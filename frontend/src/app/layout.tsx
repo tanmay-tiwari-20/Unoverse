@@ -12,14 +12,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Arcade display font (chunky, Smash Karts vibe)
 const lilitaOne = Lilita_One({
   variable: "--font-arcade",
   weight: "400",
   subsets: ["latin"],
 });
 
-// Rounded UI font for body/buttons
 const fredoka = Fredoka({
   variable: "--font-rounded",
   weight: ["400", "500", "600", "700"],
@@ -27,10 +25,10 @@ const fredoka = Fredoka({
 });
 
 export const metadata: Metadata = {
-  title: "UNO Real — Immersive 3D Multiplayer UNO Experience",
+  title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
   description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
-  keywords: ["UNO", "multiplayer game", "3D card game", "UNO Real", "React Three Fiber", "Socket.io"],
-  authors: [{ name: "UNO Real Team" }],
+  keywords: ["UNO", "multiplayer game", "3D card game", "Unoverse", "React Three Fiber", "Socket.io"],
+  authors: [{ name: "Unoverse Team" }],
 };
 
 export default function RootLayout({

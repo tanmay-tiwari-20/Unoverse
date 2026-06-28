@@ -618,7 +618,7 @@ io.on('connection', (socket) => {
 // Start Server
 server.listen(port, () => {
   logger.info(`===============================================`);
-  logger.info(`  UNO Real Backend Server running on port ${port}  `);
+  logger.info(`  Unoverse Backend Server running on port ${port}  `);
   logger.info(`  Log level: ${logger.level}`);
   logger.info(`===============================================`);
 });
