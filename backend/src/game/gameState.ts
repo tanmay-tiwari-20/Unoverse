@@ -11,6 +11,7 @@ export interface UnoGameState {
   colorChooserId: string | null; // socketId of the player who must choose a color
   winnerId: string | null; // socketId of the winner when game ends
   unoCalled: Record<string, boolean>; // socketId -> boolean
+  turnDeadline?: number | null; // epoch ms when the current turn auto-resolves (null = no timer)
   lastAction?: {
     type: 'play' | 'draw';
     playerId: string;

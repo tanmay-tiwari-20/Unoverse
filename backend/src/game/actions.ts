@@ -3,6 +3,7 @@ import { UnoGameState } from './gameState';
 import { isValidMove } from './rules';
 import { getNextPlayerIndex } from './turnManager';
 import { Player } from '../rooms/roomManager';
+import { logger } from '../utils/logger';
 
 // Safe card drawing with deck recycling
 const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string) => {
@@ -29,7 +30,7 @@ const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string
       });
       
       state.deck = shuffleDeck(resetCards);
-      console.log(`[GameEngine] Recycled ${state.deck.length} cards from discard pile into draw deck.`);
+      logger.debug(`[GameEngine] Recycled ${state.deck.length} cards from discard pile into draw deck.`);
     }
     
     if (state.deck.length > 0) {
@@ -118,7 +119,7 @@ export const startGameState = (players: Player[]): UnoGameState => {
     });
   }
 
-  console.log(`[Smart Shuffle] Found balanced deal after ${shuffleAttempts} attempts.`);
+  logger.debug(`[Smart Shuffle] Found balanced deal after ${shuffleAttempts} attempts.`);
 
   // 3. Reveal first discard card (cannot be Wild, Wild Draw Four, or Draw Two)
   let firstCardIndex = deck.length - 1;
@@ -134,8 +135,8 @@ export const startGameState = (players: Player[]): UnoGameState => {
   const [startingCard] = deck.splice(firstCardIndex, 1);
   const discardPile = [startingCard];
 
-  console.log(`[GAME START] DISCARD PILE LENGTH: ${discardPile.length}`);
-  console.log(`[GAME START] TOP CARD:`, startingCard);
+  logger.debug(`[GAME START] DISCARD PILE LENGTH: ${discardPile.length}`);
+  logger.debug(`[GAME START] TOP CARD:`, startingCard);
 
   // 4. Determine first player and play direction
   let startPlayerIndex = 0;
@@ -239,8 +240,8 @@ export const playCardAction = (
   playerHand.splice(cardIndex, 1);
   state.discardPile.push(card);
 
-  console.log(`[PLAY CARD] DISCARD PILE LENGTH: ${state.discardPile.length}`);
-  console.log(`[PLAY CARD] TOP CARD:`, card);
+  logger.debug(`[PLAY CARD] DISCARD PILE LENGTH: ${state.discardPile.length}`);
+  logger.debug(`[PLAY CARD] TOP CARD:`, card);
 
   // Reset wild color chooser variables
   state.wildColor = null;

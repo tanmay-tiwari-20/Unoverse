@@ -5,12 +5,106 @@ import cors from 'cors';
 import { roomManager } from './rooms/roomManager';
 import { drawCardAction, playCardAction, chooseColorAction, callUnoAction, catchUnoAction } from './game/actions';
 import { CardColor } from './game/deck';
+import { logger } from './utils/logger';
 
 // Load environment variables from backend/.env if present (optional in dev).
 try {
   process.loadEnvFile();
 } catch {
   // No .env file — fall back to process defaults. This is fine for local dev.
+}
+
+// ---- Turn timer --------------------------------------------------------------
+// Each active turn is given a deadline. If the active player (or color chooser)
+// does nothing before it expires, the server auto-resolves the turn so a single
+// AFK or disconnected player can't freeze the table forever.
+
+const TURN_DURATION_MS = Number(process.env.TURN_TIMEOUT_MS) || 45000;
+const turnTimers = new Map<string, NodeJS.Timeout>();
+// Tracks which turn (status + active socket id) the current timer belongs to, so
+// idempotent re-broadcasts (e.g. a reconnect) don't restart the clock.
+const turnSignatures = new Map<string, string>();
+
+function turnSignatureOf(game: { status: string; currentPlayerId: string; colorChooserId: string | null }): string {
+  const activeId = game.status === 'awaiting_color_selection' ? game.colorChooserId : game.currentPlayerId;
+  return `${game.status}:${activeId}`;
+}
+
+function clearTurnTimer(code: string) {
+  const existing = turnTimers.get(code);
+  if (existing) clearTimeout(existing);
+  turnTimers.delete(code);
+  turnSignatures.delete(code);
+}
+
+// Pick a sensible color for an AFK player's pending Wild: their most-held color.
+function pickAutoColor(hands: Record<string, { color: string }[]>, playerId: string): CardColor {
+  const counts: Record<string, number> = { red: 0, blue: 0, green: 0, yellow: 0 };
+  for (const card of hands[playerId] || []) {
+    if (card.color in counts) counts[card.color]++;
+  }
+  let best: CardColor = 'red';
+  let bestN = -1;
+  (['red', 'blue', 'green', 'yellow'] as CardColor[]).forEach((c) => {
+    if (counts[c] > bestN) { best = c; bestN = counts[c]; }
+  });
+  return best;
+}
+
+// Arm (or refresh) the timer for the room's current turn. Called from
+// broadcastGameState after every state change so the deadline rides along in
+// the payload. No-op if the turn signature is unchanged.
+function armTurnTimer(code: string) {
+  const room = roomManager.getRoom(code);
+  if (!room || !room.game) { clearTurnTimer(code); return; }
+  const game = room.game;
+
+  const timed = game.status === 'playing' || game.status === 'awaiting_color_selection';
+  // A timer only makes sense with at least 2 players actively in the game.
+  if (!timed || room.players.length < 2) {
+    clearTurnTimer(code);
+    game.turnDeadline = null;
+    return;
+  }
+
+  const signature = turnSignatureOf(game);
+  if (turnSignatures.get(code) === signature && turnTimers.has(code)) {
+    return; // Same turn already being timed — don't reset the clock.
+  }
+
+  clearTurnTimer(code);
+  game.turnDeadline = Date.now() + TURN_DURATION_MS;
+  turnSignatures.set(code, signature);
+  turnTimers.set(code, setTimeout(() => handleTurnTimeout(code, signature), TURN_DURATION_MS));
+}
+
+// Fired when a turn's deadline expires. Auto-draws (playing) or auto-picks a
+// color (awaiting_color_selection) for the stalled player, then re-broadcasts.
+function handleTurnTimeout(code: string, signature: string) {
+  const room = roomManager.getRoom(code);
+  if (!room || !room.game) { clearTurnTimer(code); return; }
+  const game = room.game;
+
+  // The turn moved on between scheduling and firing — ignore this stale timeout.
+  if (turnSignatureOf(game) !== signature) return;
+
+  try {
+    if (game.status === 'awaiting_color_selection' && game.colorChooserId) {
+      const color = pickAutoColor(game.hands, game.colorChooserId);
+      logger.info(`[TURN_TIMEOUT] Auto-choosing '${color}' for ${game.colorChooserId} in room ${code}`);
+      room.game = chooseColorAction(game, room.players, game.colorChooserId, color);
+    } else if (game.status === 'playing') {
+      const activePlayerId = game.currentPlayerId;
+      logger.info(`[TURN_TIMEOUT] Auto-drawing for ${activePlayerId} in room ${code}`);
+      room.game = drawCardAction(game, room.players, activePlayerId);
+    } else {
+      return;
+    }
+    broadcastGameState(code);
+  } catch (err: any) {
+    logger.error(`[TURN_TIMEOUT] Failed to auto-resolve turn in room ${code}:`, err.message);
+    clearTurnTimer(code);
+  }
 }
 
 // Helper to sanitize and broadcast game state to each player individually
@@ -25,7 +119,7 @@ function broadcastGameState(code: string) {
     const currentPlayerExists = room.players.some(p => p.id === game.currentPlayerId);
     if (!currentPlayerExists && room.players.length > 0) {
       const fallback = room.players[0];
-      console.log(`[TURN_RECOVERY] currentPlayerId '${game.currentPlayerId}' is stale (no matching player). Resetting to ${fallback.name} (${fallback.id})`);
+      logger.debug(`[TURN_RECOVERY] currentPlayerId '${game.currentPlayerId}' is stale (no matching player). Resetting to ${fallback.name} (${fallback.id})`);
       game.currentPlayerId = fallback.id;
       // Also reset color selection state if stale
       if (game.status === 'awaiting_color_selection') {
@@ -35,12 +129,16 @@ function broadcastGameState(code: string) {
     }
   }
 
+  // Arm/refresh the turn timer before building the payload so the deadline is
+  // included in this broadcast.
+  armTurnTimer(code);
+
   const activePlayerObj = room.players.find(p => p.id === game.currentPlayerId);
   const activePlayerName = activePlayerObj ? activePlayerObj.name : 'Unknown';
-  console.log(`[GAME_STATE_UPDATED] roomId: ${room.code}, turnPlayerId: ${game.currentPlayerId}, turnPlayerName: ${activePlayerName}, drawPileLength: ${game.deck.length}, discardPileLength: ${game.discardPile.length}`);
+  logger.debug(`[GAME_STATE_UPDATED] roomId: ${room.code}, turnPlayerId: ${game.currentPlayerId}, turnPlayerName: ${activePlayerName}, drawPileLength: ${game.deck.length}, discardPileLength: ${game.discardPile.length}`);
   
   room.players.forEach((p) => {
-    console.log(`  Player -> playerId: ${p.id}, socketId: ${p.id}, seat: ${p.seatNumber}, cards.length: ${game.hands[p.id]?.length || 0}`);
+    logger.debug(`  Player -> playerId: ${p.id}, socketId: ${p.id}, seat: ${p.seatNumber}, cards.length: ${game.hands[p.id]?.length || 0}`);
   });
   
   room.players.forEach((targetPlayer) => {
@@ -66,7 +164,7 @@ function broadcastGameState(code: string) {
 
     const winnerObj = game.winnerId ? room.players.find(p => p.id === game.winnerId) : null;
 
-    console.log(`[BROADCAST] Room ${room.code} Player ${targetPlayer.id} Discard Pile Length: ${game.discardPile?.length}`);
+    logger.debug(`[BROADCAST] Room ${room.code} Player ${targetPlayer.id} Discard Pile Length: ${game.discardPile?.length}`);
 
     io.to(targetPlayer.id).emit('game-updated', {
       roomCode: room.code,
@@ -82,13 +180,14 @@ function broadcastGameState(code: string) {
       winnerId: game.winnerId,
       winnerName: winnerObj ? winnerObj.name : null,
       unoCalled: game.unoCalled,
+      turnDeadline: game.turnDeadline ?? null,
       lastAction: game.lastAction,
     });
   });
 
   const activePlayer = room.players.find(p => p.id === game.currentPlayerId);
   if (activePlayer) {
-    console.log(`[TURN_START] Player: ${activePlayer.name} (${game.currentPlayerId})`);
+    logger.debug(`[TURN_START] Player: ${activePlayer.name} (${game.currentPlayerId})`);
   }
 }
 
@@ -114,10 +213,10 @@ app.use(express.json());
 app.post('/api/rooms', (req, res) => {
   try {
     const room = roomManager.createRoom();
-    console.log(`[REST] Created room: ${room.code}`);
+    logger.debug(`[REST] Created room: ${room.code}`);
     res.status(201).json({ code: room.code });
   } catch (error: any) {
-    console.error('[REST] Error creating room:', error);
+    logger.error('[REST] Error creating room:', error);
     res.status(500).json({ error: error.message || 'Failed to create room' });
   }
 });
@@ -135,7 +234,7 @@ app.post('/api/rooms/join', (req, res) => {
   if (!room) {
     const availableRooms = roomManager.getAvailableRooms().join(', ');
     const roomCount = roomManager.getRoomCount();
-    console.log(`[ROOM_NOT_FOUND] (REST) requested: ${code.toUpperCase()}, available: ${availableRooms || 'None'}, roomCount: ${roomCount}`);
+    logger.debug(`[ROOM_NOT_FOUND] (REST) requested: ${code.toUpperCase()}, available: ${availableRooms || 'None'}, roomCount: ${roomCount}`);
     res.status(404).json({ error: 'Room not found' });
     return;
   }
@@ -150,7 +249,7 @@ app.post('/api/rooms/join', (req, res) => {
     }
   }
 
-  console.log(`[REST] Validated join request for name "${name}" to room ${code} (isSpectator: ${isSpectator})`);
+  logger.debug(`[REST] Validated join request for name "${name}" to room ${code} (isSpectator: ${isSpectator})`);
   res.status(200).json({ success: true, isSpectator });
 });
 
@@ -164,7 +263,7 @@ const io = new Server(server, {
 });
 
 io.on('connection', (socket) => {
-  console.log(`[Socket] Client connected: ${socket.id}`);
+  logger.debug(`[Socket] Client connected: ${socket.id}`);
 
   // Track room code on the socket object for easier disconnect handling
   let currentRoomCode: string | null = null;
@@ -180,7 +279,7 @@ io.on('connection', (socket) => {
       currentName = name;
       socket.join(room.code);
 
-      console.log(`[Socket] Host ${name} (${socket.id}) created and joined room ${room.code}`);
+      logger.debug(`[Socket] Host ${name} (${socket.id}) created and joined room ${room.code}`);
 
       // The owner receives their own player object including its private secret;
       // the room is sanitized so no other player's secret is exposed.
@@ -194,7 +293,7 @@ io.on('connection', (socket) => {
   // Join room socket handler
   socket.on('join-room', ({ code, name, secret }: { code: string; name: string; secret?: string }) => {
     if (currentRoomCode) {
-      console.log(`[Socket] Duplicate join-room blocked for socket ${socket.id}. Already in room ${currentRoomCode}`);
+      logger.debug(`[Socket] Duplicate join-room blocked for socket ${socket.id}. Already in room ${currentRoomCode}`);
       return;
     }
 
@@ -207,9 +306,9 @@ io.on('connection', (socket) => {
       socket.join(upperCode);
 
       if (isSpectator) {
-        console.log(`[Socket] Spectator ${name} (${socket.id}) joined room ${upperCode}`);
+        logger.debug(`[Socket] Spectator ${name} (${socket.id}) joined room ${upperCode}`);
       } else {
-        console.log(`[Socket] Player ${name} (${socket.id}) joined room ${upperCode} at Seat ${player?.seatNumber}`);
+        logger.debug(`[Socket] Player ${name} (${socket.id}) joined room ${upperCode} at Seat ${player?.seatNumber}`);
       }
 
       // Notify the joining socket. Their own player object keeps its secret so
@@ -232,7 +331,7 @@ io.on('connection', (socket) => {
         broadcastGameState(upperCode);
       }
     } catch (error: any) {
-      console.error(`[Socket] Join error for client ${socket.id}:`, error.message);
+      logger.error(`[Socket] Join error for client ${socket.id}:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to join room' });
     }
   });
@@ -249,7 +348,7 @@ io.on('connection', (socket) => {
     const seatNumber = player ? player.seatNumber : null;
     const isSpectator = !player;
 
-    console.log(`[REACTION] ${name} sent emoji ${emoji} in room ${currentRoomCode}`);
+    logger.debug(`[REACTION] ${name} sent emoji ${emoji} in room ${currentRoomCode}`);
     io.to(currentRoomCode).emit('player-reacted', { name, seatNumber, emoji, isSpectator });
   });
 
@@ -273,7 +372,7 @@ io.on('connection', (socket) => {
 
     try {
       const room = roomManager.startGame(currentRoomCode, socket.id);
-      console.log(`[Socket] Room ${currentRoomCode} game started by host ${socket.id}`);
+      logger.debug(`[Socket] Room ${currentRoomCode} game started by host ${socket.id}`);
 
       io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
       io.to(currentRoomCode).emit('game-started', roomManager.publicRoom(room));
@@ -281,7 +380,7 @@ io.on('connection', (socket) => {
       // Broadcast initial game state to all players
       broadcastGameState(currentRoomCode);
     } catch (error: any) {
-      console.error(`[Socket] Start game error for room ${currentRoomCode}:`, error.message);
+      logger.error(`[Socket] Start game error for room ${currentRoomCode}:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to start game' });
     }
   });
@@ -295,12 +394,12 @@ io.on('connection', (socket) => {
     try {
       const player = room.players.find(p => p.id === socket.id);
       const playerName = player ? player.name : 'Unknown';
-      console.log(`[CARD_PLAYED] Player: ${playerName}, Card: ${cardId}`);
+      logger.debug(`[CARD_PLAYED] Player: ${playerName}, Card: ${cardId}`);
 
       // Proactive stale-turn recovery: if currentPlayerId doesn't match any active player, fix it
       const currentTurnValid = room.players.some(p => p.id === room.game!.currentPlayerId);
       if (!currentTurnValid && player) {
-        console.log(`[TURN_RECOVERY] currentPlayerId '${room.game!.currentPlayerId}' is stale. Recovering to ${playerName} (${socket.id})`);
+        logger.debug(`[TURN_RECOVERY] currentPlayerId '${room.game!.currentPlayerId}' is stale. Recovering to ${playerName} (${socket.id})`);
         room.game!.currentPlayerId = socket.id;
       }
 
@@ -311,20 +410,21 @@ io.on('connection', (socket) => {
       if (updatedGame.currentPlayerId !== oldPlayerId) {
         const nextPlayer = room.players.find(p => p.id === updatedGame.currentPlayerId);
         const nextPlayerName = nextPlayer ? nextPlayer.name : 'Unknown';
-        console.log(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
+        logger.debug(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
       }
 
       broadcastGameState(currentRoomCode);
 
       if (updatedGame.status === 'ended') {
-        console.log(`[Socket] Game in room ${currentRoomCode} ended. Winner: ${currentName}`);
-        io.to(currentRoomCode).emit('game-ended', { 
-          winnerId: socket.id, 
-          winnerName: currentName 
+        clearTurnTimer(currentRoomCode);
+        logger.debug(`[Socket] Game in room ${currentRoomCode} ended. Winner: ${currentName}`);
+        io.to(currentRoomCode).emit('game-ended', {
+          winnerId: socket.id,
+          winnerName: currentName
         });
       }
     } catch (error: any) {
-      console.error(`[Socket] Play card error:`, error.message);
+      logger.error(`[Socket] Play card error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to play card' });
     }
   });
@@ -338,12 +438,12 @@ io.on('connection', (socket) => {
     try {
       const player = room.players.find(p => p.id === socket.id);
       const playerName = player ? player.name : 'Unknown';
-      console.log(`[CARD_DRAWN] Player: ${playerName}`);
+      logger.debug(`[CARD_DRAWN] Player: ${playerName}`);
 
       // Proactive stale-turn recovery
       const currentTurnValid = room.players.some(p => p.id === room.game!.currentPlayerId);
       if (!currentTurnValid && player) {
-        console.log(`[TURN_RECOVERY] currentPlayerId '${room.game!.currentPlayerId}' is stale. Recovering to ${playerName} (${socket.id})`);
+        logger.debug(`[TURN_RECOVERY] currentPlayerId '${room.game!.currentPlayerId}' is stale. Recovering to ${playerName} (${socket.id})`);
         room.game!.currentPlayerId = socket.id;
       }
 
@@ -354,12 +454,12 @@ io.on('connection', (socket) => {
       if (updatedGame.currentPlayerId !== oldPlayerId) {
         const nextPlayer = room.players.find(p => p.id === updatedGame.currentPlayerId);
         const nextPlayerName = nextPlayer ? nextPlayer.name : 'Unknown';
-        console.log(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
+        logger.debug(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
       }
 
       broadcastGameState(currentRoomCode);
     } catch (error: any) {
-      console.error(`[Socket] Draw card error:`, error.message);
+      logger.error(`[Socket] Draw card error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to draw card' });
     }
   });
@@ -377,17 +477,17 @@ io.on('connection', (socket) => {
 
       const player = room.players.find(p => p.id === socket.id);
       const playerName = player ? player.name : 'Unknown';
-      console.log(`[Socket] Player ${playerName} selected color ${color}`);
+      logger.debug(`[Socket] Player ${playerName} selected color ${color}`);
 
       if (updatedGame.currentPlayerId !== oldPlayerId) {
         const nextPlayer = room.players.find(p => p.id === updatedGame.currentPlayerId);
         const nextPlayerName = nextPlayer ? nextPlayer.name : 'Unknown';
-        console.log(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
+        logger.debug(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
       }
 
       broadcastGameState(currentRoomCode);
     } catch (error: any) {
-      console.error(`[Socket] Choose color error:`, error.message);
+      logger.error(`[Socket] Choose color error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to select color' });
     }
   });
@@ -402,10 +502,10 @@ io.on('connection', (socket) => {
       const updatedGame = callUnoAction(room.game, socket.id);
       room.game = updatedGame;
 
-      console.log(`[Socket] Player ${currentName} (${socket.id}) called UNO in room ${currentRoomCode}`);
+      logger.debug(`[Socket] Player ${currentName} (${socket.id}) called UNO in room ${currentRoomCode}`);
       broadcastGameState(currentRoomCode);
     } catch (error: any) {
-      console.error(`[Socket] Call UNO error:`, error.message);
+      logger.error(`[Socket] Call UNO error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to call UNO' });
     }
   });
@@ -420,10 +520,10 @@ io.on('connection', (socket) => {
       const updatedGame = catchUnoAction(room.game, targetPlayerId);
       room.game = updatedGame;
 
-      console.log(`[Socket] Player ${currentName} caught ${targetPlayerId} not calling UNO in room ${currentRoomCode}`);
+      logger.debug(`[Socket] Player ${currentName} caught ${targetPlayerId} not calling UNO in room ${currentRoomCode}`);
       broadcastGameState(currentRoomCode);
     } catch (error: any) {
-      console.error(`[Socket] Catch UNO error:`, error.message);
+      logger.error(`[Socket] Catch UNO error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to catch UNO' });
     }
   });
@@ -442,24 +542,25 @@ io.on('connection', (socket) => {
     const spectator = room ? room.spectators?.find(s => s.id === socket.id) : null;
     const name = player ? player.name : (spectator ? spectator.name : 'Unknown');
 
-    console.log(`[PLAYER_DISCONNECTED] Name: ${name} (${socket.id}), Room: ${currentRoomCode}`);
+    logger.debug(`[PLAYER_DISCONNECTED] Name: ${name} (${socket.id}), Room: ${currentRoomCode}`);
 
     const tempRoomCode = currentRoomCode;
     const graceInfo = roomManager.startDisconnectGracePeriod(socket.id, tempRoomCode, (result) => {
       const { room: updatedRoom, leftPlayer, leftSpectator, gameStopped } = result;
 
       if (leftPlayer) {
-        console.log(`[Socket] Disconnect grace period expired. Player ${leftPlayer.name} left room ${tempRoomCode}`);
+        logger.debug(`[Socket] Disconnect grace period expired. Player ${leftPlayer.name} left room ${tempRoomCode}`);
         io.to(tempRoomCode).emit('player-left', roomManager.publicPlayer(leftPlayer));
       } else if (leftSpectator) {
-        console.log(`[Socket] Disconnect grace period expired. Spectator ${leftSpectator.name} left room ${tempRoomCode}`);
+        logger.debug(`[Socket] Disconnect grace period expired. Spectator ${leftSpectator.name} left room ${tempRoomCode}`);
         io.to(tempRoomCode).emit('spectator-left', { id: leftSpectator.id, name: leftSpectator.name });
       }
 
       if (updatedRoom) {
         // Game was stopped because too few players remain — tell clients to reset to lobby
         if (gameStopped) {
-          console.log(`[Socket] Game stopped in room ${tempRoomCode} (not enough players).`);
+          logger.debug(`[Socket] Game stopped in room ${tempRoomCode} (not enough players).`);
+          clearTurnTimer(tempRoomCode);
           io.to(tempRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
         io.to(tempRoomCode).emit('lobby-updated', roomManager.publicRoom(updatedRoom));
@@ -470,7 +571,7 @@ io.on('connection', (socket) => {
     });
 
     if (graceInfo) {
-      console.log(`[Socket] Seat/Spectator slot retained during disconnect grace period for ${name} (${socket.id})`);
+      logger.debug(`[Socket] Seat/Spectator slot retained during disconnect grace period for ${name} (${socket.id})`);
     } else {
       handleLeave();
     }
@@ -484,10 +585,10 @@ io.on('connection', (socket) => {
     if (result) {
       const { room: updatedRoom, leftPlayer, leftSpectator, gameStopped } = result;
       if (leftPlayer) {
-        console.log(`[Socket] Player ${leftPlayer.name} left room ${currentRoomCode}`);
+        logger.debug(`[Socket] Player ${leftPlayer.name} left room ${currentRoomCode}`);
         socket.to(currentRoomCode).emit('player-left', roomManager.publicPlayer(leftPlayer));
       } else if (leftSpectator) {
-        console.log(`[Socket] Spectator ${leftSpectator.name} left room ${currentRoomCode}`);
+        logger.debug(`[Socket] Spectator ${leftSpectator.name} left room ${currentRoomCode}`);
         socket.to(currentRoomCode).emit('spectator-left', { id: leftSpectator.id, name: leftSpectator.name });
       }
 
@@ -496,7 +597,8 @@ io.on('connection', (socket) => {
       if (updatedRoom) {
         // Game was stopped because too few players remain — tell clients to reset to lobby
         if (gameStopped) {
-          console.log(`[Socket] Game stopped in room ${currentRoomCode} (not enough players).`);
+          logger.debug(`[Socket] Game stopped in room ${currentRoomCode} (not enough players).`);
+          clearTurnTimer(currentRoomCode);
           io.to(currentRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
         // Broadcast the updated lobby to remaining players
@@ -515,7 +617,8 @@ io.on('connection', (socket) => {
 
 // Start Server
 server.listen(port, () => {
-  console.log(`===============================================`);
-  console.log(`  UNO Real Backend Server running on port ${port}  `);
-  console.log(`===============================================`);
+  logger.info(`===============================================`);
+  logger.info(`  UNO Real Backend Server running on port ${port}  `);
+  logger.info(`  Log level: ${logger.level}`);
+  logger.info(`===============================================`);
 });

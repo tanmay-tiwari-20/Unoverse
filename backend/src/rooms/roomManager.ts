@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextPlayerIndex } from '../game/turnManager';
+import { logger } from '../utils/logger';
 
 export interface Player {
   id: string; // Socket ID
@@ -54,7 +55,7 @@ class RoomManager {
       status: 'lobby',
     };
     this.rooms.set(code, newRoom);
-    console.log(`[ROOM_CREATED] Code: ${code}`);
+    logger.debug(`[ROOM_CREATED] Code: ${code}`);
     return newRoom;
   }
 
@@ -123,11 +124,11 @@ class RoomManager {
       clearTimeout(this.disconnectTimers.get(key));
     }
 
-    console.log(`[GRACE_PERIOD_START] Starting 60s disconnect grace period for ${isPlayer ? 'Player' : 'Spectator'} ${name} in Room ${upperCode}`);
+    logger.debug(`[GRACE_PERIOD_START] Starting 60s disconnect grace period for ${isPlayer ? 'Player' : 'Spectator'} ${name} in Room ${upperCode}`);
 
     const timer = setTimeout(() => {
       this.disconnectTimers.delete(key);
-      console.log(`[GRACE_PERIOD_EXPIRED] Disconnect grace period expired for ${name} in Room ${upperCode}`);
+      logger.debug(`[GRACE_PERIOD_EXPIRED] Disconnect grace period expired for ${name} in Room ${upperCode}`);
       // Actually remove the player/spectator now
       const result = this.leaveRoom(socketId);
       if (result) {
@@ -155,20 +156,20 @@ class RoomManager {
     if (!room) {
       const availableRooms = Array.from(this.rooms.keys()).join(', ');
       const roomCount = this.rooms.size;
-      console.log(`[ROOM_NOT_FOUND] requested: ${upperCode}, available: ${availableRooms || 'None'}, roomCount: ${roomCount}`);
+      logger.debug(`[ROOM_NOT_FOUND] requested: ${upperCode}, available: ${availableRooms || 'None'}, roomCount: ${roomCount}`);
       throw new Error('Room not found');
     }
 
-    console.log(`[ROOM_JOIN_REQUEST] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${upperCode}, Status: ${room.status}`);
-    console.log(`[ROOM_PLAYER_COUNT] Room: ${upperCode}, Count: ${room.players.length}`);
-    console.log(`[ROOM_CAPACITY] Room: ${upperCode}, Capacity: 6`);
+    logger.debug(`[ROOM_JOIN_REQUEST] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${upperCode}, Status: ${room.status}`);
+    logger.debug(`[ROOM_PLAYER_COUNT] Room: ${upperCode}, Count: ${room.players.length}`);
+    logger.debug(`[ROOM_CAPACITY] Room: ${upperCode}, Capacity: 6`);
 
     // Cancel any active disconnect timer for this player/spectator
     const timerKey = `${upperCode}:${playerName.toLowerCase()}`;
     if (this.disconnectTimers.has(timerKey)) {
       clearTimeout(this.disconnectTimers.get(timerKey)!);
       this.disconnectTimers.delete(timerKey);
-      console.log(`[GRACE_PERIOD_CANCEL] Reconnection detected. Cancelled disconnect grace period for ${playerName} in Room ${upperCode}`);
+      logger.debug(`[GRACE_PERIOD_CANCEL] Reconnection detected. Cancelled disconnect grace period for ${playerName} in Room ${upperCode}`);
     }
 
     // Check if a player with this name already exists in the room (Reconnection Case)
@@ -181,7 +182,7 @@ class RoomManager {
       // proves ownership with the matching per-session secret. This blocks a
       // stranger from stealing a seat (and possibly host) by reusing a name.
       if (!secret || secret !== existingPlayerByName.secret) {
-        console.log(`[JOIN_REJECTED] Name "${playerName}" is already taken in room ${room.code} (secret mismatch).`);
+        logger.debug(`[JOIN_REJECTED] Name "${playerName}" is already taken in room ${room.code} (secret mismatch).`);
         throw new Error('That name is already taken in this room. Please choose another.');
       }
 
@@ -229,9 +230,9 @@ class RoomManager {
         }
       }
 
-      console.log(`[PLAYER_RECONNECTED] Rebound name "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
-      console.log(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName} (Reconnected), Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${existingPlayerByName.seatNumber}`);
-      console.log(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      logger.debug(`[PLAYER_RECONNECTED] Rebound name "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
+      logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName} (Reconnected), Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${existingPlayerByName.seatNumber}`);
+      logger.debug(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       return { room, player: existingPlayerByName, isSpectator: false };
     }
 
@@ -242,13 +243,13 @@ class RoomManager {
       );
       if (existingSpectatorByName) {
         if (!secret || secret !== existingSpectatorByName.secret) {
-          console.log(`[JOIN_REJECTED] Spectator name "${playerName}" is taken in room ${room.code} (secret mismatch).`);
+          logger.debug(`[JOIN_REJECTED] Spectator name "${playerName}" is taken in room ${room.code} (secret mismatch).`);
           throw new Error('That name is already taken in this room. Please choose another.');
         }
         const oldSocketId = existingSpectatorByName.id;
         existingSpectatorByName.id = playerSocketId;
-        console.log(`[SPECTATOR_RECONNECTED] Rebound spectator "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
-        console.log(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+        logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
+        logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
         return { room, player: null, isSpectator: true };
       }
     }
@@ -266,8 +267,8 @@ class RoomManager {
         spectator = { id: playerSocketId, name: playerName, secret: randomUUID() };
         room.spectators.push(spectator);
       }
-      console.log(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
-      console.log(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      logger.debug(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       return { room, player: null, isSpectator: true };
     }
 
@@ -300,8 +301,8 @@ class RoomManager {
     // Sort players by seat number so client lists remain aligned
     room.players.sort((a, b) => a.seatNumber - b.seatNumber);
 
-    console.log(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${seatNumber}`);
-    console.log(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+    logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${seatNumber}`);
+    logger.debug(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
     return { room, player: newPlayer, isSpectator: false };
   }
 
@@ -322,7 +323,7 @@ class RoomManager {
           this.disconnectTimers.delete(timerKey);
         }
 
-        console.log(`[ROOM_LEAVE] Player: ${leftPlayer.name}, Socket: ${playerSocketId}, Room: ${code}`);
+        logger.debug(`[ROOM_LEAVE] Player: ${leftPlayer.name}, Socket: ${playerSocketId}, Room: ${code}`);
 
         // Clean up game state if a game is active
         if (room.game && room.players.length >= 2) {
@@ -346,7 +347,7 @@ class RoomManager {
             const nextIdx = room.players.length > 0 ? 0 : -1;
             if (nextIdx >= 0) {
               game.currentPlayerId = room.players[nextIdx].id;
-              console.log(`[TURN_ADVANCED_ON_LEAVE] Next Player: ${room.players[nextIdx].name} (${room.players[nextIdx].id})`);
+              logger.debug(`[TURN_ADVANCED_ON_LEAVE] Next Player: ${room.players[nextIdx].name} (${room.players[nextIdx].id})`);
             }
           }
         } else if (room.game) {
@@ -356,7 +357,7 @@ class RoomManager {
           room.game = undefined;
           room.status = 'lobby';
           gameStopped = true;
-          console.log(`[GAME_STOPPED] Room ${code} dropped below 2 players. Game reset to lobby.`);
+          logger.debug(`[GAME_STOPPED] Room ${code} dropped below 2 players. Game reset to lobby.`);
         }
 
         // If the player was the host and there are other players, elect a new host
@@ -369,12 +370,12 @@ class RoomManager {
         if (room.players.length === 1 && !room.players[0].isHost) {
           room.players[0].isHost = true;
           room.hostId = room.players[0].id;
-          console.log(`[HOST_ASSIGNED] ${room.players[0].name} is now the host of room ${code}`);
+          logger.debug(`[HOST_ASSIGNED] ${room.players[0].name} is now the host of room ${code}`);
         }
 
         // If room is empty, delete it
         if (room.players.length === 0 && (!room.spectators || room.spectators.length === 0)) {
-          console.log(`[ROOM_DELETED] Code: ${code}`);
+          logger.debug(`[ROOM_DELETED] Code: ${code}`);
           this.rooms.delete(code);
           return { room: null, leftPlayer, leftSpectator: null, gameStopped };
         }
@@ -398,10 +399,10 @@ class RoomManager {
             this.disconnectTimers.delete(timerKey);
           }
 
-          console.log(`[ROOM_LEAVE] Spectator: ${leftSpectator.name}, Socket: ${playerSocketId}, Room: ${code}`);
+          logger.debug(`[ROOM_LEAVE] Spectator: ${leftSpectator.name}, Socket: ${playerSocketId}, Room: ${code}`);
 
           if (room.players.length === 0 && room.spectators.length === 0) {
-            console.log(`[ROOM_DELETED] Code: ${code}`);
+            logger.debug(`[ROOM_DELETED] Code: ${code}`);
             this.rooms.delete(code);
             return { room: null, leftPlayer: null, leftSpectator, gameStopped: false };
           }

@@ -5,6 +5,7 @@ import { CardColor, CardItem } from '../lib/cards/cardEngine';
 import { soundManager } from '../utils/soundManager';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getSeatCoords } from '../utils/seating';
+import { logger } from '../utils/logger';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
@@ -55,7 +56,7 @@ export const useSocket = () => {
   useEffect(() => {
     // 1. Ensure socket creation happens only once (singleton pattern)
     if (!sharedSocket) {
-      console.log('SOCKET_CREATED');
+      logger.debug('SOCKET_CREATED');
       sharedSocket = io(BACKEND_URL, {
         autoConnect: false,
         transports: ['websocket'],
@@ -120,7 +121,7 @@ export const useSocket = () => {
     // 2. Attach listeners safely (cleaning up existing ones first to prevent duplicates)
     socketInstance.off('connect');
     socketInstance.on('connect', () => {
-      console.log('SOCKET_CONNECTED', socketInstance.id);
+      logger.debug('SOCKET_CONNECTED', socketInstance.id);
       setConnectionStatus('connected');
       setError(null);
 
@@ -137,7 +138,7 @@ export const useSocket = () => {
 
     socketInstance.off('connect_error');
     socketInstance.on('connect_error', (err) => {
-      console.error('[Socket] Connection error:', err);
+      logger.error('[Socket] Connection error:', err);
       setConnectionStatus('error');
 
       const state = useGameStore.getState();
@@ -151,13 +152,13 @@ export const useSocket = () => {
 
     socketInstance.off('disconnect');
     socketInstance.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
+      logger.debug('[Socket] Disconnected:', reason);
       setConnectionStatus('disconnected');
     });
 
     socketInstance.off('joined-successfully');
     socketInstance.on('joined-successfully', ({ room, player, isSpectator }) => {
-      console.log('[Socket] Joined room successfully:', room?.code, player, 'isSpectator:', isSpectator);
+      logger.debug('[Socket] Joined room successfully:', room?.code, player, 'isSpectator:', isSpectator);
       // Persist our private secret so a reload/reconnect can reclaim this seat.
       if (room && player?.secret) {
         saveSecret(room.code, player.name, player.secret);
@@ -172,14 +173,14 @@ export const useSocket = () => {
 
     socketInstance.off('lobby-updated');
     socketInstance.on('lobby-updated', (updatedRoom) => {
-      console.log('[Socket] Lobby updated:', updatedRoom);
+      logger.debug('[Socket] Lobby updated:', updatedRoom);
       setRoom(updatedRoom);
       setIsProcessing(false);
     });
 
     socketInstance.off('game-started');
     socketInstance.on('game-started', (room) => {
-      console.log('[Socket] Game started:', room.code);
+      logger.debug('[Socket] Game started:', room.code);
       soundManager.play('shuffle');
       addToast('Game has started! Good luck!', 'success');
       setIsProcessing(false);
@@ -187,22 +188,22 @@ export const useSocket = () => {
 
     socketInstance.off('game-updated');
     socketInstance.on('game-updated', (payload) => {
-      console.log('[Socket] Game updated:', payload);
-      console.log(`[DEBUG TASK] Discard Pile: ${payload.discardPile.length}, Top Card: ${payload.discardPile[payload.discardPile.length - 1]?.id || 'None'}, Draw Pile: ${payload.drawPileCount}`);
+      logger.debug('[Socket] Game updated:', payload);
+      logger.debug(`[DEBUG TASK] Discard Pile: ${payload.discardPile.length}, Top Card: ${payload.discardPile[payload.discardPile.length - 1]?.id || 'None'}, Draw Pile: ${payload.drawPileCount}`);
       handleGameUpdateAnimation(payload);
       setIsProcessing(false);
     });
 
     socketInstance.off('game-ended');
     socketInstance.on('game-ended', ({ winnerId, winnerName }) => {
-      console.log('[Socket] Game ended. Winner:', winnerName);
+      logger.debug('[Socket] Game ended. Winner:', winnerName);
       soundManager.play('victory');
       setIsProcessing(false);
     });
 
     socketInstance.off('game-stopped');
     socketInstance.on('game-stopped', ({ room }) => {
-      console.log('[Socket] Game stopped — not enough players. Resetting to lobby.');
+      logger.debug('[Socket] Game stopped — not enough players. Resetting to lobby.');
       // Reset all card/game state back to the lobby. A fresh game must be started.
       useGameStore.getState().clearAllCards();
       if (room) {
@@ -215,7 +216,7 @@ export const useSocket = () => {
 
     socketInstance.off('error');
     socketInstance.on('error', (err: { message: string }) => {
-      console.error('[Socket] Error from server:', err.message);
+      logger.error('[Socket] Error from server:', err.message);
       const state = useGameStore.getState();
       // Redirect room gameplay error messages as toasts instead of crashing screen
       if (state.room) {
@@ -228,7 +229,7 @@ export const useSocket = () => {
 
     socketInstance.off('player-reacted');
     socketInstance.on('player-reacted', ({ name, seatNumber, emoji, isSpectator }) => {
-      console.log('[Socket] Player reacted:', name, emoji);
+      logger.debug('[Socket] Player reacted:', name, emoji);
       soundManager.play('reaction');
       addReaction({
         id: `reaction-${Math.random().toString(36).substring(2, 9)}`,
@@ -241,7 +242,7 @@ export const useSocket = () => {
 
     socketInstance.off('player-joined');
     socketInstance.on('player-joined', (newPlayer) => {
-      console.log('[Socket] Player joined:', newPlayer?.name);
+      logger.debug('[Socket] Player joined:', newPlayer?.name);
       soundManager.play('player_join');
       if (newPlayer && newPlayer.name) {
         addToast(`${newPlayer.name} joined the table!`, 'success');
@@ -250,7 +251,7 @@ export const useSocket = () => {
 
     socketInstance.off('player-left');
     socketInstance.on('player-left', (leftPlayer) => {
-      console.log('[Socket] Player left:', leftPlayer?.name);
+      logger.debug('[Socket] Player left:', leftPlayer?.name);
       soundManager.play('player_leave');
       if (leftPlayer && leftPlayer.name) {
         addToast(`${leftPlayer.name} left the table.`, 'info');
@@ -259,7 +260,7 @@ export const useSocket = () => {
 
     socketInstance.off('spectator-joined');
     socketInstance.on('spectator-joined', ({ name, id }) => {
-      console.log('[Socket] Spectator joined:', name);
+      logger.debug('[Socket] Spectator joined:', name);
       soundManager.play('player_join');
       if (name) {
         addToast(`${name} is now spectating.`, 'info');
@@ -268,7 +269,7 @@ export const useSocket = () => {
 
     socketInstance.off('spectator-left');
     socketInstance.on('spectator-left', ({ name, id }) => {
-      console.log('[Socket] Spectator left:', name);
+      logger.debug('[Socket] Spectator left:', name);
       soundManager.play('player_leave');
       if (name) {
         addToast(`${name} stopped spectating.`, 'info');
@@ -283,13 +284,13 @@ export const useSocket = () => {
 
     // 3. Verify setSocket() is only called when socket actually changes
     if (socket !== socketInstance) {
-      console.log('SOCKET_STORED');
+      logger.debug('SOCKET_STORED');
       setSocket(socketInstance);
     }
 
     // Cleanup: remove listeners to prevent duplicates
     return () => {
-      console.log('[Socket] Cleaning up listeners for socket:', socketInstance.id);
+      logger.debug('[Socket] Cleaning up listeners for socket:', socketInstance.id);
       socketInstance.off('connect');
       socketInstance.off('connect_error');
       socketInstance.off('disconnect');
@@ -313,7 +314,7 @@ export const useSocket = () => {
     if (socket) {
       socket.emit('create-room', { name });
     } else {
-      console.warn('[Socket] Socket not initialized yet');
+      logger.warn('[Socket] Socket not initialized yet');
     }
   };
 
@@ -324,7 +325,7 @@ export const useSocket = () => {
       const secret = loadSecret(code, name);
       socket.emit('join-room', { code, name, secret });
     } else {
-      console.warn('[Socket] Socket not initialized yet');
+      logger.warn('[Socket] Socket not initialized yet');
     }
   };
 
@@ -348,7 +349,7 @@ export const useSocket = () => {
     if (state.isProcessing) return;
 
     if (socket) {
-      console.log({
+      logger.debug({
         clickedBy: state.player?.name,
         clickedById: state.player?.id,
         currentTurn: state.room?.players?.find(p => p.id === state.currentPlayerId)?.name,

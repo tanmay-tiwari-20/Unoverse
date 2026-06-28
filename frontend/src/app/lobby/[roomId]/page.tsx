@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
 import { PlayerNameplates } from '../../../components/table/PlayerNameplates';
+import { TurnTimer } from '../../../components/table/TurnTimer';
 import { SettingsModal } from '../../../components/ui/SettingsModal';
 import { HelpModals } from '../../../components/ui/HelpModals';
 import { FPSCounter } from '../../../components/ui/FPSCounter';
@@ -619,15 +620,18 @@ export default function LobbyPage() {
                 isMyTurn ? (
                   <span className="font-arcade text-xs bg-gradient-to-b from-lime-400 to-green-600 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide animate-pulse inline-flex items-center gap-1.5">
                     <Star size={14} className="fill-white" /> Your Turn!
+                    <TurnTimer className="ml-1 text-[11px] no-underline normal-case not-italic" />
                   </span>
                 ) : (
-                  <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-blue-300 px-3 py-1 rounded-full shadow-md">
+                  <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-blue-300 px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
                     Waiting for {room?.players.find(p => p.id === currentPlayerId)?.name || `Seat ${currentPlayerSeat}`}...
+                    <TurnTimer className="text-[10px]" />
                   </span>
                 )
               ) : gameStatus === 'awaiting_color_selection' ? (
-                <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3.5 py-1.5 rounded-full shadow-md">
+                <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1.5">
                   Waiting for color selection...
+                  <TurnTimer className="text-[10px]" />
                 </span>
               ) : null}
 

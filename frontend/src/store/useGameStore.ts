@@ -3,6 +3,7 @@ import { Socket } from 'socket.io-client';
 import { Room, Player } from '../types/game';
 import { CardItem, CardColor } from '../lib/cards/cardEngine';
 import { soundManager } from '../utils/soundManager';
+import { logger } from '../utils/logger';
 
 interface GameState {
   socket: Socket | null;
@@ -29,6 +30,7 @@ interface GameState {
   winnerId: string | null;
   winnerName: string | null;
   unoCalled: Record<string, boolean>; // socketId -> boolean
+  turnDeadline: number | null; // epoch ms when the active turn auto-resolves on the server
   gameStoppedNotice: boolean; // true when a game was just stopped due to too few players
   isSpectator: boolean;
   reactions: Array<{ id: string; name: string; seatNumber: number | null; emoji: string; isSpectator: boolean }>;
@@ -77,6 +79,7 @@ interface GameState {
     winnerId: string | null;
     winnerName: string | null;
     unoCalled: Record<string, boolean>;
+    turnDeadline?: number | null;
   }) => void;
   
   reset: () => void;
@@ -107,6 +110,7 @@ export const useGameStore = create<GameState>((set) => ({
   winnerId: null,
   winnerName: null,
   unoCalled: {},
+  turnDeadline: null,
   gameStoppedNotice: false,
   isSpectator: false,
   reactions: [],
@@ -191,11 +195,12 @@ export const useGameStore = create<GameState>((set) => ({
     winnerId: null,
     winnerName: null,
     unoCalled: {},
+    turnDeadline: null,
     gameStoppedNotice: false,
   }),
 
   setGameState: (payload) => {
-    console.log(`[STORE] SETTING GAME STATE. DISCARD PILE:`, payload.discardPile?.length, 'TOP:', payload.discardPile?.[payload.discardPile.length - 1]);
+    logger.debug(`[STORE] SETTING GAME STATE. DISCARD PILE:`, payload.discardPile?.length, 'TOP:', payload.discardPile?.[payload.discardPile.length - 1]);
     set((state) => ({
       playerCards: payload.hands,
       discardPile: payload.discardPile,
@@ -209,6 +214,7 @@ export const useGameStore = create<GameState>((set) => ({
       winnerId: payload.winnerId,
       winnerName: payload.winnerName,
       unoCalled: payload.unoCalled,
+      turnDeadline: payload.turnDeadline ?? null,
       gameStoppedNotice: false,
       isProcessing: false,
     }));
@@ -237,6 +243,7 @@ export const useGameStore = create<GameState>((set) => ({
     winnerId: null,
     winnerName: null,
     unoCalled: {},
+    turnDeadline: null,
     gameStoppedNotice: false,
   }),
 }));
