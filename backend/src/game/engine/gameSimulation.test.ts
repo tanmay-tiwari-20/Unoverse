@@ -47,8 +47,8 @@ function opponentId(current: string): string {
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 const players: Player[] = [
-  { id: 'player-1', name: 'Alice', seatNumber: 1, isHost: true },
-  { id: 'player-2', name: 'Bob', seatNumber: 2, isHost: false },
+  { id: 'player-1', name: 'Alice', seatNumber: 1, isHost: true, secret: 'secret-1' },
+  { id: 'player-2', name: 'Bob', seatNumber: 2, isHost: false, secret: 'secret-2' },
 ];
 
 // ─── Counters ─────────────────────────────────────────────────────────────────

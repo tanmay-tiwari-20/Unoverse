@@ -6,6 +6,13 @@ import { roomManager } from './rooms/roomManager';
 import { drawCardAction, playCardAction, chooseColorAction, callUnoAction, catchUnoAction } from './game/actions';
 import { CardColor } from './game/deck';
 
+// Load environment variables from backend/.env if present (optional in dev).
+try {
+  process.loadEnvFile();
+} catch {
+  // No .env file — fall back to process defaults. This is fine for local dev.
+}
+
 // Helper to sanitize and broadcast game state to each player individually
 function broadcastGameState(code: string) {
   const room = roomManager.getRoom(code);
@@ -88,9 +95,16 @@ function broadcastGameState(code: string) {
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Allowed CORS origins. Comma-separated env var; "*" (default) allows all.
+// In production set CORS_ORIGIN to your real frontend URL(s).
+const corsEnv = process.env.CORS_ORIGIN || '*';
+const corsOrigin: string | string[] = corsEnv === '*'
+  ? '*'
+  : corsEnv.split(',').map((o) => o.trim()).filter(Boolean);
+
 // Middlewares
 app.use(cors({
-  origin: '*', // Allow all origins for testing/development
+  origin: corsOrigin,
 }));
 app.use(express.json());
 
@@ -144,7 +158,7 @@ app.post('/api/rooms/join', (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
   },
 });
@@ -161,22 +175,24 @@ io.on('connection', (socket) => {
     try {
       const room = roomManager.createRoom();
       const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id);
-      
+
       currentRoomCode = room.code;
       currentName = name;
       socket.join(room.code);
 
       console.log(`[Socket] Host ${name} (${socket.id}) created and joined room ${room.code}`);
-      
-      socket.emit('lobby-updated', room);
-      socket.emit('joined-successfully', { room, player, isSpectator });
+
+      // The owner receives their own player object including its private secret;
+      // the room is sanitized so no other player's secret is exposed.
+      socket.emit('lobby-updated', roomManager.publicRoom(room));
+      socket.emit('joined-successfully', { room: roomManager.publicRoom(room), player, isSpectator });
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to create room via socket' });
     }
   });
 
   // Join room socket handler
-  socket.on('join-room', ({ code, name }: { code: string; name: string }) => {
+  socket.on('join-room', ({ code, name, secret }: { code: string; name: string; secret?: string }) => {
     if (currentRoomCode) {
       console.log(`[Socket] Duplicate join-room blocked for socket ${socket.id}. Already in room ${currentRoomCode}`);
       return;
@@ -184,7 +200,7 @@ io.on('connection', (socket) => {
 
     try {
       const upperCode = code.toUpperCase();
-      const { room, player, isSpectator } = roomManager.joinRoom(upperCode, name, socket.id);
+      const { room, player, isSpectator } = roomManager.joinRoom(upperCode, name, socket.id, secret);
 
       currentRoomCode = upperCode;
       currentName = name;
@@ -196,19 +212,20 @@ io.on('connection', (socket) => {
         console.log(`[Socket] Player ${name} (${socket.id}) joined room ${upperCode} at Seat ${player?.seatNumber}`);
       }
 
-      // Notify the specific socket they joined successfully
-      socket.emit('joined-successfully', { room, player, isSpectator });
+      // Notify the joining socket. Their own player object keeps its secret so
+      // they can prove identity on reconnect; the room view is sanitized.
+      socket.emit('joined-successfully', { room: roomManager.publicRoom(room), player, isSpectator });
 
       if (isSpectator) {
         // Notify others that a spectator joined
         socket.to(upperCode).emit('spectator-joined', { name, id: socket.id });
-      } else {
-        // Notify others that a player joined
-        socket.to(upperCode).emit('player-joined', player);
+      } else if (player) {
+        // Notify others that a player joined (without the secret)
+        socket.to(upperCode).emit('player-joined', roomManager.publicPlayer(player));
       }
 
       // Broadcast the updated lobby state to all players in the room
-      io.to(upperCode).emit('lobby-updated', room);
+      io.to(upperCode).emit('lobby-updated', roomManager.publicRoom(room));
 
       // If game is active, broadcast latest state immediately so they recover hands
       if (room.status === 'playing') {
@@ -257,9 +274,9 @@ io.on('connection', (socket) => {
     try {
       const room = roomManager.startGame(currentRoomCode, socket.id);
       console.log(`[Socket] Room ${currentRoomCode} game started by host ${socket.id}`);
-      
-      io.to(currentRoomCode).emit('lobby-updated', room);
-      io.to(currentRoomCode).emit('game-started', room);
+
+      io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
+      io.to(currentRoomCode).emit('game-started', roomManager.publicRoom(room));
 
       // Broadcast initial game state to all players
       broadcastGameState(currentRoomCode);
@@ -433,19 +450,19 @@ io.on('connection', (socket) => {
 
       if (leftPlayer) {
         console.log(`[Socket] Disconnect grace period expired. Player ${leftPlayer.name} left room ${tempRoomCode}`);
-        io.to(tempRoomCode).emit('player-left', leftPlayer);
+        io.to(tempRoomCode).emit('player-left', roomManager.publicPlayer(leftPlayer));
       } else if (leftSpectator) {
         console.log(`[Socket] Disconnect grace period expired. Spectator ${leftSpectator.name} left room ${tempRoomCode}`);
-        io.to(tempRoomCode).emit('spectator-left', leftSpectator);
+        io.to(tempRoomCode).emit('spectator-left', { id: leftSpectator.id, name: leftSpectator.name });
       }
 
       if (updatedRoom) {
         // Game was stopped because too few players remain — tell clients to reset to lobby
         if (gameStopped) {
           console.log(`[Socket] Game stopped in room ${tempRoomCode} (not enough players).`);
-          io.to(tempRoomCode).emit('game-stopped', { room: updatedRoom });
+          io.to(tempRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
-        io.to(tempRoomCode).emit('lobby-updated', updatedRoom);
+        io.to(tempRoomCode).emit('lobby-updated', roomManager.publicRoom(updatedRoom));
         if (updatedRoom.status === 'playing') {
           broadcastGameState(tempRoomCode);
         }
@@ -468,10 +485,10 @@ io.on('connection', (socket) => {
       const { room: updatedRoom, leftPlayer, leftSpectator, gameStopped } = result;
       if (leftPlayer) {
         console.log(`[Socket] Player ${leftPlayer.name} left room ${currentRoomCode}`);
-        socket.to(currentRoomCode).emit('player-left', leftPlayer);
+        socket.to(currentRoomCode).emit('player-left', roomManager.publicPlayer(leftPlayer));
       } else if (leftSpectator) {
         console.log(`[Socket] Spectator ${leftSpectator.name} left room ${currentRoomCode}`);
-        socket.to(currentRoomCode).emit('spectator-left', leftSpectator);
+        socket.to(currentRoomCode).emit('spectator-left', { id: leftSpectator.id, name: leftSpectator.name });
       }
 
       socket.leave(currentRoomCode);
@@ -480,10 +497,10 @@ io.on('connection', (socket) => {
         // Game was stopped because too few players remain — tell clients to reset to lobby
         if (gameStopped) {
           console.log(`[Socket] Game stopped in room ${currentRoomCode} (not enough players).`);
-          io.to(currentRoomCode).emit('game-stopped', { room: updatedRoom });
+          io.to(currentRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
         // Broadcast the updated lobby to remaining players
-        io.to(currentRoomCode).emit('lobby-updated', updatedRoom);
+        io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(updatedRoom));
         if (updatedRoom.status === 'playing') {
           broadcastGameState(currentRoomCode);
         }

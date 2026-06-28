@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextPlayerIndex } from '../game/turnManager';
@@ -7,11 +8,13 @@ export interface Player {
   name: string;
   seatNumber: number; // 1 to 6
   isHost: boolean;
+  secret: string; // Private per-session token. Never broadcast to other clients.
 }
 
 export interface Spectator {
   id: string; // Socket ID
   name: string;
+  secret: string; // Private per-session token. Never broadcast to other clients.
 }
 
 export interface Room {
@@ -58,6 +61,26 @@ class RoomManager {
   // Get a room by its code
   public getRoom(code: string): Room | undefined {
     return this.rooms.get(code.toUpperCase());
+  }
+
+  // ---- Sanitization helpers -------------------------------------------------
+  // Player/Spectator objects carry a private `secret`. It must NEVER be sent to
+  // any client other than its owner. Use these before broadcasting.
+
+  public publicPlayer(p: Player): Omit<Player, 'secret'> {
+    const { secret, ...rest } = p;
+    return rest;
+  }
+
+  public publicRoom(room: Room): Room {
+    return {
+      ...room,
+      players: room.players.map((p) => this.publicPlayer(p) as Player),
+      spectators: room.spectators?.map((s) => {
+        const { secret, ...rest } = s;
+        return rest as Spectator;
+      }),
+    };
   }
 
   // Expose active room lists for diagnostic logs
@@ -123,7 +146,8 @@ class RoomManager {
   public joinRoom(
     code: string,
     playerName: string,
-    playerSocketId: string
+    playerSocketId: string,
+    secret?: string
   ): { room: Room; player: Player | null; isSpectator: boolean } {
     const upperCode = code.toUpperCase();
     const room = this.rooms.get(upperCode);
@@ -153,6 +177,14 @@ class RoomManager {
     );
 
     if (existingPlayerByName) {
+      // Identity check: a name-based reconnection is only honoured if the caller
+      // proves ownership with the matching per-session secret. This blocks a
+      // stranger from stealing a seat (and possibly host) by reusing a name.
+      if (!secret || secret !== existingPlayerByName.secret) {
+        console.log(`[JOIN_REJECTED] Name "${playerName}" is already taken in room ${room.code} (secret mismatch).`);
+        throw new Error('That name is already taken in this room. Please choose another.');
+      }
+
       const oldSocketId = existingPlayerByName.id;
       
       // Update player socket ID
@@ -209,6 +241,10 @@ class RoomManager {
         (s) => s.name.toLowerCase() === playerName.toLowerCase()
       );
       if (existingSpectatorByName) {
+        if (!secret || secret !== existingSpectatorByName.secret) {
+          console.log(`[JOIN_REJECTED] Spectator name "${playerName}" is taken in room ${room.code} (secret mismatch).`);
+          throw new Error('That name is already taken in this room. Please choose another.');
+        }
         const oldSocketId = existingSpectatorByName.id;
         existingSpectatorByName.id = playerSocketId;
         console.log(`[SPECTATOR_RECONNECTED] Rebound spectator "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
@@ -227,7 +263,7 @@ class RoomManager {
       // Reconnection or duplicate checks for spectators
       let spectator = room.spectators.find((s) => s.id === playerSocketId);
       if (!spectator) {
-        spectator = { id: playerSocketId, name: playerName };
+        spectator = { id: playerSocketId, name: playerName, secret: randomUUID() };
         room.spectators.push(spectator);
       }
       console.log(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
@@ -256,6 +292,7 @@ class RoomManager {
       name: playerName,
       seatNumber,
       isHost,
+      secret: randomUUID(),
     };
 
     room.players.push(newPlayer);

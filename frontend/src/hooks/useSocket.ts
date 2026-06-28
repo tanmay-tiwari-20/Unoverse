@@ -8,6 +8,32 @@ import { getSeatCoords } from '../utils/seating';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
+// --- Session secret persistence -------------------------------------------
+// The backend issues a private per-session secret on first join. We persist it
+// (per-tab) so a page reload or socket reconnect can prove ownership of the
+// same seat instead of being rejected as a name collision.
+const secretKey = (code: string, name: string) =>
+  `unoverse:secret:${code.toUpperCase()}:${name.trim().toLowerCase()}`;
+
+const saveSecret = (code: string, name: string, secret?: string) => {
+  if (typeof window === 'undefined' || !secret) return;
+  try {
+    sessionStorage.setItem(secretKey(code, name), secret);
+  } catch {
+    // sessionStorage may be unavailable (private mode); reconnection still works
+    // within the same tab via the in-memory store.
+  }
+};
+
+const loadSecret = (code: string, name: string): string | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    return sessionStorage.getItem(secretKey(code, name)) || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Global singleton socket instance to prevent duplicate socket connections
 let sharedSocket: Socket | null = null;
 
@@ -102,7 +128,10 @@ export const useSocket = () => {
       if (state.room && state.player) {
         addToast('Reconnected to game server! Resyncing...', 'info');
         // CRITICAL: Rejoin the room so the backend updates our socket.id in room.players!
-        socketInstance.emit('join-room', { code: state.room.code, name: state.player.name });
+        // Send our stored secret so the backend recognises us as the same player
+        // and lets us reclaim our seat instead of rejecting the name.
+        const secret = state.player.secret || loadSecret(state.room.code, state.player.name);
+        socketInstance.emit('join-room', { code: state.room.code, name: state.player.name, secret });
       }
     });
 
@@ -129,6 +158,10 @@ export const useSocket = () => {
     socketInstance.off('joined-successfully');
     socketInstance.on('joined-successfully', ({ room, player, isSpectator }) => {
       console.log('[Socket] Joined room successfully:', room?.code, player, 'isSpectator:', isSpectator);
+      // Persist our private secret so a reload/reconnect can reclaim this seat.
+      if (room && player?.secret) {
+        saveSecret(room.code, player.name, player.secret);
+      }
       setRoom(room);
       setPlayer(player);
       setIsSpectator(!!isSpectator);
@@ -286,7 +319,10 @@ export const useSocket = () => {
 
   const joinRoom = (code: string, name: string) => {
     if (socket) {
-      socket.emit('join-room', { code, name });
+      // Resend any previously-issued secret so a page reload reclaims our seat
+      // rather than being rejected as a duplicate name.
+      const secret = loadSecret(code, name);
+      socket.emit('join-room', { code, name, secret });
     } else {
       console.warn('[Socket] Socket not initialized yet');
     }

@@ -119,7 +119,7 @@ export default function LandingPage() {
           {/* Titles */}
           <div className="text-center flex flex-col items-center gap-3 arcade-bob">
             <h1 className="font-arcade text-8xl leading-none arcade-stroke-uno text-yellow-400">
-              UNO!
+              UNOVERSE!
             </h1>
             <p className="font-arcade text-sm tracking-wide uppercase text-white arcade-stroke-uno-sm">
               Party Card Battle
