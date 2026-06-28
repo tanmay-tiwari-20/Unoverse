@@ -1,0 +1,5 @@
+# UNO Real Core Game Engine Implementation
+#
+# Place all core game state machines, turn loop timers, rule validators, 
+# deck shufflers, and card action behaviors here. 
+# Keep it pure, testable, and decoupled from Socket.IO / Express transport libraries.

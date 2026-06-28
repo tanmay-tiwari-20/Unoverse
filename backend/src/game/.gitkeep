@@ -1,0 +1,10 @@
+# UNO Real Game Engine Module
+#
+# IMPORTANT ARCHITECTURAL RULE:
+# All future UNO rules (such as draw card rules, matching card colors/numbers, special card behaviors
+# like wild/skip/reverse, turn order management, direction of play, and victory conditions) 
+# MUST be implemented inside this 'game' engine module.
+#
+# NEVER implement gameplay logic directly inside socket handlers in index.ts or other transport layer files.
+# The socket layer should only act as a thin network transport wrapper that forwards user actions to the
+# game engine and broadcasts the resulting engine state changes.
