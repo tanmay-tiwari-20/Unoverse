@@ -201,6 +201,20 @@ export const useSocket = () => {
       setIsProcessing(false);
     });
 
+    socketInstance.off('uno-penalty');
+    socketInstance.on('uno-penalty', ({ playerId, playerName }) => {
+      logger.debug('[Socket] UNO penalty applied to', playerName);
+      soundManager.play('card_draw');
+      const me = useGameStore.getState().player;
+      const youGotCaught = me?.id === playerId;
+      addToast(
+        youGotCaught
+          ? "You forgot to call UNO! +4 penalty cards"
+          : `${playerName} forgot to call UNO! +4 penalty cards`,
+        youGotCaught ? 'error' : 'info'
+      );
+    });
+
     socketInstance.off('game-stopped');
     socketInstance.on('game-stopped', ({ room }) => {
       logger.debug('[Socket] Game stopped — not enough players. Resetting to lobby.');
@@ -299,6 +313,7 @@ export const useSocket = () => {
       socketInstance.off('game-started');
       socketInstance.off('game-updated');
       socketInstance.off('game-ended');
+      socketInstance.off('uno-penalty');
       socketInstance.off('game-stopped');
       socketInstance.off('error');
       socketInstance.off('player-reacted');
@@ -358,12 +373,19 @@ export const useSocket = () => {
         socketId: socket.id
       });
       useGameStore.setState({ isProcessing: true });
-      socket.emit('play-card', { cardId, playerId: state.player?.id });
-      
+
+      // Auto-declare UNO BEFORE playing, when this play will leave the local
+      // player on a single card (they currently hold exactly 2). The declaration
+      // must reach the server first — otherwise the play triggers the automatic
+      // +4 penalty. The hand lives in the store keyed by seat number.
       const { autoDeclareUno } = useSettingsStore.getState();
-      if (autoDeclareUno && state.player?.cards.length === 2) {
+      const mySeat = state.player?.seatNumber;
+      const myHandCount = mySeat != null ? (state.playerCards[mySeat]?.length ?? 0) : 0;
+      if (autoDeclareUno && myHandCount === 2) {
         socket.emit('call-uno');
       }
+
+      socket.emit('play-card', { cardId, playerId: state.player?.id });
     }
   };
 
@@ -389,12 +411,6 @@ export const useSocket = () => {
     }
   };
 
-  const catchUno = (targetPlayerId: string) => {
-    if (socket) {
-      socket.emit('catch-uno', { targetPlayerId });
-    }
-  };
-
   return {
     socket,
     createRoom,
@@ -405,6 +421,5 @@ export const useSocket = () => {
     drawCard,
     chooseColor,
     callUno,
-    catchUno,
   };
 };

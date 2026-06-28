@@ -3,7 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { roomManager } from './rooms/roomManager';
-import { drawCardAction, playCardAction, chooseColorAction, callUnoAction, catchUnoAction } from './game/actions';
+import { drawCardAction, playCardAction, chooseColorAction, callUnoAction } from './game/actions';
 import { CardColor } from './game/deck';
 import { logger } from './utils/logger';
 
@@ -415,6 +415,15 @@ io.on('connection', (socket) => {
 
       broadcastGameState(currentRoomCode);
 
+      // Notify the room when a play triggered the automatic +4 UNO penalty so
+      // clients can surface it (the player forgot to declare UNO at 2 cards).
+      if (updatedGame.lastAction?.type === 'play' && updatedGame.lastAction.unoPenalty) {
+        io.to(currentRoomCode).emit('uno-penalty', {
+          playerId: updatedGame.lastAction.playerId,
+          playerName: player ? player.name : 'A player',
+        });
+      }
+
       if (updatedGame.status === 'ended') {
         clearTurnTimer(currentRoomCode);
         logger.debug(`[Socket] Game in room ${currentRoomCode} ended. Winner: ${currentName}`);
@@ -507,24 +516,6 @@ io.on('connection', (socket) => {
     } catch (error: any) {
       logger.error(`[Socket] Call UNO error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to call UNO' });
-    }
-  });
-
-  // Catch UNO event
-  socket.on('catch-uno', ({ targetPlayerId }: { targetPlayerId: string }) => {
-    if (!currentRoomCode) return;
-    const room = roomManager.getRoom(currentRoomCode);
-    if (!room || !room.game) return;
-
-    try {
-      const updatedGame = catchUnoAction(room.game, targetPlayerId);
-      room.game = updatedGame;
-
-      logger.debug(`[Socket] Player ${currentName} caught ${targetPlayerId} not calling UNO in room ${currentRoomCode}`);
-      broadcastGameState(currentRoomCode);
-    } catch (error: any) {
-      logger.error(`[Socket] Catch UNO error:`, error.message);
-      socket.emit('error', { message: error.message || 'Failed to catch UNO' });
     }
   });
 

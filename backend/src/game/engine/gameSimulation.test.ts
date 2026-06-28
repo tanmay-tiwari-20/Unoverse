@@ -19,7 +19,6 @@ import {
   playCardAction,
   chooseColorAction,
   callUnoAction,
-  catchUnoAction,
 } from '../actions';
 import { Player } from '../../rooms/roomManager';
 
@@ -59,7 +58,7 @@ let drawTwoCount = 0;
 let wildCount = 0;
 let wildDrawFourCount = 0;
 let unoCalledCount = 0;
-let unoCaughtCount = 0;
+let unoPenaltyCount = 0;
 let invalidMovesRejected = 0;
 let totalTurns = 0;
 let failedTests: string[] = [];
@@ -149,6 +148,17 @@ function runSimulation(): void {
       const nextPlayerId = players[nextPlayerIdx].id;
       const nextPlayerHandBefore = state.hands[nextPlayerId].length;
 
+      // ── Pre-play UNO declaration ──
+      // Under the auto-penalty rule, UNO must be declared while still holding 2
+      // cards (before the play drops you to 1). Decide here, before playing, so
+      // we exercise both the "declared safely" and "forgot → +4 penalty" paths.
+      const willReachOne = hand.length === 2;
+      const declaredUno = willReachOne && Math.random() > 0.4; // 60% declare in time
+      if (declaredUno) {
+        state = callUnoAction(state, currentId);
+        unoCalledCount++;
+      }
+
       // ── Play the card ──
       state = playCardAction(state, players, currentId, playable.id);
 
@@ -237,30 +247,28 @@ function runSimulation(): void {
         );
       }
 
-      // ── UNO logic ──
-      if (state.status !== 'ended') {
-        const currentHand = state.hands[currentId];
-        if (currentHand.length === 1) {
-          // Alternate: sometimes call UNO, sometimes deliberately skip to test catching
-          const shouldCallUno = Math.random() > 0.4; // 60 % chance of calling
-          if (shouldCallUno) {
-            state = callUnoAction(state, currentId);
-            unoCalledCount++;
-          } else {
-            // Opponent tries to catch
-            try {
-              state = catchUnoAction(state, currentId);
-              unoCaughtCount++;
-              // After catch, player should now have 3 cards (1 + 2 penalty)
-              assert(
-                state.hands[currentId].length === 3,
-                `UNO catch should add 2 penalty cards (hand is ${state.hands[currentId].length})`
-              );
-            } catch {
-              // Catch may fail if state conditions aren't met — that's fine
-            }
-          }
-        }
+      // ── Auto UNO penalty verification ──
+      // If this play would have dropped the player to a single card but they
+      // never declared UNO, the engine must have auto-applied a +4 penalty,
+      // leaving them on 5 cards and flagging lastAction.unoPenalty.
+      if (state.status !== 'ended' && willReachOne && !declaredUno) {
+        unoPenaltyCount++;
+        assert(
+          state.lastAction?.unoPenalty === true,
+          'Forgetting UNO should set lastAction.unoPenalty'
+        );
+        assert(
+          state.hands[currentId].length === 5,
+          `Auto UNO penalty should add 4 cards (1 + 4), hand is ${state.hands[currentId].length}`
+        );
+      }
+
+      // A player who declared UNO in time should sit safely on a single card.
+      if (state.status !== 'ended' && willReachOne && declaredUno) {
+        assert(
+          state.hands[currentId].length === 1,
+          `Declared UNO should leave the player on 1 card (hand is ${state.hands[currentId].length})`
+        );
       }
 
       // ── Win detection ──
@@ -315,8 +323,8 @@ ${wildCount > 0 ? '✅' : '❌'} Wild triggered: ${wildCount} times
 ${wildDrawFourCount > 0 ? '✅' : '❌'} Wild Draw Four triggered: ${wildDrawFourCount} times
 
 UNO SYSTEM VERIFICATION:
-${unoCalledCount > 0 ? '✅' : '⚠️'} UNO called: ${unoCalledCount} times
-${unoCaughtCount > 0 ? '✅' : '⚠️'} UNO caught: ${unoCaughtCount} times
+${unoCalledCount > 0 ? '✅' : '⚠️'} UNO declared in time: ${unoCalledCount} times
+${unoPenaltyCount > 0 ? '✅' : '⚠️'} Auto +4 penalty applied: ${unoPenaltyCount} times
 
 WIN SYSTEM VERIFICATION:
 ${gameEnded ? '✅' : '⚠️'} Game ended: ${gameEnded ? 'yes' : 'no'}

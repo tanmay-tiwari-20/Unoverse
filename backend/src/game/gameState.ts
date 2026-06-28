@@ -16,5 +16,6 @@ export interface UnoGameState {
     type: 'play' | 'draw';
     playerId: string;
     card?: CardItem;
+    unoPenalty?: boolean; // true when a play triggered the automatic +4 UNO penalty
   };
 }

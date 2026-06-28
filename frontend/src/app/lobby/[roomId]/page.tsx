@@ -24,7 +24,6 @@ import {
   X,
   Trophy,
   Star,
-  Megaphone,
   Siren,
   PartyPopper,
   Medal,
@@ -258,8 +257,7 @@ export default function LobbyPage() {
     playCard, 
     chooseColor, 
     callUno,
-    catchUno,
-    drawCard 
+    drawCard
   } = useSocket();
 
   const { 
@@ -635,50 +633,24 @@ export default function LobbyPage() {
                 </span>
               ) : null}
 
-              {/* Declare UNO Button - Large when 1 card, normal when 2 cards. Disappears after declared. */}
-              {(myHand.length === 2 || myHand.length === 1) && gameStatus === 'playing' && !isSpectator && !(player && unoCalled[player.id]) && (
+              {/* Declare UNO Button — shown while holding exactly 2 cards. Declaring
+                  now exempts you from the automatic +4 penalty that hits when a
+                  play would otherwise drop you to a single undeclared card. */}
+              {myHand.length === 2 && gameStatus === 'playing' && !isSpectator && !(player && unoCalled[player.id]) && (
                 <motion.button
                   disabled={isProcessing}
                   whileTap={{ scale: 0.92, y: 4 }}
-                  animate={myHand.length === 1 ? { scale: [1, 1.08, 1] } : {}}
-                  transition={myHand.length === 1 ? { repeat: Infinity, duration: 0.8, ease: 'easeInOut' } : undefined}
+                  animate={{ scale: [1, 1.08, 1] }}
+                  transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
                   onClick={() => {
                     setIsProcessing(true);
                     callUno();
                   }}
-                  className={`btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 ${
-                    myHand.length === 1
-                      ? 'px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600'
-                      : 'px-4 py-2 text-[11px] bg-gradient-to-b from-red-500 to-red-700'
-                  }`}
+                  className="btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600"
                 >
-                  {myHand.length === 1
-                    ? <><Siren size={18} /> PRESS UNO!</>
-                    : <><Megaphone size={14} /> Declare UNO!</>}
+                  <Siren size={18} /> CALL UNO!
                 </motion.button>
               )}
-
-              {/* Catch UNO Buttons - Show for opponents with 1 card who haven't called UNO */}
-              {gameStatus === 'playing' && !isSpectator && room && room.players
-                .filter(p => p.id !== player?.id && playerCards[p.seatNumber]?.length === 1 && !unoCalled[p.id])
-                .map(targetPlayer => (
-                  <motion.button
-                    key={`catch-${targetPlayer.id}`}
-                    whileTap={{ scale: 0.92, y: 4 }}
-                    animate={{ scale: [1, 1.06, 1] }}
-                    transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
-                    disabled={isProcessing}
-                    onClick={() => {
-                      setIsProcessing(true);
-                      catchUno(targetPlayer.id);
-                      addToast(`Caught ${targetPlayer.name} not calling UNO! +2 penalty cards`, 'success');
-                    }}
-                    className="btn-arcade mt-1.5 px-5 py-2 text-[11px] bg-gradient-to-b from-amber-400 to-orange-600 text-white uppercase inline-flex items-center gap-1.5"
-                  >
-                    <Siren size={14} /> Catch {targetPlayer.name}&apos;s UNO!
-                  </motion.button>
-                ))
-              }
             </div>
           </div>
         </div>

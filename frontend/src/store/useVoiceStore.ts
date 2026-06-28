@@ -26,17 +26,15 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   
   setSpeakerEnabled: (isSpeakerEnabled) => set({ isSpeakerEnabled }),
 
-  updatePeerStatus: (playerId, statusUpdate) => set((state) => ({
-    peerStatuses: {
-      ...state.peerStatuses,
-      [playerId]: {
-        isMuted: false,
-        isSpeaking: false,
-        ...(state.peerStatuses[playerId] || {}),
-        ...statusUpdate
-      }
-    }
-  })),
+  updatePeerStatus: (playerId, statusUpdate) => set((state) => {
+    const existing = state.peerStatuses[playerId] ?? { isMuted: false, isSpeaking: false };
+    return {
+      peerStatuses: {
+        ...state.peerStatuses,
+        [playerId]: { ...existing, ...statusUpdate },
+      },
+    };
+  }),
 
   removePeerStatus: (playerId) => set((state) => {
     const newStatuses = { ...state.peerStatuses };

@@ -253,6 +253,17 @@ export const playCardAction = (
     return state;
   }
 
+  // Auto UNO penalty: if this play dropped the player to exactly 1 card and they
+  // never declared UNO (while holding 2), the server immediately deals them 4
+  // penalty cards. This replaces the old manual "catch UNO" mechanic — forgetting
+  // to call UNO is now punished automatically.
+  let unoPenalty = false;
+  if (playerHand.length === 1 && !state.unoCalled[playerId]) {
+    drawCardsHelper(state, 4, playerId);
+    unoPenalty = true;
+    logger.debug(`[UNO_PENALTY] ${playerId} reached 1 card without declaring UNO — +4 penalty cards.`);
+  }
+
   // Handle Card Effects
   const currentIndex = players.findIndex(p => p.id === playerId);
 
@@ -280,7 +291,7 @@ export const playCardAction = (
     state.currentPlayerId = players[nextIndex].id;
   }
 
-  state.lastAction = { type: 'play', playerId, card };
+  state.lastAction = { type: 'play', playerId, card, unoPenalty };
 
   return state;
 };
@@ -329,40 +340,16 @@ export const chooseColorAction = (
 };
 
 /**
- * Tracks UNO calls.
+ * Tracks UNO calls. A player declares UNO pre-emptively while still holding 2
+ * cards; doing so exempts them from the automatic +4 penalty applied in
+ * playCardAction when a play would otherwise drop them to a single card.
  */
 export const callUnoAction = (state: UnoGameState, playerId: string): UnoGameState => {
   const hand = state.hands[playerId] || [];
   if (hand.length > 2) {
     throw new Error('You cannot call UNO with more than 2 cards in hand');
   }
-  
+
   state.unoCalled[playerId] = true;
-  return state;
-};
-
-/**
- * Penalizes a player who has 1 card but forgot to call UNO.
- */
-export const catchUnoAction = (state: UnoGameState, targetPlayerId: string): UnoGameState => {
-  if (state.status !== 'playing' && state.status !== 'awaiting_color_selection') {
-    throw new Error('Game is not active');
-  }
-
-  const hand = state.hands[targetPlayerId];
-  if (!hand || hand.length !== 1) {
-    throw new Error('Target player does not have exactly 1 card');
-  }
-
-  if (state.unoCalled[targetPlayerId]) {
-    throw new Error('Target player already called UNO safely');
-  }
-
-  // Penalty: Draw 2 cards
-  drawCardsHelper(state, 2, targetPlayerId);
-  
-  // They are now safe after penalty
-  state.unoCalled[targetPlayerId] = true;
-
   return state;
 };
