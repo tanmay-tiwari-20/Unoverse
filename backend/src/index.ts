@@ -3,7 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { roomManager } from './rooms/roomManager';
-import { drawCardAction, playCardAction, chooseColorAction, callUnoAction } from './game/actions';
+import { drawCardAction, playCardAction, chooseColorAction, callUnoAction, passTurnAction } from './game/actions';
 import { CardColor } from './game/deck';
 import { logger } from './utils/logger';
 
@@ -25,9 +25,12 @@ const turnTimers = new Map<string, NodeJS.Timeout>();
 // idempotent re-broadcasts (e.g. a reconnect) don't restart the clock.
 const turnSignatures = new Map<string, string>();
 
-function turnSignatureOf(game: { status: string; currentPlayerId: string; colorChooserId: string | null }): string {
+function turnSignatureOf(game: { status: string; currentPlayerId: string; colorChooserId: string | null; drawnCardId?: string | null }): string {
   const activeId = game.status === 'awaiting_color_selection' ? game.colorChooserId : game.currentPlayerId;
-  return `${game.status}:${activeId}`;
+  // Opening a draw-then-play decision window keeps the same player & status but is
+  // a distinct timed phase, so fold it into the signature to (re)arm a fresh clock.
+  const decision = game.drawnCardId ? ':decision' : '';
+  return `${game.status}:${activeId}${decision}`;
 }
 
 function clearTurnTimer(code: string) {
@@ -95,8 +98,19 @@ function handleTurnTimeout(code: string, signature: string) {
       room.game = chooseColorAction(game, room.players, game.colorChooserId, color);
     } else if (game.status === 'playing') {
       const activePlayerId = game.currentPlayerId;
-      logger.info(`[TURN_TIMEOUT] Auto-drawing for ${activePlayerId} in room ${code}`);
-      room.game = drawCardAction(game, room.players, activePlayerId);
+      if (game.drawnCardId) {
+        // Already drew a playable card and is sitting on the decision — pass for them.
+        logger.info(`[TURN_TIMEOUT] Auto-passing drawn-card decision for ${activePlayerId} in room ${code}`);
+        room.game = passTurnAction(game, room.players, activePlayerId);
+      } else {
+        logger.info(`[TURN_TIMEOUT] Auto-drawing for ${activePlayerId} in room ${code}`);
+        room.game = drawCardAction(game, room.players, activePlayerId);
+        // If the forced draw produced a playable card, don't make the table wait
+        // another full timeout — immediately pass on the AFK player's behalf.
+        if (room.game.drawnCardId) {
+          room.game = passTurnAction(room.game, room.players, activePlayerId);
+        }
+      }
     } else {
       return;
     }
@@ -182,6 +196,7 @@ function broadcastGameState(code: string) {
       unoCalled: game.unoCalled,
       drawStack: game.drawStack,
       pendingDrawType: game.pendingDrawType,
+      drawnCardId: game.drawnCardId ?? null,
       turnDeadline: game.turnDeadline ?? null,
       lastAction: game.lastAction,
     });
@@ -472,6 +487,34 @@ io.on('connection', (socket) => {
     } catch (error: any) {
       logger.error(`[Socket] Draw card error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to draw card' });
+    }
+  });
+
+  // Pass-turn event — the player drew a playable card but chose not to play it.
+  socket.on('pass-turn', () => {
+    if (!currentRoomCode) return;
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room || !room.game) return;
+
+    try {
+      const player = room.players.find(p => p.id === socket.id);
+      const playerName = player ? player.name : 'Unknown';
+      logger.debug(`[TURN_PASSED] Player: ${playerName}`);
+
+      const oldPlayerId = room.game.currentPlayerId;
+      const updatedGame = passTurnAction(room.game, room.players, socket.id);
+      room.game = updatedGame;
+
+      if (updatedGame.currentPlayerId !== oldPlayerId) {
+        const nextPlayer = room.players.find(p => p.id === updatedGame.currentPlayerId);
+        const nextPlayerName = nextPlayer ? nextPlayer.name : 'Unknown';
+        logger.debug(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
+      }
+
+      broadcastGameState(currentRoomCode);
+    } catch (error: any) {
+      logger.error(`[Socket] Pass turn error:`, error.message);
+      socket.emit('error', { message: error.message || 'Failed to pass turn' });
     }
   });
 

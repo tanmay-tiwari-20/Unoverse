@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
 import { PhysicalCard } from '../cards/PhysicalCard';
@@ -8,11 +8,51 @@ import { CinematicSharedTopCard } from './CinematicSharedTopCard';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 
+/**
+ * Large invisible click target covering the whole draw pile. The visible deck is
+ * a stack of very thin cards, so at oblique camera angles the clickable top face
+ * is a sliver that's hard to hit. This proxy box gives a generous, angle-robust
+ * hit area: a wide footprint plus enough height to be caught from the side. It
+ * stays invisible but raycastable, and shows a hover ring + pointer cursor.
+ */
+const DrawPileHitbox: React.FC<{ stackHeight: number; onDraw: () => void }> = ({ stackHeight, onDraw }) => {
+  const [hovered, setHovered] = useState(false);
+
+  // Footprint a bit larger than the card; height spans the stack plus headroom
+  // so a ray grazing from the side still intersects it.
+  const boxH = Math.max(0.14, stackHeight + 0.12);
+
+  return (
+    <group>
+      <mesh
+        position={[0, boxH / 2 - 0.01, 0]}
+        onClick={(e) => { e.stopPropagation(); onDraw(); }}
+        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
+        onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
+      >
+        <boxGeometry args={[0.2, boxH, 0.26]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
+      {/* Hover affordance: a soft glowing ring around the pile base */}
+      {hovered && (
+        <mesh position={[0, stackHeight + 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.085, 0.11, 40]} />
+          <meshBasicMaterial color="#fde047" transparent opacity={0.85} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      )}
+    </group>
+  );
+};
+
 export const WebGLCards: React.FC = () => {
-  const { room, player, currentPlayerId, playerCards, discardPile, drawPileCount, gameStatus, isProcessing, wildColor } = useGameStore();
+  const { room, player, currentPlayerId, playerCards, discardPile, drawPileCount, gameStatus, isProcessing, wildColor, drawnCardId } = useGameStore();
   const { playCard, drawCard } = useSocket();
 
   const isMyTurn = currentPlayerId === player?.id && (gameStatus === 'playing' || gameStatus === 'awaiting_color_selection') && !isProcessing;
+  // Once a playable card has been drawn, a second draw is not allowed — the player
+  // must play that card or pass — so the draw pile is no longer interactive.
+  const canDraw = isMyTurn && !drawnCardId;
 
   // Must render cards when playing OR waiting for color selection OR game ended
   if (!room || !['playing', 'awaiting_color_selection', 'ended'].includes(gameStatus)) return null;
@@ -21,9 +61,6 @@ export const WebGLCards: React.FC = () => {
   const numPlayers = Math.max(playersList.length, 2);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
-  
-  console.log(`[COMPONENT WebGLCards] Render Discard Pile. Array:`, discardPile);
-  console.log(`[COMPONENT WebGLCards] Sliced Discard Pile Length:`, discardPile.slice(-10).length);
 
   return (
     <group>
@@ -66,11 +103,9 @@ export const WebGLCards: React.FC = () => {
         {Array.from({ length: Math.max(1, Math.min(15, drawPileCount)) }).map((_, idx) => {
           const randAngle = (Math.sin(idx * 12.9898) * 43758.5453) % 1;
           const randRot = (Math.cos(idx * 78.233) * 43758.5453) % 1;
-          
+
           const xOffset = (randAngle - 0.5) * 0.04;
           const zOffset = (randRot - 0.5) * 0.04;
-
-          const isClickable = (drawPileCount > 0 ? idx === Math.min(15, drawPileCount) - 1 : idx === 0) && isMyTurn;
 
           return (
             <PhysicalCard
@@ -80,10 +115,17 @@ export const WebGLCards: React.FC = () => {
               isFaceUp={false}
               position={[xOffset, idx * 0.002, zOffset]}
               rotation={[0, 0, 0]}
-              onClick={isClickable ? () => drawCard() : undefined}
             />
           );
         })}
+
+        {/* Whole-pile click proxy — a large invisible volume covering the deck so
+            it can be picked from any camera angle (the thin top card alone is a
+            tiny target at grazing angles). Raycastable despite being invisible. */}
+        {canDraw && (
+          <DrawPileHitbox stackHeight={Math.min(15, Math.max(1, drawPileCount)) * 0.002} onDraw={() => drawCard()} />
+        )}
+
         {/* Draw Pile Count Badge */}
         {drawPileCount > 0 && (
           <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>

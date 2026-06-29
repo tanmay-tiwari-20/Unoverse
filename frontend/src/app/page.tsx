@@ -1,22 +1,25 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, Copy, Check, Share2, LogIn, X } from 'lucide-react';
-import dynamic from 'next/dynamic';
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { AlertCircle, Copy, Check, Share2, LogIn } from "lucide-react";
+import dynamic from "next/dynamic";
 
 const LandingScene = dynamic(
-  () => import('../components/landing/LandingScene').then((mod) => ({ default: mod.LandingScene })),
-  { ssr: false }
+  () =>
+    import("../components/landing/LandingScene").then((mod) => ({
+      default: mod.LandingScene,
+    })),
+  { ssr: false },
 );
 
 export default function LandingPage() {
   const router = useRouter();
-  
+
   // State variables
-  const [displayName, setDisplayName] = useState('');
-  const [roomCode, setRoomCode] = useState('');
+  const [displayName, setDisplayName] = useState("");
+  const [roomCode, setRoomCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,13 +27,14 @@ export default function LandingPage() {
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+  const backendUrl =
+    process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
 
   // Pre-fill the room code when arriving via an invitation link (/?room=CODE)
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const invited = params.get('room');
+    const invited = params.get("room");
     if (invited) {
       setRoomCode(invited.toUpperCase().slice(0, 6));
     }
@@ -38,7 +42,7 @@ export default function LandingPage() {
 
   // Build a shareable invitation link that pre-fills the room code on landing
   const buildInviteLink = (code: string): string => {
-    if (typeof window === 'undefined') return '';
+    if (typeof window === "undefined") return "";
     return `${window.location.origin}/?room=${encodeURIComponent(code)}`;
   };
 
@@ -49,7 +53,7 @@ export default function LandingPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      setError('Could not copy the link. Please copy the room code manually.');
+      setError("Could not copy the link. Please copy the room code manually.");
     }
   };
 
@@ -57,12 +61,12 @@ export default function LandingPage() {
     if (!createdCode) return;
     const link = buildInviteLink(createdCode);
     const shareData = {
-      title: 'Join my UNOVERSE game!',
+      title: "Join my UNOVERSE game!",
       text: `Join my UNOVERSE party! Room code: ${createdCode}`,
       url: link,
     };
     // Use the native share sheet where available, otherwise fall back to copy.
-    if (typeof navigator !== 'undefined' && navigator.share) {
+    if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share(shareData);
       } catch {
@@ -76,13 +80,15 @@ export default function LandingPage() {
   // Proceed from the invite interface into the lobby as the host
   const handleEnterLobby = () => {
     if (!createdCode) return;
-    router.push(`/lobby/${createdCode}?name=${encodeURIComponent(displayName.trim())}`);
+    router.push(
+      `/lobby/${createdCode}?name=${encodeURIComponent(displayName.trim())}`,
+    );
   };
 
   const handleCreateRoom = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!displayName.trim()) {
-      setError('Please enter a display name first.');
+      setError("Please enter a display name first.");
       return;
     }
 
@@ -91,14 +97,14 @@ export default function LandingPage() {
 
     try {
       const response = await fetch(`${backendUrl}/api/rooms`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
       });
 
       if (!response.ok) {
-        throw new Error('Failed to create room server-side.');
+        throw new Error("Failed to create room server-side.");
       }
 
       const data = await response.json();
@@ -110,7 +116,7 @@ export default function LandingPage() {
       setLoading(false);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Something went wrong. Is the server running?');
+      setError(err.message || "Something went wrong. Is the server running?");
       setLoading(false);
     }
   };
@@ -118,11 +124,11 @@ export default function LandingPage() {
   const handleJoinRoom = async (e: React.MouseEvent) => {
     e.preventDefault();
     if (!displayName.trim()) {
-      setError('Please enter a display name first.');
+      setError("Please enter a display name first.");
       return;
     }
     if (!roomCode.trim()) {
-      setError('Please enter a 6-digit room code.');
+      setError("Please enter a 6-digit room code.");
       return;
     }
 
@@ -131,9 +137,9 @@ export default function LandingPage() {
 
     try {
       const response = await fetch(`${backendUrl}/api/rooms/join`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           code: roomCode.trim().toUpperCase(),
@@ -144,13 +150,17 @@ export default function LandingPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to join room.');
+        throw new Error(data.error || "Failed to join room.");
       }
 
-      router.push(`/lobby/${roomCode.trim().toUpperCase()}?name=${encodeURIComponent(displayName.trim())}`);
+      router.push(
+        `/lobby/${roomCode.trim().toUpperCase()}?name=${encodeURIComponent(displayName.trim())}`,
+      );
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Something went wrong. Please check your room code.');
+      setError(
+        err.message || "Something went wrong. Please check your room code.",
+      );
       setLoading(false);
     }
   };
@@ -168,12 +178,11 @@ export default function LandingPage() {
 
       {/* Foreground UI */}
       <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
-
         {/* Centerpiece Hero */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1.2, ease: 'easeOut' }}
+          transition={{ duration: 1.2, ease: "easeOut" }}
           className="flex flex-col items-center gap-8 pointer-events-auto w-full max-w-sm px-4"
         >
           {/* Titles */}
@@ -188,12 +197,11 @@ export default function LandingPage() {
 
           {/* Controls Panel */}
           <div className="w-full flex flex-col gap-4">
-
             <AnimatePresence mode="wait">
               {error && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
+                  animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden"
                 >
@@ -248,7 +256,6 @@ export default function LandingPage() {
                 Create
               </button>
             </div>
-
           </div>
         </motion.div>
       </div>
@@ -275,19 +282,10 @@ export default function LandingPage() {
               initial={{ opacity: 0, y: 24, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 16, scale: 0.95 }}
-              transition={{ type: 'spring', damping: 22, stiffness: 280 }}
+              transition={{ type: "spring", damping: 22, stiffness: 280 }}
               className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center relative overflow-hidden"
             >
               <div className="absolute inset-0 arcade-dots pointer-events-none" />
-
-              {/* Close — abandons the invite view but the room still exists */}
-              <button
-                onClick={() => setCreatedCode(null)}
-                className="absolute top-3 right-3 chip-arcade w-8 h-8 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700 z-10"
-                title="Close"
-              >
-                <X size={14} />
-              </button>
 
               <div className="relative">
                 <h2 className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">
@@ -315,7 +313,7 @@ export default function LandingPage() {
                   className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2"
                 >
                   {copied ? <Check size={16} /> : <Copy size={16} />}
-                  {copied ? 'Link Copied!' : 'Copy Invitation Link'}
+                  {copied ? "Link Copied!" : "Copy Invitation Link"}
                 </button>
 
                 <button
@@ -336,7 +334,6 @@ export default function LandingPage() {
           </motion.div>
         )}
       </AnimatePresence>
-
     </main>
   );
 }

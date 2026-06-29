@@ -399,6 +399,16 @@ export const useSocket = () => {
     }
   };
 
+  const passTurn = () => {
+    const state = useGameStore.getState();
+    if (state.isProcessing) return;
+
+    if (socket) {
+      useGameStore.setState({ isProcessing: true });
+      socket.emit('pass-turn');
+    }
+  };
+
   const chooseColor = (color: CardColor) => {
     if (socket) {
       socket.emit('choose-color', { color });
@@ -419,6 +429,7 @@ export const useSocket = () => {
     startGame,
     playCard,
     drawCard,
+    passTurn,
     chooseColor,
     callUno,
   };

@@ -172,6 +172,7 @@ export const startGameState = (players: Player[]): UnoGameState => {
     unoCalled,
     drawStack: 0,
     pendingDrawType: null,
+    drawnCardId: null,
   };
 
   // If the first card is a Draw Two, open a draw chain that the first player must
@@ -197,6 +198,12 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
     throw new Error('It is not your turn');
   }
 
+  // Defensive: the player already drew this turn and is in the play-or-pass
+  // decision window. They can't draw again — they must play the drawn card or pass.
+  if (state.drawnCardId) {
+    throw new Error('You already drew a card. Play it or pass.');
+  }
+
   const currentIndex = players.findIndex(p => p.id === playerId);
 
   // Active draw chain: the player chose not to (or cannot) stack, so they "eat"
@@ -216,13 +223,60 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
     return state;
   }
 
-  // Normal draw: take a single card and pass the turn.
+  // Normal draw: take a single card.
+  const handBefore = state.hands[playerId].length;
   drawCardsHelper(state, 1, playerId);
+  const hand = state.hands[playerId];
+  const drawnCard = hand.length > handBefore ? hand[hand.length - 1] : null;
 
+  const topCard = state.discardPile[state.discardPile.length - 1];
+
+  // "Draw then play" house rule: after drawing, if the player now holds ANY
+  // playable card — the freshly drawn one OR a card they were holding back — the
+  // turn does NOT pass. They may play any valid card or choose to pass. The drawn
+  // card's id is kept only so the UI can highlight what was just drawn.
+  const hasPlayable = hand.some((c) => isValidMove(c, topCard, state.wildColor, null));
+  if (drawnCard && hasPlayable) {
+    state.drawnCardId = drawnCard.id;
+    state.lastAction = { type: 'draw', playerId, drawCount: 1 };
+    logger.debug(`[DRAW] ${playerId} drew and now has a playable card — awaiting play-or-pass.`);
+    return state;
+  }
+
+  // Nothing playable (or the deck was exhausted) — pass the turn.
+  state.drawnCardId = null;
   const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
   state.currentPlayerId = players[nextIndex].id;
 
-  state.lastAction = { type: 'draw', playerId, drawCount: 1 };
+  state.lastAction = { type: 'draw', playerId, drawCount: drawnCard ? 1 : 0 };
+
+  return state;
+};
+
+/**
+ * Pass the turn after drawing a playable card. This is only valid while a
+ * draw-then-play decision is open (drawnCardId set): the player has chosen to
+ * keep the drawn card rather than play it, so the turn advances to the next seat.
+ */
+export const passTurnAction = (state: UnoGameState, players: Player[], playerId: string): UnoGameState => {
+  if (state.status !== 'playing') {
+    throw new Error('Game is not in active playing status');
+  }
+  if (state.currentPlayerId !== playerId) {
+    throw new Error('It is not your turn');
+  }
+  if (!state.drawnCardId) {
+    throw new Error('You can only pass after drawing a playable card');
+  }
+
+  state.drawnCardId = null;
+
+  const currentIndex = players.findIndex(p => p.id === playerId);
+  const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
+  state.currentPlayerId = players[nextIndex].id;
+
+  state.lastAction = { type: 'pass', playerId };
+  logger.debug(`[PASS] ${playerId} kept their drawn card and passed the turn.`);
 
   return state;
 };
@@ -253,6 +307,10 @@ export const playCardAction = (
   const card = playerHand[cardIndex];
   const topCard = state.discardPile[state.discardPile.length - 1];
 
+  // Note: during a draw-then-play decision (drawnCardId set) the player may play
+  // ANY valid card from their hand, not just the one they drew. Normal move
+  // validation below is the only gate; playing simply clears the decision.
+
   if (!isValidMove(card, topCard, state.wildColor, state.pendingDrawType)) {
     if (state.pendingDrawType === 'wild_draw_four' && card.value === 'draw_two') {
       throw new Error('You cannot stack a +2 on a +4. Draw the cards or play another +4.');
@@ -266,6 +324,9 @@ export const playCardAction = (
   // Remove card from hand and push to discard pile
   playerHand.splice(cardIndex, 1);
   state.discardPile.push(card);
+
+  // The play resolves any open draw-then-play decision.
+  state.drawnCardId = null;
 
   logger.debug(`[PLAY CARD] DISCARD PILE LENGTH: ${state.discardPile.length}`);
   logger.debug(`[PLAY CARD] TOP CARD:`, card);

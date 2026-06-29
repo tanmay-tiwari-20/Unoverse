@@ -19,9 +19,15 @@ export interface UnoGameState {
   // no chain is active.
   drawStack: number;
   pendingDrawType: 'draw_two' | 'wild_draw_four' | null;
+  // After a normal draw, if the drawn card is immediately playable the turn is NOT
+  // passed — instead the player gets to decide whether to play that specific card
+  // or pass. drawnCardId holds the id of that just-drawn, still-playable card while
+  // the engine waits for that decision; it's null whenever no such decision is
+  // pending. Only this card may be played during the decision window.
+  drawnCardId: string | null;
   turnDeadline?: number | null; // epoch ms when the current turn auto-resolves (null = no timer)
   lastAction?: {
-    type: 'play' | 'draw';
+    type: 'play' | 'draw' | 'pass';
     playerId: string;
     card?: CardItem;
     unoPenalty?: boolean; // true when a play triggered the automatic +4 UNO penalty

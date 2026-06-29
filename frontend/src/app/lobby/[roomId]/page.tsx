@@ -249,15 +249,16 @@ export default function LobbyPage() {
   const roomId = params?.roomId as string;
   const name = searchParams?.get('name');
 
-  const { 
-    socket, 
-    joinRoom, 
-    leaveRoom, 
-    startGame, 
-    playCard, 
-    chooseColor, 
+  const {
+    socket,
+    joinRoom,
+    leaveRoom,
+    startGame,
+    playCard,
+    chooseColor,
     callUno,
-    drawCard
+    drawCard,
+    passTurn
   } = useSocket();
 
   const { 
@@ -279,6 +280,7 @@ export default function LobbyPage() {
     unoCalled,
     drawStack,
     pendingDrawType,
+    drawnCardId,
     clearAllCards,
     isProcessing,
     setIsProcessing,
@@ -667,6 +669,32 @@ export default function LobbyPage() {
                 >
                   <Siren size={18} /> CALL UNO!
                 </motion.button>
+              )}
+
+              {/* Draw-then-play decision — the player drew and now has a playable
+                  card. They may play any valid card (the drawn one is highlighted)
+                  or keep it and pass. */}
+              {isMyTurn && drawnCardId && !isSpectator && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className="mt-1.5 flex flex-col items-center gap-1.5"
+                >
+                  <span className="font-arcade text-xs bg-gradient-to-b from-amber-400 to-orange-600 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide inline-flex items-center gap-1.5">
+                    <Star size={14} className="fill-white" /> Play a card or keep it!
+                  </span>
+                  <motion.button
+                    disabled={isProcessing}
+                    whileTap={{ scale: 0.92, y: 4 }}
+                    onClick={() => {
+                      setIsProcessing(true);
+                      passTurn();
+                    }}
+                    className="btn-arcade text-white uppercase inline-flex items-center gap-1.5 px-6 py-2 text-sm bg-gradient-to-b from-slate-500 to-slate-700 disabled:cursor-not-allowed"
+                  >
+                    Keep & Pass
+                  </motion.button>
+                </motion.div>
               )}
             </div>
           </div>

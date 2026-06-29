@@ -18,6 +18,7 @@ import {
   playCardAction,
   chooseColorAction,
   callUnoAction,
+  passTurnAction,
 } from '../actions';
 import { Player } from '../../rooms/roomManager';
 
@@ -60,6 +61,8 @@ let unoCalledCount = 0;
 let unoPenaltyCount = 0;
 let stackedCount = 0;
 let ateStackCount = 0;
+let drewAndPlayedCount = 0;
+let drewAndPassedCount = 0;
 let invalidMovesRejected = 0;
 let totalTurns = 0;
 let failedTests: string[] = [];
@@ -205,12 +208,15 @@ function runSimulation(): void {
       // ── Post-play assertions per card type ──
       if (playable.value === 'reverse') {
         reverseCount++;
-        // In a 2-player game, reverse acts like skip (current player keeps turn)
-        assert(
-          state.direction !== prevDirection,
-          `Direction should flip after reverse (was ${prevDirection}, now ${state.direction})`
-        );
+        // A reverse played as the winning last card ends the game before the
+        // direction flip is applied (playCardAction returns early on a win), so
+        // only assert the flip/turn effects while the game is still in progress.
         if (state.status !== 'ended') {
+          // In a 2-player game, reverse acts like skip (current player keeps turn)
+          assert(
+            state.direction !== prevDirection,
+            `Direction should flip after reverse (was ${prevDirection}, now ${state.direction})`
+          );
           // 2-player: reverse gives the same player another turn
           assert(
             state.currentPlayerId === currentId,
@@ -309,15 +315,60 @@ function runSimulation(): void {
         break;
       }
     } else {
-      // ── No valid card → draw ──
+      // ── No valid card → draw one ──
       const prevPlayerId = state.currentPlayerId;
+      const handBefore = state.hands[currentId].length;
       state = drawCardAction(state, players, currentId);
 
-      // Turn should advance after drawing
-      assert(
-        state.currentPlayerId !== prevPlayerId,
-        'Turn should advance after drawing a card'
-      );
+      if (state.drawnCardId) {
+        // Draw-then-play rule: the player now holds at least one playable card, so
+        // the turn must NOT have advanced — they may play any valid card or pass.
+        assert(
+          state.currentPlayerId === prevPlayerId,
+          'Drawing into a playable hand should keep the turn with the same player'
+        );
+        const top = state.discardPile[state.discardPile.length - 1];
+        const playableNow = state.hands[currentId].find((c) =>
+          isValidMove(c, top, state.wildColor, state.pendingDrawType)
+        );
+        assert(
+          !!playableNow,
+          'drawnCardId should only be set when the player has a playable card'
+        );
+
+        if (Math.random() > 0.5) {
+          // Play any valid card (may be the drawn card or one held back). The loop's
+          // top handles any subsequent wild color step.
+          drewAndPlayedCount++;
+          state = playCardAction(state, players, currentId, playableNow!.id);
+          assert(
+            state.drawnCardId === null,
+            'Playing a card should clear the draw-then-play decision'
+          );
+        } else {
+          // Keep the drawn card and pass.
+          drewAndPassedCount++;
+          state = passTurnAction(state, players, currentId);
+          assert(
+            state.currentPlayerId !== prevPlayerId,
+            'Passing after a drawn playable card should advance the turn'
+          );
+          assert(
+            state.drawnCardId === null,
+            'Passing should clear the draw-then-play decision'
+          );
+        }
+      } else {
+        // Drawn card was not playable → the turn advances automatically.
+        assert(
+          state.hands[currentId].length === handBefore + 1 || state.deck.length === 0,
+          'A normal draw should add one card (unless the deck is exhausted)'
+        );
+        assert(
+          state.currentPlayerId !== prevPlayerId,
+          'Turn should advance after drawing an unplayable card'
+        );
+      }
     }
   }
 
@@ -357,6 +408,10 @@ ${unoPenaltyCount > 0 ? '✅' : '⚠️'} Auto +4 penalty applied: ${unoPenaltyC
 DRAW STACK VERIFICATION:
 ${stackedCount > 0 ? '✅' : '⚠️'} Draw cards stacked: ${stackedCount} times
 ${ateStackCount > 0 ? '✅' : '⚠️'} Draw stacks eaten: ${ateStackCount} times
+
+DRAW-THEN-PLAY VERIFICATION:
+${drewAndPlayedCount > 0 ? '✅' : '⚠️'} Drew a playable card and played it: ${drewAndPlayedCount} times
+${drewAndPassedCount > 0 ? '✅' : '⚠️'} Drew a playable card and passed: ${drewAndPassedCount} times
 
 WIN SYSTEM VERIFICATION:
 ${gameEnded ? '✅' : '⚠️'} Game ended: ${gameEnded ? 'yes' : 'no'}

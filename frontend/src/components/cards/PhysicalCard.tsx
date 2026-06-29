@@ -1,5 +1,5 @@
 import React, { useRef, useMemo, useLayoutEffect, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 export interface PhysicalCardProps {
@@ -58,84 +58,171 @@ const getCardCanvases = (color: string, value: string) => {
     return canvasCache[cacheKey];
   }
 
-  // Front canvas
+  // Hi-res face for crisp text/edges even when viewed at oblique angles.
+  const W = 512;
+  const H = 760;
+
+  const colorMap: Record<string, string> = {
+    red: '#ef4444',    // Tailwind red-500
+    blue: '#3b82f6',   // Tailwind blue-500
+    green: '#22c55e',  // Tailwind green-500
+    yellow: '#eab308', // Tailwind yellow-500
+    wild: '#171717',   // Tailwind neutral-900
+  };
+
+  // Convert an internal value to its UNO glyph.
+  const toGlyph = (v: string): string => {
+    if (v === 'draw_two') return '+2';
+    if (v === 'wild_draw_four') return '+4';
+    if (v === 'skip') return '⊘';
+    if (v === 'reverse') return '⇄';
+    if (v === 'wild') return 'W';
+    return v;
+  };
+
+  // Rounded-rect path helper.
+  const roundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
+  // Draw a tilted white center oval with the value drawn inside it.
+  const drawCenterOval = (ctx: CanvasRenderingContext2D, body: string, glyph: string, isWild: boolean) => {
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(-Math.PI / 12); // -15deg tilt, matching the HTML hand card
+
+    // White oval badge
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, W * 0.34, H * 0.30, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // For a Wild card, fill the oval with the 4 quadrant colours.
+    if (isWild) {
+      const quad = [
+        { c: '#ef4444', s: Math.PI * 1.5, e: Math.PI * 2.0 }, // red
+        { c: '#3b82f6', s: 0,            e: Math.PI * 0.5 }, // blue
+        { c: '#eab308', s: Math.PI * 0.5, e: Math.PI * 1.0 }, // yellow
+        { c: '#22c55e', s: Math.PI * 1.0, e: Math.PI * 1.5 }, // green
+      ];
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(0, 0, W * 0.30, H * 0.265, 0, 0, Math.PI * 2);
+      ctx.clip();
+      quad.forEach(({ c, s, e }) => {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, W * 0.5, s, e);
+        ctx.closePath();
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    // Center value glyph
+    ctx.fillStyle = isWild ? '#ffffff' : body;
+    ctx.font = `900 ${glyph.length > 1 ? 150 : 200}px "Arial Black", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (isWild) {
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.strokeText(glyph, 0, 8);
+    }
+    ctx.fillText(glyph, 0, 8);
+    ctx.restore();
+  };
+
+  // Draw a small corner index (top-left, and rotated bottom-right).
+  const drawCornerIndices = (ctx: CanvasRenderingContext2D, glyph: string) => {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `900 ${glyph.length > 1 ? 64 : 78}px "Arial Black", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = 'rgba(0,0,0,0.35)';
+    ctx.shadowBlur = 6;
+    ctx.fillText(glyph, 38, 32);
+
+    ctx.save();
+    ctx.translate(W - 38, H - 32);
+    ctx.rotate(Math.PI);
+    ctx.fillText(glyph, 0, 0);
+    ctx.restore();
+    ctx.shadowBlur = 0;
+  };
+
+  const glyph = toGlyph(value);
+  const body = colorMap[color] || '#ffffff';
+  const isWild = color === 'wild';
+
+  // ── Front canvas ──
   const frontCanvas = document.createElement('canvas');
-  frontCanvas.width = 256;
-  frontCanvas.height = 380;
+  frontCanvas.width = W;
+  frontCanvas.height = H;
   const fctx = frontCanvas.getContext('2d');
   if (fctx) {
-    const colorMap: Record<string, string> = {
-      red: '#ef4444',    // Tailwind red-500
-      blue: '#3b82f6',   // Tailwind blue-500
-      green: '#22c55e',  // Tailwind green-500
-      yellow: '#eab308', // Tailwind yellow-500
-      wild: '#171717',   // Tailwind neutral-900
-    };
-    
+    // White rounded card stock
     fctx.fillStyle = '#ffffff';
-    fctx.fillRect(0, 0, 256, 380);
-
-    fctx.fillStyle = colorMap[color] || '#ffffff';
-    fctx.fillRect(10, 10, 236, 360);
-
-    fctx.fillStyle = '#ffffff';
-    fctx.beginPath();
-    fctx.ellipse(128, 190, 90, 140, 0, 0, 2 * Math.PI);
+    roundRect(fctx, 0, 0, W, H, 56);
     fctx.fill();
 
-    fctx.fillStyle = color === 'wild' ? '#000000' : (colorMap[color] || '#000000');
-    fctx.font = 'bold 80px sans-serif';
-    fctx.textAlign = 'center';
-    fctx.textBaseline = 'middle';
-    
-    let displayVal = value;
-    if (value === 'draw_two') displayVal = '+2';
-    if (value === 'wild_draw_four') displayVal = '+4';
-    if (value === 'skip') displayVal = '⊘';
-    if (value === 'reverse') displayVal = '⇄';
-    if (value === 'wild') displayVal = 'W';
+    // Colored body inset
+    fctx.fillStyle = body;
+    roundRect(fctx, 22, 22, W - 44, H - 44, 42);
+    fctx.fill();
 
-    fctx.fillText(displayVal, 128, 190);
+    // Subtle inner border highlight
+    fctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    fctx.lineWidth = 4;
+    roundRect(fctx, 22, 22, W - 44, H - 44, 42);
+    fctx.stroke();
 
-    fctx.font = 'bold 40px sans-serif';
-    fctx.fillStyle = '#ffffff';
-    fctx.fillText(displayVal, 40, 50);
-    
-    fctx.save();
-    fctx.translate(216, 330);
-    fctx.rotate(Math.PI);
-    fctx.fillText(displayVal, 0, 0);
-    fctx.restore();
+    drawCenterOval(fctx, body, glyph, isWild);
+    drawCornerIndices(fctx, glyph);
   }
 
-  // Back canvas
+  // ── Back canvas ──
   const backCanvas = document.createElement('canvas');
-  backCanvas.width = 256;
-  backCanvas.height = 380;
+  backCanvas.width = W;
+  backCanvas.height = H;
   const bctx = backCanvas.getContext('2d');
   if (bctx) {
     bctx.fillStyle = '#ffffff';
-    bctx.fillRect(0, 0, 256, 380);
-
-    bctx.fillStyle = '#111111';
-    bctx.fillRect(10, 10, 236, 360);
-
-    bctx.fillStyle = '#cc0000';
-    bctx.beginPath();
-    bctx.ellipse(128, 190, 90, 140, 0, 0, 2 * Math.PI);
+    roundRect(bctx, 0, 0, W, H, 56);
     bctx.fill();
 
+    bctx.fillStyle = '#111111';
+    roundRect(bctx, 22, 22, W - 44, H - 44, 42);
+    bctx.fill();
+
+    // Red center ellipse
+    bctx.fillStyle = '#cc0000';
+    bctx.save();
+    bctx.translate(W / 2, H / 2);
+    bctx.rotate(-Math.PI / 12);
+    bctx.beginPath();
+    bctx.ellipse(0, 0, W * 0.36, H * 0.30, 0, 0, Math.PI * 2);
+    bctx.fill();
+
+    // UNO wordmark
     bctx.fillStyle = '#ffe200';
-    bctx.font = 'bold 60px sans-serif';
+    bctx.font = '900 120px "Arial Black", sans-serif';
     bctx.textAlign = 'center';
     bctx.textBaseline = 'middle';
-    bctx.save();
-    bctx.translate(128, 190);
-    bctx.rotate(-Math.PI / 4);
-    bctx.fillText('UNO', 0, 0);
+    bctx.lineWidth = 10;
+    bctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    bctx.strokeText('UNO', 0, 6);
+    bctx.fillText('UNO', 0, 6);
     bctx.restore();
   }
-  
+
   const canvases = { front: frontCanvas, back: backCanvas };
   canvasCache[cacheKey] = canvases;
   return canvases;
@@ -155,6 +242,8 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
   const targetPos = useMemo(() => new THREE.Vector3(...position), [position]);
   const currentPos = useRef(new THREE.Vector3(...position));
   const isMounted = useRef(false);
+  const { gl } = useThree();
+  const maxAnisotropy = useMemo(() => gl.capabilities.getMaxAnisotropy(), [gl]);
 
   useLayoutEffect(() => {
     if (meshRef.current) {
@@ -187,12 +276,16 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
     frontTex.colorSpace = THREE.SRGBColorSpace;
     frontTex.generateMipmaps = true;
     frontTex.minFilter = THREE.LinearMipmapLinearFilter;
+    frontTex.magFilter = THREE.LinearFilter;
+    frontTex.anisotropy = maxAnisotropy; // Keep face crisp at grazing angles
     frontTex.needsUpdate = true; // Ensure it updates if newly created
 
     const backTex = new THREE.CanvasTexture(back);
     backTex.colorSpace = THREE.SRGBColorSpace;
     backTex.generateMipmaps = true;
     backTex.minFilter = THREE.LinearMipmapLinearFilter;
+    backTex.magFilter = THREE.LinearFilter;
+    backTex.anisotropy = maxAnisotropy;
     backTex.needsUpdate = true;
 
     const bumpMap = getSharedBumpMap();
@@ -222,7 +315,7 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
       edgeMaterial,  // +z
       edgeMaterial,  // -z
     ];
-  }, [color, value]);
+  }, [color, value, blankFace, maxAnisotropy]);
 
   const [hovered, setHovered] = useState(false);
 

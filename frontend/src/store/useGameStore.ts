@@ -32,6 +32,7 @@ interface GameState {
   unoCalled: Record<string, boolean>; // socketId -> boolean
   drawStack: number; // accumulated +2/+4 cards the next player must stack or draw
   pendingDrawType: 'draw_two' | 'wild_draw_four' | null; // top of an active draw chain
+  drawnCardId: string | null; // id of a just-drawn, still-playable card awaiting a play-or-pass decision
   turnDeadline: number | null; // epoch ms when the active turn auto-resolves on the server
   gameStoppedNotice: boolean; // true when a game was just stopped due to too few players
   isSpectator: boolean;
@@ -83,6 +84,7 @@ interface GameState {
     unoCalled: Record<string, boolean>;
     drawStack?: number;
     pendingDrawType?: 'draw_two' | 'wild_draw_four' | null;
+    drawnCardId?: string | null;
     turnDeadline?: number | null;
   }) => void;
   
@@ -116,6 +118,7 @@ export const useGameStore = create<GameState>((set) => ({
   unoCalled: {},
   drawStack: 0,
   pendingDrawType: null,
+  drawnCardId: null,
   turnDeadline: null,
   gameStoppedNotice: false,
   isSpectator: false,
@@ -203,6 +206,7 @@ export const useGameStore = create<GameState>((set) => ({
     unoCalled: {},
     drawStack: 0,
     pendingDrawType: null,
+    drawnCardId: null,
     turnDeadline: null,
     gameStoppedNotice: false,
   }),
@@ -224,6 +228,7 @@ export const useGameStore = create<GameState>((set) => ({
       unoCalled: payload.unoCalled,
       drawStack: payload.drawStack ?? 0,
       pendingDrawType: payload.pendingDrawType ?? null,
+      drawnCardId: payload.drawnCardId ?? null,
       turnDeadline: payload.turnDeadline ?? null,
       gameStoppedNotice: false,
       isProcessing: false,
@@ -255,6 +260,7 @@ export const useGameStore = create<GameState>((set) => ({
     unoCalled: {},
     drawStack: 0,
     pendingDrawType: null,
+    drawnCardId: null,
     turnDeadline: null,
     gameStoppedNotice: false,
   }),
