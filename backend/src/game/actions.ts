@@ -170,13 +170,17 @@ export const startGameState = (players: Player[]): UnoGameState => {
     colorChooserId: null,
     winnerId: null,
     unoCalled,
+    drawStack: 0,
+    pendingDrawType: null,
   };
 
-  // If first card was a draw two, apply card drawing to starting player and skip their turn
+  // If the first card is a Draw Two, open a draw chain that the first player must
+  // respond to (stack another draw card or draw the pending cards). This keeps
+  // the opening consistent with the in-game stacking rule.
   if (startingCard.value === 'draw_two') {
-    drawCardsHelper(state, 2, players[0].id);
-    const nextIdx = getNextPlayerIndex(0, direction, players.length, 2);
-    state.currentPlayerId = players[nextIdx].id;
+    state.drawStack = 2;
+    state.pendingDrawType = 'draw_two';
+    state.currentPlayerId = players[0].id;
   }
 
   return state;
@@ -193,15 +197,32 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
     throw new Error('It is not your turn');
   }
 
-  // Draw 1 card
+  const currentIndex = players.findIndex(p => p.id === playerId);
+
+  // Active draw chain: the player chose not to (or cannot) stack, so they "eat"
+  // the entire accumulated stack and forfeit their turn.
+  if (state.pendingDrawType && state.drawStack > 0) {
+    const penalty = state.drawStack;
+    drawCardsHelper(state, penalty, playerId);
+    state.drawStack = 0;
+    state.pendingDrawType = null;
+
+    state.lastAction = { type: 'draw', playerId, drawCount: penalty };
+
+    // The player who eats the chain is skipped (advance by 1 past them).
+    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
+    state.currentPlayerId = players[nextIndex].id;
+    logger.debug(`[DRAW CHAIN] ${playerId} ate ${penalty} cards and was skipped.`);
+    return state;
+  }
+
+  // Normal draw: take a single card and pass the turn.
   drawCardsHelper(state, 1, playerId);
 
-  // Advance turn
-  const currentIndex = players.findIndex(p => p.id === playerId);
   const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
   state.currentPlayerId = players[nextIndex].id;
 
-  state.lastAction = { type: 'draw', playerId };
+  state.lastAction = { type: 'draw', playerId, drawCount: 1 };
 
   return state;
 };
@@ -232,7 +253,13 @@ export const playCardAction = (
   const card = playerHand[cardIndex];
   const topCard = state.discardPile[state.discardPile.length - 1];
 
-  if (!isValidMove(card, topCard, state.wildColor)) {
+  if (!isValidMove(card, topCard, state.wildColor, state.pendingDrawType)) {
+    if (state.pendingDrawType === 'wild_draw_four' && card.value === 'draw_two') {
+      throw new Error('You cannot stack a +2 on a +4. Draw the cards or play another +4.');
+    }
+    if (state.pendingDrawType) {
+      throw new Error('There is a pending draw stack. Stack a draw card or draw the cards.');
+    }
     throw new Error('Invalid move. Card does not match color or value.');
   }
 
@@ -267,10 +294,25 @@ export const playCardAction = (
   // Handle Card Effects
   const currentIndex = players.findIndex(p => p.id === playerId);
 
-  if (card.color === 'wild') {
-    // Await color selection - do not advance turn yet
+  if (card.value === 'wild_draw_four') {
+    // +4 extends (or starts) the draw chain. We still need a color, so the chain
+    // total is banked now and resolution waits until after color selection passes
+    // the turn to the next player (who may stack or eat).
+    state.drawStack += 4;
+    state.pendingDrawType = 'wild_draw_four';
     state.status = 'awaiting_color_selection';
     state.colorChooserId = playerId;
+  } else if (card.color === 'wild') {
+    // Plain Wild: await color selection - do not advance turn yet
+    state.status = 'awaiting_color_selection';
+    state.colorChooserId = playerId;
+  } else if (card.value === 'draw_two') {
+    // +2 extends (or starts) the draw chain, then passes the turn to the next
+    // player who must stack another draw card or eat the accumulated stack.
+    state.drawStack += 2;
+    state.pendingDrawType = 'draw_two';
+    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
+    state.currentPlayerId = players[nextIndex].id;
   } else {
     let skipCount = 1;
 
@@ -279,11 +321,6 @@ export const playCardAction = (
     } else if (card.value === 'reverse') {
       state.direction = state.direction === 'clockwise' ? 'counter-clockwise' : 'clockwise';
       skipCount = players.length === 2 ? 2 : 1;
-    } else if (card.value === 'draw_two') {
-      const nextPlayerIdx = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-      const nextPlayerId = players[nextPlayerIdx].id;
-      drawCardsHelper(state, 2, nextPlayerId);
-      skipCount = 2;
     }
 
     // Advance turn
@@ -322,18 +359,18 @@ export const chooseColorAction = (
   // Retrieve top card (Wild / Wild Draw Four)
   const topCard = state.discardPile[state.discardPile.length - 1];
   const currentIndex = players.findIndex(p => p.id === playerId);
-  let skipCount = 1;
 
   if (topCard.value === 'wild_draw_four') {
-    // Next player draws 4 cards and is skipped
-    const nextPlayerIdx = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-    const nextPlayerId = players[nextPlayerIdx].id;
-    drawCardsHelper(state, 4, nextPlayerId);
-    skipCount = 2;
+    // The +4's cards were already banked into the draw chain when it was played.
+    // Just pass the turn to the next player, who may stack another +4 or eat the
+    // accumulated stack.
+    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
+    state.currentPlayerId = players[nextIndex].id;
+    return state;
   }
 
-  // Advance turn
-  const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, skipCount);
+  // Plain Wild: advance one seat normally.
+  const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
   state.currentPlayerId = players[nextIndex].id;
 
   return state;

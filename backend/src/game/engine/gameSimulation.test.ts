@@ -12,7 +12,6 @@
 import { CardColor, CardItem } from '../deck';
 import { UnoGameState } from '../gameState';
 import { isValidMove } from '../rules';
-import { getNextPlayerIndex } from '../turnManager';
 import {
   startGameState,
   drawCardAction,
@@ -59,6 +58,8 @@ let wildCount = 0;
 let wildDrawFourCount = 0;
 let unoCalledCount = 0;
 let unoPenaltyCount = 0;
+let stackedCount = 0;
+let ateStackCount = 0;
 let invalidMovesRejected = 0;
 let totalTurns = 0;
 let failedTests: string[] = [];
@@ -72,7 +73,7 @@ function verifyInvalidMoveRejection(state: UnoGameState): void {
 
   // Find a card in hand that is NOT a valid play (if any)
   const invalidCard = hand.find(
-    (c) => !isValidMove(c, topCard, state.wildColor)
+    (c) => !isValidMove(c, topCard, state.wildColor, state.pendingDrawType)
   );
 
   if (invalidCard) {
@@ -133,20 +134,59 @@ function runSimulation(): void {
       verifyInvalidMoveRejection(state);
     }
 
+    // ── Active draw chain: must stack a legal draw card or eat the stack ──
+    if (state.pendingDrawType) {
+      const stackCard = hand.find((c) =>
+        isValidMove(c, topCard, state.wildColor, state.pendingDrawType)
+      );
+      const stackBefore = state.drawStack;
+
+      if (stackCard && Math.random() > 0.4) {
+        // Stack it — the accumulated total must grow by this card's value.
+        const expectedAdd = stackCard.value === 'wild_draw_four' ? 4 : 2;
+        state = playCardAction(state, players, currentId, stackCard.id);
+        stackedCount++;
+        if (stackCard.value === 'draw_two') drawTwoCount++;
+        else wildDrawFourCount++;
+
+        if (state.status === 'awaiting_color_selection') {
+          // +4 stack still needs a color; the chain total is already banked.
+          assert(
+            state.drawStack === stackBefore + 4,
+            `Stacking +4 should grow stack by 4 (was ${stackBefore}, now ${state.drawStack})`
+          );
+          state = chooseColorAction(state, players, state.colorChooserId!, randomColor());
+        } else {
+          assert(
+            state.drawStack === stackBefore + expectedAdd,
+            `Stacking should grow draw stack by ${expectedAdd} (was ${stackBefore}, now ${state.drawStack})`
+          );
+        }
+      } else {
+        // Eat the whole stack and get skipped.
+        const handBefore = hand.length;
+        state = drawCardAction(state, players, currentId);
+        ateStackCount++;
+        assert(
+          state.hands[currentId].length === handBefore + stackBefore,
+          `Eating the chain should add ${stackBefore} cards (was ${handBefore}, now ${state.hands[currentId].length})`
+        );
+        assert(
+          state.drawStack === 0 && state.pendingDrawType === null,
+          'Draw chain should reset after being eaten'
+        );
+      }
+
+      if (state.status === 'ended') break;
+      continue;
+    }
+
     // ── Find a playable card ──
-    const playable = hand.find((c) => isValidMove(c, topCard, state.wildColor));
+    const playable = hand.find((c) => isValidMove(c, topCard, state.wildColor, state.pendingDrawType));
 
     if (playable) {
       // ── Snapshot before playing ──
       const prevDirection = state.direction;
-      const nextPlayerIdx = getNextPlayerIndex(
-        players.findIndex((p) => p.id === currentId),
-        state.direction,
-        players.length,
-        1
-      );
-      const nextPlayerId = players[nextPlayerIdx].id;
-      const nextPlayerHandBefore = state.hands[nextPlayerId].length;
 
       // ── Pre-play UNO declaration ──
       // Under the auto-penalty rule, UNO must be declared while still holding 2
@@ -189,16 +229,15 @@ function runSimulation(): void {
       } else if (playable.value === 'draw_two') {
         drawTwoCount++;
         if (state.status !== 'ended') {
-          // Next player's hand should have grown by 2
-          const nextPlayerHandAfter = state.hands[nextPlayerId].length;
+          // A fresh +2 opens a chain: stack banked, turn PASSES to the next player
+          // (who must stack or eat). No immediate draw under the stacking rule.
           assert(
-            nextPlayerHandAfter === nextPlayerHandBefore + 2,
-            `draw_two: opponent hand should grow by 2 (was ${nextPlayerHandBefore}, now ${nextPlayerHandAfter})`
+            state.drawStack === 2 && state.pendingDrawType === 'draw_two',
+            `draw_two should open a chain of 2 (stack=${state.drawStack}, type=${state.pendingDrawType})`
           );
-          // 2-player: current player keeps turn
           assert(
-            state.currentPlayerId === currentId,
-            'In 2-player, draw_two should give the same player another turn'
+            state.currentPlayerId !== currentId,
+            'A fresh +2 should pass the turn to the next player to respond'
           );
         }
       } else if (playable.value === 'wild') {
@@ -214,26 +253,15 @@ function runSimulation(): void {
           'awaiting_color_selection should only occur after a wild card'
         );
 
-        const chooser = state.colorChooserId!;
-        // Snapshot for WD4 check
-        const wd4NextIdx = getNextPlayerIndex(
-          players.findIndex((p) => p.id === chooser),
-          state.direction,
-          players.length,
-          1
-        );
-        const wd4NextId = players[wd4NextIdx].id;
-        const wd4HandBefore = state.hands[wd4NextId].length;
-
-        state = chooseColorAction(state, players, chooser, randomColor());
-
-        if (playable.value === 'wild_draw_four' && state.status !== 'ended') {
-          const wd4HandAfter = state.hands[wd4NextId].length;
+        if (playable.value === 'wild_draw_four') {
+          // +4 opens (or extends) a chain; the cards are banked, not drawn now.
           assert(
-            wd4HandAfter === wd4HandBefore + 4,
-            `wild_draw_four: opponent hand should grow by 4 (was ${wd4HandBefore}, now ${wd4HandAfter})`
+            state.drawStack === 4 && state.pendingDrawType === 'wild_draw_four',
+            `wild_draw_four should open a chain of 4 (stack=${state.drawStack}, type=${state.pendingDrawType})`
           );
         }
+
+        state = chooseColorAction(state, players, state.colorChooserId!, randomColor());
       }
 
       // ── Normal (non-action) card: turn should advance ──
@@ -325,6 +353,10 @@ ${wildDrawFourCount > 0 ? '✅' : '❌'} Wild Draw Four triggered: ${wildDrawFou
 UNO SYSTEM VERIFICATION:
 ${unoCalledCount > 0 ? '✅' : '⚠️'} UNO declared in time: ${unoCalledCount} times
 ${unoPenaltyCount > 0 ? '✅' : '⚠️'} Auto +4 penalty applied: ${unoPenaltyCount} times
+
+DRAW STACK VERIFICATION:
+${stackedCount > 0 ? '✅' : '⚠️'} Draw cards stacked: ${stackedCount} times
+${ateStackCount > 0 ? '✅' : '⚠️'} Draw stacks eaten: ${ateStackCount} times
 
 WIN SYSTEM VERIFICATION:
 ${gameEnded ? '✅' : '⚠️'} Game ended: ${gameEnded ? 'yes' : 'no'}

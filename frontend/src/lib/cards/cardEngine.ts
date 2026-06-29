@@ -122,14 +122,26 @@ export const generateRandomCard = (): CardItem => {
 
 /**
  * Validates whether a card can be played on top of the current discard card.
+ *
+ * When a draw chain is active (pendingDrawType set), normal matching is
+ * suspended and only legal stacks are allowed: +2 on +2, +4 on +2, +4 on +4 —
+ * but never +2 on +4. Mirrors the server-authoritative rule in backend/rules.ts.
  */
 export const isValidMove = (
   card: CardItem,
   topCard: CardItem | null,
-  wildColor: CardColor | null
+  wildColor: CardColor | null,
+  pendingDrawType: 'draw_two' | 'wild_draw_four' | null = null
 ): boolean => {
   if (!topCard) return true; // Safety fallback if discard pile is empty
-  
+
+  // 0. An active draw chain overrides everything: only legal stacks are allowed.
+  if (pendingDrawType) {
+    if (card.value === 'wild_draw_four') return true; // +4 stacks on anything
+    if (card.value === 'draw_two') return pendingDrawType === 'draw_two'; // +2 only on +2
+    return false;
+  }
+
   // 1. Wild cards are always valid to play
   if (card.color === 'wild') {
     return true;

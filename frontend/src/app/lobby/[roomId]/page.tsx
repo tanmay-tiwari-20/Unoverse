@@ -277,6 +277,8 @@ export default function LobbyPage() {
     winnerId,
     winnerName,
     unoCalled,
+    drawStack,
+    pendingDrawType,
     clearAllCards,
     isProcessing,
     setIsProcessing,
@@ -632,6 +634,21 @@ export default function LobbyPage() {
                   <TurnTimer className="text-[10px]" />
                 </span>
               ) : null}
+
+              {/* Pending Draw Stack banner — shown while a +2/+4 chain is live. The
+                  active player must stack a matching draw card or draw the total. */}
+              {gameStatus === 'playing' && (drawStack ?? 0) > 0 && pendingDrawType && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className="mt-1.5 font-arcade text-xs bg-gradient-to-b from-orange-500 to-red-700 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide inline-flex items-center gap-1.5"
+                >
+                  <Siren size={14} className="fill-white" />
+                  {isMyTurn
+                    ? `Stack a ${pendingDrawType === 'wild_draw_four' ? '+4' : '+2 / +4'} or draw ${drawStack}!`
+                    : `Draw stack building: +${drawStack}`}
+                </motion.div>
+              )}
 
               {/* Declare UNO Button — shown while holding exactly 2 cards. Declaring
                   now exempts you from the automatic +4 penalty that hits when a

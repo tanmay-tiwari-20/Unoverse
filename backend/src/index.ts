@@ -180,6 +180,8 @@ function broadcastGameState(code: string) {
       winnerId: game.winnerId,
       winnerName: winnerObj ? winnerObj.name : null,
       unoCalled: game.unoCalled,
+      drawStack: game.drawStack,
+      pendingDrawType: game.pendingDrawType,
       turnDeadline: game.turnDeadline ?? null,
       lastAction: game.lastAction,
     });
