@@ -11,6 +11,15 @@ export const useVoiceChat = () => {
   const localStreamRef = useRef<MediaStream | null>(null);
   const outgoingGainNodeRef = useRef<GainNode | null>(null);
   const peerConnectionsRef = useRef<{ [playerId: string]: RTCPeerConnection }>({});
+  // The audio sender for each peer. We create one sendrecv transceiver up front
+  // (track-less) so the audio m-line is negotiated in the very first offer/answer.
+  // Enabling/disabling the mic then just swaps the track via replaceTrack(), which
+  // needs NO renegotiation — the previous code relied on addTrack() after connect,
+  // which requires renegotiation that was never performed, so audio never flowed.
+  const audioSendersRef = useRef<{ [playerId: string]: RTCRtpSender }>({});
+  // ICE candidates that arrive before the remote description is set must be queued,
+  // otherwise addIceCandidate() throws and the candidate is lost (flaky connects).
+  const pendingCandidatesRef = useRef<{ [playerId: string]: RTCIceCandidateInit[] }>({});
   const audioElementsRef = useRef<{ [playerId: string]: HTMLAudioElement }>({});
   const audioContextRef = useRef<AudioContext | null>(null);
   const analysersRef = useRef<{ [playerId: string]: { analyser: AnalyserNode, dataArray: Uint8Array, interval: any } }>({});
@@ -31,6 +40,8 @@ export const useVoiceChat = () => {
       peerConnectionsRef.current[playerId].close();
       delete peerConnectionsRef.current[playerId];
     }
+    delete audioSendersRef.current[playerId];
+    delete pendingCandidatesRef.current[playerId];
     if (audioElementsRef.current[playerId]) {
       audioElementsRef.current[playerId].pause();
       audioElementsRef.current[playerId].srcObject = null;
@@ -71,22 +82,18 @@ export const useVoiceChat = () => {
         (processedStream as any).originalTracks = stream.getTracks();
         
         setMicEnabled(true);
-        
-        // Add track to all existing peers
-        Object.values(peerConnectionsRef.current).forEach(pc => {
-          processedStream.getTracks().forEach(track => {
-            const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
-            if (sender) {
-              sender.replaceTrack(track);
-            } else {
-              pc.addTrack(track, processedStream);
-            }
-          });
+
+        // Push the live mic track onto every peer's pre-created audio sender. This
+        // uses replaceTrack (no renegotiation required) since the sendrecv
+        // transceiver was already negotiated when the connection was built.
+        const micTrack = processedStream.getAudioTracks()[0] || null;
+        Object.values(audioSendersRef.current).forEach(sender => {
+          sender.replaceTrack(micTrack).catch(err => console.error('replaceTrack (enable) failed', err));
         });
 
         // Broadcast mic status change
         socket?.emit('voice-status', { isMuted: false });
-        
+
       } catch (err) {
         console.error('Failed to get microphone permissions', err);
         const { addToast } = useGameStore.getState();
@@ -105,14 +112,11 @@ export const useVoiceChat = () => {
         outgoingGainNodeRef.current = null;
       }
       setMicEnabled(false);
-      
-      // Stop sending track (replace with null)
-      Object.values(peerConnectionsRef.current).forEach(pc => {
-        pc.getSenders().forEach(sender => {
-          if (sender.track?.kind === 'audio') {
-            sender.replaceTrack(null);
-          }
-        });
+
+      // Stop sending audio by clearing the track on each sender (keeps the
+      // transceiver/connection alive so re-enabling is instant, no renegotiation).
+      Object.values(audioSendersRef.current).forEach(sender => {
+        sender.replaceTrack(null).catch(err => console.error('replaceTrack (disable) failed', err));
       });
 
       // Broadcast mic status change
@@ -133,11 +137,18 @@ export const useVoiceChat = () => {
       ]
     });
     peerConnectionsRef.current[targetId] = pc;
+    pendingCandidatesRef.current[targetId] = [];
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!);
-      });
+    // Always negotiate a bidirectional audio channel up front, even if the mic is
+    // currently off. The sender starts track-less; toggleMic later swaps the live
+    // track in via replaceTrack() WITHOUT renegotiation. This is the core fix:
+    // adding a track after the connection is established would require a fresh
+    // offer/answer that the previous implementation never performed.
+    const micTrack = localStreamRef.current?.getAudioTracks()[0] || null;
+    const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
+    audioSendersRef.current[targetId] = transceiver.sender;
+    if (micTrack) {
+      transceiver.sender.replaceTrack(micTrack).catch(err => console.error('initial replaceTrack failed', err));
     }
 
     pc.onicecandidate = (event) => {
@@ -173,16 +184,25 @@ export const useVoiceChat = () => {
       }
     };
 
-    if (initiator) {
-      pc.createOffer().then(offer => {
-        return pc.setLocalDescription(offer);
-      }).then(() => {
+    // Safety net: if anything ever does trigger renegotiation (e.g. a future
+    // track change), the initiator re-offers instead of silently stalling.
+    pc.onnegotiationneeded = async () => {
+      if (!initiator) return; // only the designated initiator drives renegotiation
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
         socket?.emit('webrtc-signal', {
           targetId,
           signalData: { type: 'offer', offer: pc.localDescription }
         });
-      }).catch(err => console.error("Error creating offer", err));
-    }
+      } catch (err) {
+        console.error('onnegotiationneeded offer failed', err);
+      }
+    };
+
+    // Note: we do NOT manually createOffer here. Adding the transceiver above
+    // triggers onnegotiationneeded on the initiator, which sends exactly one
+    // initial offer. Driving it from both places would cause offer glare.
 
     return pc;
   }, [socket, cleanupPeer]);
@@ -240,6 +260,19 @@ export const useVoiceChat = () => {
   useEffect(() => {
     if (!socket) return;
 
+    const flushPendingCandidates = async (peerId: string, pc: RTCPeerConnection) => {
+      const queued = pendingCandidatesRef.current[peerId];
+      if (!queued || queued.length === 0) return;
+      for (const cand of queued) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (err) {
+          console.error('Failed to apply queued ICE candidate', err);
+        }
+      }
+      pendingCandidatesRef.current[peerId] = [];
+    };
+
     const handleSignal = async ({ sourceId, signalData }: { sourceId: string; signalData: any }) => {
       let pc = peerConnectionsRef.current[sourceId];
       
@@ -252,6 +285,7 @@ export const useVoiceChat = () => {
       try {
         if (signalData.type === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
+          await flushPendingCandidates(sourceId, pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socket.emit('webrtc-signal', {
@@ -260,8 +294,15 @@ export const useVoiceChat = () => {
           });
         } else if (signalData.type === 'answer') {
           await pc.setRemoteDescription(new RTCSessionDescription(signalData.answer));
+          await flushPendingCandidates(sourceId, pc);
         } else if (signalData.type === 'ice-candidate') {
-          await pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
+          // Buffer candidates that arrive before the remote description exists;
+          // applying them too early throws and drops the candidate.
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            await pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
+          } else {
+            (pendingCandidatesRef.current[sourceId] ||= []).push(signalData.candidate);
+          }
         }
       } catch (err) {
         console.error("Error handling signal data", err);
