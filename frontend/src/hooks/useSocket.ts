@@ -71,7 +71,12 @@ export const useSocket = () => {
       
       // Play turn start chime if turn has shifted to a new player
       if (payload.currentPlayerId && payload.currentPlayerId !== state.currentPlayerId) {
-        soundManager.play('turn_start');
+        if (payload.currentPlayerId === state.player?.id) {
+          // Play a louder turn start chime when it's your turn
+          soundManager.play('turn_start', 2.5);
+        } else {
+          soundManager.play('turn_start', 1.0);
+        }
       }
 
       const localSeat = state.player?.seatNumber || 1;

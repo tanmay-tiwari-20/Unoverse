@@ -5,6 +5,9 @@ dist/
 !.env.example
 *.log
 
+# Local file-store persistence data
+.data/
+
 # Ad-hoc dev scratch scripts
 test-socket.js
 testClient.js

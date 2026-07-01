@@ -3,6 +3,7 @@ import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextPlayerIndex } from '../game/turnManager';
 import { logger } from '../utils/logger';
+import { RoomStore, MemoryRoomStore } from './roomStore';
 
 export interface Player {
   id: string; // Socket ID
@@ -32,6 +33,87 @@ class RoomManager {
   // Map key: `${roomCode}:${playerName}` -> NodeJS.Timeout
   private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
 
+  // Durable storage (write-through). Defaults to a no-op memory store so the
+  // manager works before a real store is injected (and in unit tests).
+  private store: RoomStore = new MemoryRoomStore();
+  // Coalesce bursts of synchronous mutations within one handler into a single
+  // async write per room, and swallow write errors so persistence can never
+  // crash gameplay. Codes queued here are flushed on the next microtask/tick.
+  private dirty: Set<string> = new Set();
+  private removed: Set<string> = new Set();
+  private flushScheduled = false;
+
+  /** Inject the durable store (called once at startup). */
+  public setStore(store: RoomStore): void {
+    this.store = store;
+  }
+
+  /**
+   * Rehydrate all persisted rooms into memory on startup. Any game that was in
+   * progress when the server stopped is restored; players reconnect with their
+   * name + secret and resume. Timers are NOT restored (they re-arm naturally on
+   * the next broadcast / grace period).
+   */
+  public async hydrate(): Promise<void> {
+    const rooms = await this.store.loadAll();
+    for (const room of rooms) {
+      this.rooms.set(room.code.toUpperCase(), room);
+    }
+    if (rooms.length) {
+      logger.info(`[STORE] Rehydrated ${rooms.length} room(s) from persistence.`);
+    }
+  }
+
+  /** Mark a room dirty so its latest snapshot is written on the next flush. */
+  public markDirty(code: string): void {
+    const upper = code.toUpperCase();
+    this.removed.delete(upper);
+    this.dirty.add(upper);
+    this.scheduleFlush();
+  }
+
+  private markRemoved(code: string): void {
+    const upper = code.toUpperCase();
+    this.dirty.delete(upper);
+    this.removed.add(upper);
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    // queueMicrotask lets a whole synchronous handler finish mutating before we
+    // serialize once, rather than writing after every field change.
+    queueMicrotask(() => this.flush());
+  }
+
+  private async flush(): Promise<void> {
+    this.flushScheduled = false;
+    const toSave = [...this.dirty];
+    const toRemove = [...this.removed];
+    this.dirty.clear();
+    this.removed.clear();
+
+    await Promise.all([
+      ...toSave.map(async (code) => {
+        const room = this.rooms.get(code);
+        if (!room) return; // deleted before flush
+        try {
+          await this.store.save(room);
+        } catch (err: any) {
+          logger.error(`[STORE] Failed to persist room ${code}:`, err?.message);
+        }
+      }),
+      ...toRemove.map(async (code) => {
+        try {
+          await this.store.remove(code);
+        } catch (err: any) {
+          logger.error(`[STORE] Failed to remove room ${code}:`, err?.message);
+        }
+      }),
+    ]);
+  }
+
   // Helper to generate a unique 6-digit room code
   private generateRoomCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -56,6 +138,7 @@ class RoomManager {
     };
     this.rooms.set(code, newRoom);
     logger.debug(`[ROOM_CREATED] Code: ${code}`);
+    this.markDirty(code);
     return newRoom;
   }
 
@@ -233,6 +316,7 @@ class RoomManager {
       logger.debug(`[PLAYER_RECONNECTED] Rebound name "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
       logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName} (Reconnected), Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${existingPlayerByName.seatNumber}`);
       logger.debug(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      this.markDirty(room.code);
       return { room, player: existingPlayerByName, isSpectator: false };
     }
 
@@ -250,6 +334,7 @@ class RoomManager {
         existingSpectatorByName.id = playerSocketId;
         logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
         logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+        this.markDirty(room.code);
         return { room, player: null, isSpectator: true };
       }
     }
@@ -269,6 +354,7 @@ class RoomManager {
       }
       logger.debug(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      this.markDirty(room.code);
       return { room, player: null, isSpectator: true };
     }
 
@@ -303,6 +389,7 @@ class RoomManager {
 
     logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${seatNumber}`);
     logger.debug(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+    this.markDirty(room.code);
     return { room, player: newPlayer, isSpectator: false };
   }
 
@@ -377,12 +464,14 @@ class RoomManager {
         if (room.players.length === 0 && (!room.spectators || room.spectators.length === 0)) {
           logger.debug(`[ROOM_DELETED] Code: ${code}`);
           this.rooms.delete(code);
+          this.markRemoved(code);
           return { room: null, leftPlayer, leftSpectator: null, gameStopped };
         }
 
         // Keep players sorted by seat number
         room.players.sort((a, b) => a.seatNumber - b.seatNumber);
 
+        this.markDirty(code);
         return { room, leftPlayer, leftSpectator: null, gameStopped };
       }
 
@@ -404,9 +493,11 @@ class RoomManager {
           if (room.players.length === 0 && room.spectators.length === 0) {
             logger.debug(`[ROOM_DELETED] Code: ${code}`);
             this.rooms.delete(code);
+            this.markRemoved(code);
             return { room: null, leftPlayer: null, leftSpectator, gameStopped: false };
           }
 
+          this.markDirty(code);
           return { room, leftPlayer: null, leftSpectator, gameStopped: false };
         }
       }
@@ -429,6 +520,7 @@ class RoomManager {
 
     room.status = 'playing';
     room.game = startGameState(room.players);
+    this.markDirty(code);
     return room;
   }
 }

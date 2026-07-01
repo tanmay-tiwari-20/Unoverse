@@ -6,32 +6,48 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { X, Bug, Keyboard, Info, Send, Layers } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 
-const ModalBase = ({ isOpen, onClose, title, icon: Icon, children }: any) => {
-  if (!isOpen) return null;
+interface ModalBaseProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  children: React.ReactNode;
+}
 
+const ModalBase = ({ isOpen, onClose, title, icon: Icon, children }: ModalBaseProps) => {
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col"
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20">
-          <h2 className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
-            <Icon size={20} className="text-white" /> {title}
-          </h2>
-          <button onClick={onClose} className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700">
-            <X size={16} />
-          </button>
-        </div>
-        <div className="p-6">
-          {children}
-        </div>
-      </motion.div>
-    </div>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col"
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20">
+              <h2 className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
+                <Icon size={20} className="text-white" /> {title}
+              </h2>
+              <button onClick={onClose} className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6">
+              {children}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
 
@@ -138,10 +154,10 @@ export const AboutModal = () => {
 
 export const HelpModals = () => {
   return (
-    <AnimatePresence>
+    <>
       <ReportBugModal />
       <ControlsModal />
       <AboutModal />
-    </AnimatePresence>
+    </>
   );
 };

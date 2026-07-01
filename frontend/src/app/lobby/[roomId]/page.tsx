@@ -33,7 +33,8 @@ import {
   Info,
   CheckCircle2,
   AlertTriangle,
-  Play
+  Play,
+  WifiOff
 } from 'lucide-react';
 import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
 import { PlayerNameplates } from '../../../components/table/PlayerNameplates';
@@ -437,6 +438,45 @@ export default function LobbyPage() {
       {/* Reactions Layer Overlay */}
       <ReactionsHandler />
 
+      {/* Connection Status Banner/Overlay */}
+      {connectionStatus !== 'connected' && (
+        <div className="absolute inset-0 z-[3000] flex flex-col items-center justify-center bg-black/75 backdrop-blur-md pointer-events-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-8 flex flex-col items-center gap-5 text-center max-w-sm"
+          >
+            <div className="relative flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 border-2 border-red-500/30 text-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+              <WifiOff size={28} className="animate-pulse" />
+              <motion.span
+                className="absolute inset-0 rounded-full border-2 border-red-500"
+                animate={{ scale: [1, 1.4, 1], opacity: [1, 0, 1] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
+              />
+            </div>
+            <div>
+              <h3 className="font-arcade text-xl uppercase tracking-wide text-red-500 arcade-stroke-sm">
+                Connection Lost
+              </h3>
+              <p className="font-rounded font-bold text-white/90 text-xs mt-2 leading-relaxed">
+                Attempting to reconnect to game server...
+              </p>
+              <p className="font-rounded text-[10px] text-slate-400 mt-1 font-mono uppercase">
+                Status: {connectionStatus.toUpperCase()}
+              </p>
+            </div>
+            {/* Chunky arcade progress indicator */}
+            <div className="w-40 h-2 bg-neutral-800 rounded-full overflow-hidden relative border-2 border-white/20">
+              <motion.div
+                animate={{ x: ['-100%', '250%'] }}
+                transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
+                className="absolute inset-y-0 w-1/3 bg-red-500 rounded-full shadow-[0_0_8px_#ef4444]"
+              />
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* Voice Chat Player Nameplates */}
       <PlayerNameplates />
 
@@ -687,7 +727,6 @@ export default function LobbyPage() {
                     disabled={isProcessing}
                     whileTap={{ scale: 0.92, y: 4 }}
                     onClick={() => {
-                      setIsProcessing(true);
                       passTurn();
                     }}
                     className="btn-arcade text-white uppercase inline-flex items-center gap-1.5 px-6 py-2 text-sm bg-gradient-to-b from-slate-500 to-slate-700 disabled:cursor-not-allowed"

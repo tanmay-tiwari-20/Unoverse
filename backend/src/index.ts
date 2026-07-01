@@ -3,9 +3,20 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { roomManager } from './rooms/roomManager';
+import { createRoomStore } from './rooms/roomStore';
 import { drawCardAction, playCardAction, chooseColorAction, callUnoAction, passTurnAction } from './game/actions';
 import { CardColor } from './game/deck';
 import { logger } from './utils/logger';
+import type { ZodType } from 'zod';
+import {
+  createRoomSchema,
+  joinRoomSchema,
+  sendReactionSchema,
+  webrtcSignalSchema,
+  voiceStatusSchema,
+  playCardSchema,
+  chooseColorSchema,
+} from './validation/socketSchemas';
 
 // Load environment variables from backend/.env if present (optional in dev).
 try {
@@ -206,6 +217,12 @@ function broadcastGameState(code: string) {
   if (activePlayer) {
     logger.debug(`[TURN_START] Player: ${activePlayer.name} (${game.currentPlayerId})`);
   }
+
+  // Persist the room after every game-state broadcast. All in-game mutations
+  // (play/draw/pass/chooseColor/UNO, plus reconnection remaps) flow through here,
+  // so this single hook covers durability for active games. Coalesced + async
+  // inside the manager, so it never blocks the broadcast.
+  roomManager.markDirty(code);
 }
 
 const app = express();
@@ -286,8 +303,39 @@ io.on('connection', (socket) => {
   let currentRoomCode: string | null = null;
   let currentName: string | null = null;
 
+  /**
+   * Wrap a socket handler with schema validation. The returned listener parses the
+   * raw payload against `schema`; on success it invokes `handler` with the typed,
+   * sanitized value, on failure it emits a clean `error` back to just that client.
+   * Any exception thrown inside the handler is also caught here so a single bad
+   * actor can never take down the process (or the room). This is the core of the
+   * hardening: previously handlers destructured raw payloads and a malformed one
+   * threw an uncaught exception inside the listener.
+   */
+  function guard<T>(
+    schema: ZodType<T>,
+    handler: (data: T) => void
+  ): (payload: unknown) => void {
+    return (payload: unknown) => {
+      const result = schema.safeParse(payload);
+      if (!result.success) {
+        const issue = result.error.issues[0];
+        const where = issue?.path?.join('.') || 'payload';
+        logger.debug(`[VALIDATION] Rejected ${socket.id} payload (${where}: ${issue?.message})`);
+        socket.emit('error', { message: `Invalid request: ${where} ${issue?.message ?? 'is invalid'}` });
+        return;
+      }
+      try {
+        handler(result.data);
+      } catch (err: any) {
+        logger.error(`[Socket] Unhandled handler error for ${socket.id}:`, err?.message);
+        socket.emit('error', { message: err?.message || 'Something went wrong processing your request.' });
+      }
+    };
+  }
+
   // Create room event (alternative pathway)
-  socket.on('create-room', ({ name }: { name: string }) => {
+  socket.on('create-room', guard(createRoomSchema, ({ name }) => {
     try {
       const room = roomManager.createRoom();
       const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id);
@@ -305,10 +353,10 @@ io.on('connection', (socket) => {
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to create room via socket' });
     }
-  });
+  }));
 
   // Join room socket handler
-  socket.on('join-room', ({ code, name, secret }: { code: string; name: string; secret?: string }) => {
+  socket.on('join-room', guard(joinRoomSchema, ({ code, name, secret }) => {
     if (currentRoomCode) {
       logger.debug(`[Socket] Duplicate join-room blocked for socket ${socket.id}. Already in room ${currentRoomCode}`);
       return;
@@ -351,10 +399,10 @@ io.on('connection', (socket) => {
       logger.error(`[Socket] Join error for client ${socket.id}:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to join room' });
     }
-  });
+  }));
 
   // Send reaction socket handler
-  socket.on('send-reaction', ({ emoji }: { emoji: string }) => {
+  socket.on('send-reaction', guard(sendReactionSchema, ({ emoji }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room) return;
@@ -367,20 +415,20 @@ io.on('connection', (socket) => {
 
     logger.debug(`[REACTION] ${name} sent emoji ${emoji} in room ${currentRoomCode}`);
     io.to(currentRoomCode).emit('player-reacted', { name, seatNumber, emoji, isSpectator });
-  });
+  }));
 
   // WebRTC Signaling
-  socket.on('webrtc-signal', ({ targetId, signalData }: { targetId: string; signalData: any }) => {
+  socket.on('webrtc-signal', guard(webrtcSignalSchema, ({ targetId, signalData }) => {
     // Relay the signal to the specific target socket
     io.to(targetId).emit('webrtc-signal', { sourceId: socket.id, signalData });
-  });
+  }));
 
   // Voice Status Updates (e.g. mic muted)
-  socket.on('voice-status', ({ isMuted }: { isMuted: boolean }) => {
+  socket.on('voice-status', guard(voiceStatusSchema, ({ isMuted }) => {
     if (!currentRoomCode) return;
     // Broadcast to everyone else in the room
     socket.to(currentRoomCode).emit('voice-status-changed', { playerId: socket.id, isMuted });
-  });
+  }));
 
 
   // Trigger game start (host only)
@@ -403,7 +451,7 @@ io.on('connection', (socket) => {
   });
 
   // Play card event
-  socket.on('play-card', ({ cardId, playerId }: { cardId: string; playerId: string }) => {
+  socket.on('play-card', guard(playCardSchema, ({ cardId }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -453,7 +501,7 @@ io.on('connection', (socket) => {
       logger.error(`[Socket] Play card error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to play card' });
     }
-  });
+  }));
 
   // Draw card event
   socket.on('draw-card', () => {
@@ -519,7 +567,7 @@ io.on('connection', (socket) => {
   });
 
   // Choose color event
-  socket.on('choose-color', ({ color }: { color: CardColor }) => {
+  socket.on('choose-color', guard(chooseColorSchema, ({ color }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -544,7 +592,7 @@ io.on('connection', (socket) => {
       logger.error(`[Socket] Choose color error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to select color' });
     }
-  });
+  }));
 
   // Call UNO event
   socket.on('call-uno', () => {
@@ -651,10 +699,34 @@ io.on('connection', (socket) => {
 
 });
 
-// Start Server
-server.listen(port, () => {
-  logger.info(`===============================================`);
-  logger.info(`  Unoverse Backend Server running on port ${port}  `);
-  logger.info(`  Log level: ${logger.level}`);
-  logger.info(`===============================================`);
+// Start Server — build the durable store, rehydrate any in-progress rooms, then
+// begin accepting connections so reconnecting players find their game intact.
+async function start() {
+  const store = await createRoomStore();
+  roomManager.setStore(store);
+  try {
+    await roomManager.hydrate();
+  } catch (err: any) {
+    logger.error('[STORE] Hydration failed (starting with no restored rooms):', err?.message);
+  }
+
+  server.listen(port, () => {
+    logger.info(`===============================================`);
+    logger.info(`  Unoverse Backend Server running on port ${port}  `);
+    logger.info(`  Log level: ${logger.level}`);
+    logger.info(`  Rooms persisted: ${roomManager.getRoomCount()} restored`);
+    logger.info(`===============================================`);
+  });
+}
+
+start();
+
+// Last-resort safety net. The per-handler guard() should catch everything, but if
+// any async path throws unexpectedly we log it and keep the process alive rather
+// than letting a single bad event take down every active room.
+process.on('uncaughtException', (err) => {
+  logger.error('[FATAL] Uncaught exception (server kept alive):', err?.stack || err);
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error('[FATAL] Unhandled promise rejection (server kept alive):', reason);
 });

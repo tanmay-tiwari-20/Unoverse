@@ -40,8 +40,12 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${lilitaOne.variable} ${fredoka.variable} h-full antialiased dark`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-slate-950 text-slate-50 bg-grid-pattern antialiased">
+      <body 
+        className="min-h-full flex flex-col bg-slate-950 text-slate-50 bg-grid-pattern antialiased"
+        suppressHydrationWarning
+      >
         {children}
       </body>
     </html>
