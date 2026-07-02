@@ -282,6 +282,7 @@ export default function LobbyPage() {
     drawStack,
     pendingDrawType,
     drawnCardId,
+    match,
     clearAllCards,
     isProcessing,
     setIsProcessing,
@@ -389,6 +390,19 @@ export default function LobbyPage() {
       .sort((a, b) => a.cardCount - b.cardCount);
   };
   const standings = getStandings();
+
+  // Match scoreboard (cumulative points across rounds), highest first. Scores are
+  // keyed by lowercased name on the server so they survive reconnects.
+  const getScoreboard = () => {
+    if (!match) return [];
+    return Object.entries(match.scores)
+      .map(([nameKey, score]) => {
+        const p = room?.players.find((pl) => pl.name.toLowerCase() === nameKey);
+        return { nameKey, name: p?.name ?? nameKey, id: p?.id ?? nameKey, score };
+      })
+      .sort((a, b) => b.score - a.score);
+  };
+  const scoreboard = getScoreboard();
 
   // Render connection/error loading states
   if (!room || (!player && !isSpectator)) {
@@ -846,52 +860,78 @@ export default function LobbyPage() {
           {/* Confetti canvas animation */}
           <ConfettiCanvas />
 
+          {(() => {
+            const matchWon = !!match?.matchWinnerName;
+            const roundPoints = match?.lastRound?.pointsAwarded ?? 0;
+            const target = match?.targetScore ?? 500;
+            const headerText = matchWon
+              ? (player && match?.matchWinnerName === player.name ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
+              : (player && winnerName === player.name ? 'You won the round!' : `${winnerName} won the round!`);
+            return (
           <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-7 flex flex-col items-center gap-5 max-w-sm w-full text-center z-20 relative">
             <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce">
               <Trophy size={30} className="fill-white/30" />
             </div>
             <div>
-              <h2 className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse">Victory!</h2>
+              <h2 className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse">
+                {matchWon ? 'Match Over!' : `Round ${match?.round ?? 1}`}
+              </h2>
               <p className="font-rounded font-bold text-white text-md mt-1 inline-flex items-center gap-1.5">
                 <PartyPopper size={16} className="text-yellow-300" />
-                {player && winnerName === player.name ? 'YOU WON THE GAME!' : `${winnerName} won the game!`}
+                {headerText}
               </p>
+              {!matchWon && (
+                <p className="font-rounded font-semibold text-lime-300 text-xs mt-1">
+                  +{roundPoints} points banked · first to {target} wins
+                </p>
+              )}
             </div>
 
-            {/* Standings Leaderboard List */}
-            <div className="w-full border-t-2 border-b-2 border-white/20 py-3 my-0.5 space-y-2 max-h-48 overflow-y-auto">
-              <span className="font-arcade text-[10px] uppercase tracking-widest text-yellow-200 block text-left mb-1">Final Standings</span>
-              {standings.map((entry, idx) => {
+            {/* Running Match Scoreboard */}
+            <div className="w-full border-t-2 border-b-2 border-white/20 py-3 my-0.5 space-y-2 max-h-52 overflow-y-auto">
+              <span className="font-arcade text-[10px] uppercase tracking-widest text-yellow-200 block text-left mb-1">
+                Match Scoreboard · to {target}
+              </span>
+              {scoreboard.map((entry, idx) => {
                 const rank = idx + 1;
-                const isWinner = rank === 1;
+                const isLeader = rank === 1;
                 const RankIcon = rank === 1 ? Trophy : rank === 2 ? Medal : Award;
                 const rankIconColor = rank === 1 ? 'text-yellow-300' : rank === 2 ? 'text-slate-300' : 'text-orange-400';
+                const isMe = entry.name.toLowerCase() === player?.name.toLowerCase();
+                const justWonRound = match?.lastRound?.winnerName?.toLowerCase() === entry.name.toLowerCase();
+                const pct = Math.min(100, Math.round((entry.score / target) * 100));
                 return (
                   <div
                     key={entry.id}
-                    className={`flex justify-between items-center px-3 py-1.5 rounded-xl border-2 ${
-                      isWinner
+                    className={`px-3 py-1.5 rounded-xl border-2 ${
+                      isLeader
                         ? 'bg-amber-400/20 border-yellow-300/60 text-yellow-100'
-                        : entry.id === player?.id
+                        : isMe
                           ? 'bg-blue-500/20 border-blue-400/50 text-blue-100'
                           : 'bg-white/5 border-white/15 text-white/80'
                     }`}
                   >
-                    <div className="flex items-center gap-2 text-[11px] font-rounded font-bold">
-                      <span className="inline-flex items-center gap-1">
-                        <RankIcon size={14} className={rankIconColor} /> #{rank}
-                      </span>
-                      <span className="font-arcade truncate max-w-[100px]">{entry.name}</span>
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2 text-[11px] font-rounded font-bold">
+                        <span className="inline-flex items-center gap-1">
+                          <RankIcon size={14} className={rankIconColor} /> #{rank}
+                        </span>
+                        <span className="font-arcade truncate max-w-[90px]">{entry.name}</span>
+                        {justWonRound && !matchWon && (
+                          <span className="text-[9px] font-rounded font-bold text-lime-300 uppercase">+{roundPoints}</span>
+                        )}
+                      </div>
+                      <span className="text-[12px] font-arcade text-white tabular-nums">{entry.score}</span>
                     </div>
-                    <span className="text-[10px] font-rounded font-semibold text-white/60">
-                      {entry.cardCount === 0 ? 'Won' : `${entry.cardCount} cards left`}
-                    </span>
+                    <div className="mt-1 h-1.5 w-full bg-black/40 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-lime-400 to-green-500 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Play Again Loop Buttons */}
+            {/* Round / Match Loop Buttons */}
             <div className="w-full space-y-2">
               {isHost ? (
                 <button
@@ -902,11 +942,11 @@ export default function LobbyPage() {
                   }}
                   className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3 px-6 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
                 >
-                  <RefreshCw size={16} /> Play Again
+                  <RefreshCw size={16} /> {matchWon ? 'New Match' : 'Next Round'}
                 </button>
               ) : (
                 <div className="w-full py-2.5 px-4 rounded-full bg-white/5 border-2 border-white/15 text-center animate-pulse font-rounded font-bold text-[10px] uppercase tracking-widest text-yellow-200 inline-flex items-center justify-center gap-1.5">
-                  <Hourglass size={12} /> Waiting for host to restart...
+                  <Hourglass size={12} /> {matchWon ? 'Waiting for host to start a new match...' : 'Waiting for host to start next round...'}
                 </div>
               )}
 
@@ -921,6 +961,8 @@ export default function LobbyPage() {
               </button>
             </div>
           </div>
+            );
+          })()}
         </div>
       )}
 

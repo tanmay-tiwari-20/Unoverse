@@ -125,6 +125,23 @@ function handleTurnTimeout(code: string, signature: string) {
     } else {
       return;
     }
+
+    // An auto-resolved turn can also end the round (e.g. forced play of a last card).
+    if (room.game && room.game.status === 'ended') {
+      clearTurnTimer(code);
+      const finalized = roomManager.finalizeRound(code);
+      broadcastGameState(code);
+      const winner = room.players.find((p) => p.id === room.game!.winnerId);
+      io.to(code).emit('game-ended', {
+        winnerId: room.game.winnerId,
+        winnerName: winner ? winner.name : null,
+        roundResult: finalized?.result ?? null,
+        matchWon: finalized?.matchWon ?? false,
+        match: room.match ?? null,
+      });
+      return;
+    }
+
     broadcastGameState(code);
   } catch (err: any) {
     logger.error(`[TURN_TIMEOUT] Failed to auto-resolve turn in room ${code}:`, err.message);
@@ -210,6 +227,7 @@ function broadcastGameState(code: string) {
       drawnCardId: game.drawnCardId ?? null,
       turnDeadline: game.turnDeadline ?? null,
       lastAction: game.lastAction,
+      match: room.match ?? null,
     });
   });
 
@@ -491,10 +509,17 @@ io.on('connection', (socket) => {
 
       if (updatedGame.status === 'ended') {
         clearTurnTimer(currentRoomCode);
-        logger.debug(`[Socket] Game in room ${currentRoomCode} ended. Winner: ${currentName}`);
+        // Bank the round's points onto the match scoreboard before announcing.
+        const finalized = roomManager.finalizeRound(currentRoomCode);
+        // Re-broadcast so clients receive the updated match scores with the ended state.
+        broadcastGameState(currentRoomCode);
+        logger.debug(`[Socket] Round in room ${currentRoomCode} ended. Winner: ${currentName}`);
         io.to(currentRoomCode).emit('game-ended', {
           winnerId: socket.id,
-          winnerName: currentName
+          winnerName: currentName,
+          roundResult: finalized?.result ?? null,
+          matchWon: finalized?.matchWon ?? false,
+          match: room.match ?? null,
         });
       }
     } catch (error: any) {

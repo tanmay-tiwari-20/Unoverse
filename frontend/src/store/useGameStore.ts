@@ -5,6 +5,16 @@ import { CardItem, CardColor } from '../lib/cards/cardEngine';
 import { soundManager } from '../utils/soundManager';
 import { logger } from '../utils/logger';
 
+// Match = a running series of rounds played to a target score. Mirrors the
+// backend MatchState (scores keyed by lowercased player name).
+export interface MatchState {
+  scores: Record<string, number>;
+  targetScore: number;
+  round: number;
+  lastRound: { round: number; winnerName: string; pointsAwarded: number } | null;
+  matchWinnerName: string | null;
+}
+
 interface GameState {
   socket: Socket | null;
   room: Room | null;
@@ -33,6 +43,7 @@ interface GameState {
   drawStack: number; // accumulated +2/+4 cards the next player must stack or draw
   pendingDrawType: 'draw_two' | 'wild_draw_four' | null; // top of an active draw chain
   drawnCardId: string | null; // id of a just-drawn, still-playable card awaiting a play-or-pass decision
+  match: MatchState | null; // running match scoreboard across rounds
   turnDeadline: number | null; // epoch ms when the active turn auto-resolves on the server
   gameStoppedNotice: boolean; // true when a game was just stopped due to too few players
   isSpectator: boolean;
@@ -86,6 +97,7 @@ interface GameState {
     pendingDrawType?: 'draw_two' | 'wild_draw_four' | null;
     drawnCardId?: string | null;
     turnDeadline?: number | null;
+    match?: MatchState | null;
   }) => void;
   
   reset: () => void;
@@ -119,6 +131,7 @@ export const useGameStore = create<GameState>((set) => ({
   drawStack: 0,
   pendingDrawType: null,
   drawnCardId: null,
+  match: null,
   turnDeadline: null,
   gameStoppedNotice: false,
   isSpectator: false,
@@ -207,6 +220,7 @@ export const useGameStore = create<GameState>((set) => ({
     drawStack: 0,
     pendingDrawType: null,
     drawnCardId: null,
+    match: null,
     turnDeadline: null,
     gameStoppedNotice: false,
   }),
@@ -229,6 +243,7 @@ export const useGameStore = create<GameState>((set) => ({
       drawStack: payload.drawStack ?? 0,
       pendingDrawType: payload.pendingDrawType ?? null,
       drawnCardId: payload.drawnCardId ?? null,
+      match: payload.match ?? state.match ?? null,
       turnDeadline: payload.turnDeadline ?? null,
       gameStoppedNotice: false,
       isProcessing: false,
@@ -261,6 +276,7 @@ export const useGameStore = create<GameState>((set) => ({
     drawStack: 0,
     pendingDrawType: null,
     drawnCardId: null,
+    match: null,
     turnDeadline: null,
     gameStoppedNotice: false,
   }),

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextPlayerIndex } from '../game/turnManager';
+import { calculateRoundPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
 import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
 
@@ -19,6 +20,26 @@ export interface Spectator {
   secret: string; // Private per-session token. Never broadcast to other clients.
 }
 
+/** One completed round's result, kept for the end-of-round summary UI. */
+export interface RoundResult {
+  round: number;
+  winnerName: string;
+  pointsAwarded: number;
+}
+
+/**
+ * Match = a series of rounds played to a target score. Scores are keyed by
+ * LOWERCASED player name (the same stable identity used for reconnection), so a
+ * player's running total survives disconnects, reseating and server restarts.
+ */
+export interface MatchState {
+  scores: Record<string, number>; // lowercased name -> cumulative points
+  targetScore: number;
+  round: number;                  // 1-based index of the current/last round
+  lastRound: RoundResult | null;  // result of the round that just ended
+  matchWinnerName: string | null; // set once someone reaches targetScore
+}
+
 export interface Room {
   code: string;
   hostId: string;
@@ -26,6 +47,7 @@ export interface Room {
   spectators?: Spectator[];
   status: 'lobby' | 'playing';
   game?: UnoGameState;
+  match?: MatchState;
 }
 
 class RoomManager {
@@ -505,7 +527,8 @@ class RoomManager {
     return null;
   }
 
-  // Set room game status to playing
+  // Set room game status to playing. Starts either a brand-new match (first play,
+  // or after a previous match was won) or the next round of the ongoing match.
   public startGame(code: string, hostSocketId: string): Room {
     const room = this.rooms.get(code.toUpperCase());
     if (!room) {
@@ -518,10 +541,68 @@ class RoomManager {
       throw new Error('At least 2 players are required to start the game');
     }
 
+    // Begin a fresh match if there is none yet or the previous one was already
+    // won; otherwise this is the next round and scores carry over.
+    if (!room.match || room.match.matchWinnerName) {
+      room.match = {
+        scores: {},
+        targetScore: DEFAULT_TARGET_SCORE,
+        round: 1,
+        lastRound: null,
+        matchWinnerName: null,
+      };
+      // Seed every current player at 0 so the scoreboard shows everyone.
+      room.players.forEach((p) => { room.match!.scores[p.name.toLowerCase()] = 0; });
+    } else {
+      room.match.round += 1;
+      room.match.lastRound = null;
+      // Ensure any player who joined between rounds appears on the board.
+      room.players.forEach((p) => {
+        const key = p.name.toLowerCase();
+        if (room.match!.scores[key] === undefined) room.match!.scores[key] = 0;
+      });
+    }
+
     room.status = 'playing';
     room.game = startGameState(room.players);
     this.markDirty(code);
     return room;
+  }
+
+  /**
+   * Bank the just-ended round's points onto the match scoreboard. Call this once,
+   * right after the game engine sets status='ended' with a winnerId. Returns the
+   * round result (winner + points) plus whether the match is now won.
+   */
+  public finalizeRound(code: string): { result: RoundResult; matchWon: boolean } | null {
+    const room = this.rooms.get(code.toUpperCase());
+    if (!room || !room.game || !room.match) return null;
+    const game = room.game;
+    if (game.status !== 'ended' || !game.winnerId) return null;
+    // Idempotency guard: don't double-count if called twice for the same round.
+    if (room.match.lastRound && room.match.lastRound.round === room.match.round) {
+      return { result: room.match.lastRound, matchWon: !!room.match.matchWinnerName };
+    }
+
+    const winner = room.players.find((p) => p.id === game.winnerId);
+    const winnerName = winner ? winner.name : 'Unknown';
+    const key = winnerName.toLowerCase();
+
+    const points = calculateRoundPoints(game.hands, game.winnerId);
+    room.match.scores[key] = (room.match.scores[key] ?? 0) + points;
+
+    const result: RoundResult = { round: room.match.round, winnerName, pointsAwarded: points };
+    room.match.lastRound = result;
+
+    let matchWon = false;
+    if (room.match.scores[key] >= room.match.targetScore) {
+      room.match.matchWinnerName = winnerName;
+      matchWon = true;
+      logger.info(`[MATCH_WON] ${winnerName} reached ${room.match.scores[key]} in room ${code}`);
+    }
+
+    this.markDirty(code);
+    return { result, matchWon };
   }
 }
 
