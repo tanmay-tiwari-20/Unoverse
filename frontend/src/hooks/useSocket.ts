@@ -7,7 +7,7 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { getSeatCoords } from '../utils/seating';
 import { logger } from '../utils/logger';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 // --- Session secret persistence -------------------------------------------
 // The backend issues a private per-session secret on first join. We persist it

@@ -28,7 +28,7 @@ export default function LandingPage() {
   const [copied, setCopied] = useState(false);
 
   const backendUrl =
-    process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+    (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001").replace(/\/$/, "");
 
   // Pre-fill the room code when arriving via an invitation link (/?room=CODE)
   useEffect(() => {
