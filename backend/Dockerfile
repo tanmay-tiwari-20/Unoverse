@@ -25,6 +25,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Compiled JS from the build stage.
 COPY --from=build /app/dist ./dist
 
+# Create data directory and set ownership to node user
+RUN mkdir -p /app/.data && chown -R node:node /app/.data
+
 # Run as the built-in unprivileged 'node' user rather than root.
 USER node
 
