@@ -251,7 +251,7 @@ const port = process.env.PORT || 3001;
 const corsEnv = process.env.CORS_ORIGIN || '*';
 const corsOrigin: string | string[] = corsEnv === '*'
   ? '*'
-  : corsEnv.split(',').map((o) => o.trim()).filter(Boolean);
+  : corsEnv.split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
 
 // Middlewares
 app.use(cors({
