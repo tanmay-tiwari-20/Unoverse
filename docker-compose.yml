@@ -1,0 +1,43 @@
+# Local full-stack for smoke-testing the deploy path: backend + Redis.
+# Brings up the backend exactly as it runs in production (Docker image, Redis
+# store + Socket.IO Redis adapter). Run the frontend separately with
+# `cd frontend && npm run dev` pointed at http://localhost:3001.
+#
+#   docker compose up --build
+#
+# Then open the frontend and create/join a room. Stop with Ctrl+C.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      NODE_ENV: production
+      LOG_LEVEL: info
+      # Use Redis for both durable room state and cross-instance broadcasts.
+      STORE: redis
+      REDIS_URL: redis://redis:6379
+      # For local testing allow any origin; lock this down in real deploys.
+      CORS_ORIGIN: "*"
+      TURN_TIMEOUT_MS: "45000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:

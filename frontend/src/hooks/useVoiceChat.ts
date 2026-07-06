@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { getIceServers } from '../lib/voice/iceServers';
 
 export const useVoiceChat = () => {
   const { socket, room, player } = useGameStore();
@@ -131,10 +132,9 @@ export const useVoiceChat = () => {
     }
 
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
-      ]
+      // STUN + optional TURN (from env). TURN is required for reliable connectivity
+      // across symmetric NATs / strict firewalls. See lib/voice/iceServers.ts.
+      iceServers: getIceServers(),
     });
     peerConnectionsRef.current[targetId] = pc;
     pendingCandidatesRef.current[targetId] = [];

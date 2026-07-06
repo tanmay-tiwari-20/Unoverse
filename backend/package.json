@@ -12,6 +12,7 @@
     "sim": "ts-node src/game/engine/gameSimulation.test.ts"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "ioredis": "^5.11.1",

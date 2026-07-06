@@ -259,10 +259,51 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// --- Simple in-memory rate limiter -------------------------------------------
+// Room creation is unauthenticated, so cap it per client IP to prevent a script
+// from exhausting memory by spawning thousands of rooms. Sliding fixed-window
+// counter; adequate for a single instance. (Behind a proxy, ensure the platform
+// sets X-Forwarded-For and consider app.set('trust proxy', 1).)
+function rateLimit(opts: { windowMs: number; max: number }) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const entry = hits.get(ip);
+    if (!entry || now > entry.resetAt) {
+      hits.set(ip, { count: 1, resetAt: now + opts.windowMs });
+    } else if (entry.count >= opts.max) {
+      res.status(429).json({ error: 'Too many requests. Please slow down.' });
+      return;
+    } else {
+      entry.count++;
+    }
+    // Opportunistic cleanup so the map doesn't grow unbounded.
+    if (hits.size > 5000) {
+      for (const [k, v] of hits) if (now > v.resetAt) hits.delete(k);
+    }
+    next();
+  };
+}
+
+// Max 20 room creations per IP per minute.
+const createRoomLimiter = rateLimit({ windowMs: 60_000, max: 20 });
+
 // --- REST APIs ---
 
+// Health check — used by container orchestrators / load balancers to verify the
+// process is alive and serving. Lightweight and unauthenticated by design.
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    rooms: roomManager.getRoomCount(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Create Room API
-app.post('/api/rooms', (req, res) => {
+app.post('/api/rooms', createRoomLimiter, (req, res) => {
   try {
     const room = roomManager.createRoom();
     logger.debug(`[REST] Created room: ${room.code}`);
@@ -313,6 +354,37 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
 });
+
+/**
+ * Attach the Socket.IO Redis adapter so multiple backend instances share
+ * broadcasts (io.to(room).emit reaches sockets connected to any instance). Only
+ * engaged when REDIS_URL is set — single-instance / file-store deploys skip this
+ * entirely. ioredis + the adapter are imported lazily so they're not required for
+ * the no-Redis path.
+ *
+ * NOTE: the adapter shares broadcasts across instances, but room *state*
+ * (RoomManager's in-memory Map) still lives per-process. True horizontal scaling
+ * also requires sticky sessions at the load balancer (so a given socket always
+ * hits the same instance) plus STORE=redis for shared state. This wiring is the
+ * messaging half of that story.
+ */
+async function attachRedisAdapter(): Promise<void> {
+  const url = process.env.REDIS_URL;
+  if (!url) return;
+  try {
+    const { createAdapter } = await import('@socket.io/redis-adapter');
+    const { default: Redis } = await import('ioredis');
+    const pubClient = new Redis(url);
+    const subClient = pubClient.duplicate();
+    // Surface connection errors instead of crashing on an unhandled 'error' event.
+    pubClient.on('error', (e) => logger.error('[REDIS_ADAPTER] pub client error:', e?.message));
+    subClient.on('error', (e) => logger.error('[REDIS_ADAPTER] sub client error:', e?.message));
+    io.adapter(createAdapter(pubClient, subClient));
+    logger.info('[REDIS_ADAPTER] Socket.IO Redis adapter enabled (multi-instance broadcasts).');
+  } catch (err: any) {
+    logger.error('[REDIS_ADAPTER] Failed to enable adapter, continuing single-instance:', err?.message);
+  }
+}
 
 io.on('connection', (socket) => {
   logger.debug(`[Socket] Client connected: ${socket.id}`);
@@ -735,6 +807,9 @@ async function start() {
     logger.error('[STORE] Hydration failed (starting with no restored rooms):', err?.message);
   }
 
+  // Enable cross-instance broadcasts if Redis is configured (no-op otherwise).
+  await attachRedisAdapter();
+
   server.listen(port, () => {
     logger.info(`===============================================`);
     logger.info(`  Unoverse Backend Server running on port ${port}  `);
@@ -745,6 +820,36 @@ async function start() {
 }
 
 start();
+
+// Graceful shutdown. Container platforms send SIGTERM on deploy/scale-down; we
+// stop accepting connections, close sockets, flush pending persistence, then exit.
+// A hard timeout guarantees we don't hang the platform's shutdown grace window.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`[SHUTDOWN] Received ${signal}, shutting down gracefully...`);
+
+  const forceExit = setTimeout(() => {
+    logger.error('[SHUTDOWN] Forced exit after timeout.');
+    process.exit(1);
+  }, 10000);
+  forceExit.unref();
+
+  try {
+    io.close();                       // stop Socket.IO, disconnect clients
+    await new Promise<void>((resolve) => server.close(() => resolve())); // stop HTTP
+    await roomManager.shutdown();     // flush pending writes + close store
+    logger.info('[SHUTDOWN] Clean shutdown complete.');
+    clearTimeout(forceExit);
+    process.exit(0);
+  } catch (err: any) {
+    logger.error('[SHUTDOWN] Error during shutdown:', err?.message);
+    process.exit(1);
+  }
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Last-resort safety net. The per-handler guard() should catch everything, but if
 // any async path throws unexpectedly we log it and keep the process alive rather

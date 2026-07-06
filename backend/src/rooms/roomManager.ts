@@ -136,6 +136,21 @@ class RoomManager {
     ]);
   }
 
+  /**
+   * Flush any pending writes and close the store. Called on graceful shutdown so
+   * the last few mutations aren't lost when a container receives SIGTERM.
+   */
+  public async shutdown(): Promise<void> {
+    await this.flush();
+    if (this.store.close) {
+      try {
+        await this.store.close();
+      } catch (err: any) {
+        logger.error('[STORE] Error closing store on shutdown:', err?.message);
+      }
+    }
+  }
+
   // Helper to generate a unique 6-digit room code
   private generateRoomCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
