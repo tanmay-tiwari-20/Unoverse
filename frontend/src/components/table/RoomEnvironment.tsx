@@ -14,31 +14,50 @@ export interface RoomEnvironmentProps {
 }
 
 function CameraSetup({ isLandingPage }: { isLandingPage?: boolean }) {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
 
   useEffect(() => {
-    // Initial camera placement
-    let radius = 2.24;
+    const aspect = size.width > 0 && size.height > 0 ? size.width / size.height : 16 / 9;
+    // `aspect < 1` is a portrait phone; `< 1.3` covers narrow/tablet windows.
+    const portrait = aspect < 1;
+
+    // Base framing (landscape desktop).
     let y = 1.45;
-    let z = radius;
+    let z = 2.24;
+    let fov = 75;
 
     if (isLandingPage) {
-      // Cinematic hero shot for the landing page
+      // Cinematic hero shot for the landing page.
       y = 1.6;
       z = 3.5;
+      fov = 75;
+      // In portrait the hero table would be cropped on the sides — ease back and
+      // widen the lens so the deck and scattered cards stay in frame.
+      if (portrait) {
+        z = 3.5 + (1 / aspect - 1) * 1.6;
+        fov = Math.min(88, 75 + (1 / aspect - 1) * 26);
+      }
+    } else if (portrait) {
+      // Portrait play view: the vertical FOV crops the table's width, so pull the
+      // camera back and open the lens proportionally to how tall-and-narrow the
+      // screen is. This keeps all opponents and both piles visible on phones.
+      const narrowness = 1 / aspect - 1; // 0 at square, grows as it gets taller
+      z = 2.24 + narrowness * 2.1;
+      y = 1.45 + narrowness * 0.28;
+      fov = Math.min(90, 75 + narrowness * 24);
+    } else if (aspect < 1.4) {
+      // Slightly cramped landscape (small tablets / split-screen) — nudge back.
+      z = 2.5;
+      fov = 78;
     }
 
     camera.position.set(0, y, z);
-    if (isLandingPage) {
-      camera.lookAt(0, 0.7, 0); // Look slightly lower at the table
-    } else {
-      camera.lookAt(0, 1.0, 0);
-    }
+    camera.lookAt(0, isLandingPage ? 0.7 : 1.0, 0);
 
     const perspCam = camera as THREE.PerspectiveCamera;
-    perspCam.fov = 75;
+    perspCam.fov = fov;
     perspCam.updateProjectionMatrix();
-  }, [camera, isLandingPage]);
+  }, [camera, isLandingPage, size.width, size.height]);
 
   return null;
 }
@@ -506,7 +525,7 @@ function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironm
         minAzimuthAngle={-Math.PI / 3}
         maxAzimuthAngle={Math.PI / 3}
         minDistance={1.5}
-        maxDistance={4.0}
+        maxDistance={5.5}
         enableDamping={true}
         dampingFactor={0.03}
         enableRotate={cameraMotion}

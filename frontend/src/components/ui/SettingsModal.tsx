@@ -138,7 +138,7 @@ export const SettingsModal: React.FC = () => {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="w-full max-w-4xl bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-4xl bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[90dvh]"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20">

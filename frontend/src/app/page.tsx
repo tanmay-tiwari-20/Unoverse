@@ -166,7 +166,7 @@ export default function LandingPage() {
   };
 
   return (
-    <main className="w-screen h-screen relative bg-[#120c2e] overflow-hidden select-none">
+    <main className="w-screen h-screen-dvh relative bg-[#120c2e] overflow-hidden select-none">
       {/* 3D Background Scene */}
       <div className="absolute inset-0 z-0">
         <LandingScene />
@@ -183,14 +183,14 @@ export default function LandingPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1.2, ease: "easeOut" }}
-          className="flex flex-col items-center gap-8 pointer-events-auto w-full max-w-sm px-4"
+          className="flex flex-col items-center gap-6 sm:gap-8 pointer-events-auto w-full max-w-sm px-4"
         >
           {/* Titles */}
-          <div className="text-center flex flex-col items-center gap-3 arcade-bob">
-            <h1 className="font-arcade text-8xl leading-none arcade-stroke-uno text-yellow-400">
+          <div className="text-center flex flex-col items-center gap-2 sm:gap-3 arcade-bob">
+            <h1 className="font-arcade text-6xl sm:text-7xl md:text-8xl leading-none arcade-stroke-uno text-yellow-400">
               UNOVERSE!
             </h1>
-            <p className="font-arcade text-sm tracking-wide uppercase text-white arcade-stroke-uno-sm">
+            <p className="font-arcade text-xs sm:text-sm tracking-wide uppercase text-white arcade-stroke-uno-sm">
               Party Card Battle
             </p>
           </div>

@@ -72,7 +72,7 @@ export const ReactionsHandler: React.FC = () => {
       </div>
 
       {/* Toggle Button + Reactions Picker Popup */}
-      <div className="fixed bottom-24 right-4 z-30 flex flex-col items-end gap-2" ref={pickerRef}>
+      <div className="fixed bottom-[38%] sm:bottom-24 right-2 sm:right-4 z-30 flex flex-col items-end gap-2 safe-x" ref={pickerRef}>
         <AnimatePresence>
           {isOpen && (
             <motion.div 
@@ -85,12 +85,12 @@ export const ReactionsHandler: React.FC = () => {
               <span className="text-[7px] font-black uppercase tracking-widest text-slate-500 mb-0.5 select-none">
                 Send Reaction
               </span>
-              <div className="flex gap-1">
+              <div className="flex gap-0.5 sm:gap-1">
                 {EMOJIS.map((emoji) => (
                   <button
                     key={emoji}
                     onClick={() => sendEmoji(emoji)}
-                    className="text-lg hover:scale-125 transition-transform duration-150 active:scale-95 leading-none select-none p-1"
+                    className="text-2xl sm:text-lg hover:scale-125 transition-transform duration-150 active:scale-95 leading-none select-none p-1.5 sm:p-1"
                   >
                     {emoji}
                   </button>
@@ -104,9 +104,9 @@ export const ReactionsHandler: React.FC = () => {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setIsOpen(!isOpen)}
-          className="pointer-events-auto glass-panel bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded-full px-3.5 py-1.5 text-[10px] font-extrabold text-slate-300 hover:text-white transition-all shadow-lg flex items-center gap-1.5"
+          className="pointer-events-auto glass-panel bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded-full px-4 py-2.5 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-[10px] font-extrabold text-slate-300 hover:text-white transition-all shadow-lg flex items-center gap-1.5"
         >
-          <Smile size={14} />
+          <Smile size={16} className="sm:size-3.5" />
           <span className="uppercase tracking-wider">React</span>
         </motion.button>
       </div>

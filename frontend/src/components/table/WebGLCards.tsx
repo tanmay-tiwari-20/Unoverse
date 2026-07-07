@@ -129,7 +129,7 @@ export const WebGLCards: React.FC = () => {
         {/* Draw Pile Count Badge */}
         {drawPileCount > 0 && (
           <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>
-            <div className="bg-black/80 backdrop-blur-md px-[10px] py-[6px] h-[24px] flex items-center justify-center rounded-full text-white font-bold text-[12px] border border-white/20 shadow-lg select-none whitespace-nowrap">
+            <div className="bg-black/80 backdrop-blur-md px-2.5 py-1.5 flex items-center justify-center rounded-full text-white font-bold text-[13px] sm:text-[12px] border border-white/20 shadow-lg select-none whitespace-nowrap">
               {drawPileCount} CARDS
             </div>
           </Html>
@@ -162,10 +162,10 @@ export const WebGLCards: React.FC = () => {
             {/* position is lowered to prevent overlapping the hanging lamp shade at y=1.5 */}
             <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>
               <div className="flex flex-col items-center gap-1 select-none pointer-events-none">
-                <div className="bg-black/60 backdrop-blur-md px-[10px] py-[6px] h-[24px] flex items-center justify-center rounded-full text-white font-bold text-[14px] border border-white/10 whitespace-nowrap">
+                <div className="bg-black/60 backdrop-blur-md px-2.5 py-1.5 flex items-center justify-center rounded-full text-white font-bold text-[15px] sm:text-[14px] border border-white/10 whitespace-nowrap max-w-[38vw] truncate">
                   {occupant.name}
                 </div>
-                <div className="bg-red-500 text-white font-black text-[12px] px-[10px] py-[6px] h-[24px] flex items-center justify-center rounded-full shadow-lg whitespace-nowrap">
+                <div className="bg-red-500 text-white font-black text-[13px] sm:text-[12px] px-2.5 py-1.5 flex items-center justify-center rounded-full shadow-lg whitespace-nowrap">
                   {cardCount} CARDS
                 </div>
               </div>

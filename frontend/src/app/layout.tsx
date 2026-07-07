@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Lilita_One, Fredoka } from "next/font/google";
 import "./globals.css";
 
@@ -29,6 +29,19 @@ export const metadata: Metadata = {
   description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
   keywords: ["UNO", "multiplayer game", "3D card game", "Unoverse", "React Three Fiber", "Socket.io"],
   authors: [{ name: "Unoverse Team" }],
+};
+
+// Critical for mobile: without this, phones render at ~980px desktop width and
+// scale the whole HUD/3D scene down. `device-width` + `viewportFit: cover` lets
+// the layout fill the real screen and reach behind notches/rounded corners; the
+// `dvh`-based sizing in globals.css then accounts for mobile browser chrome.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#030712",
 };
 
 export default function RootLayout({

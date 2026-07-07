@@ -22,6 +22,73 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   overflow-x: hidden;
   min-height: 100vh;
+  /* Prevent iOS text-size auto-inflation and rubber-band scroll bleed on the
+     full-screen game canvas. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive viewport helpers                                         */
+/* `100vh` is buggy on mobile (it ignores the browser toolbar and the  */
+/* on-screen keyboard). `100dvh` tracks the *visible* viewport, so the  */
+/* game table and HUD stay fully on-screen on phones. We keep `vh` as   */
+/* a fallback for browsers without `dvh`.                               */
+/* ------------------------------------------------------------------ */
+.h-screen-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+.w-screen-dvw {
+  width: 100vw;
+  width: 100dvw;
+}
+.min-h-screen-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Safe-area insets so HUD chrome clears notches, punch-holes and the iOS home
+   indicator on phones. These ADD to a base padding via max(), so on a desktop
+   (where the insets are 0) they fall back to the normal padding instead of
+   collapsing it to nothing. Tune the base with the --safe-pad* vars. */
+.safe-top {
+  padding-top: max(env(safe-area-inset-top), var(--safe-pad-top, 0px));
+}
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), var(--safe-pad-bottom, 0px));
+}
+.safe-x {
+  padding-left: max(env(safe-area-inset-left), var(--safe-pad-x, 0px));
+  padding-right: max(env(safe-area-inset-right), var(--safe-pad-x, 0px));
+}
+
+/* Combined HUD padding: real spacing on every device, plus notch/home-bar
+   clearance on phones. Used by the lobby top header so its buttons never sit
+   flush against the screen edge. */
+.hud-pad {
+  padding-top: max(0.625rem, env(safe-area-inset-top));
+  padding-right: max(0.625rem, env(safe-area-inset-right));
+  padding-bottom: 0.625rem;
+  padding-left: max(0.625rem, env(safe-area-inset-left));
+}
+@media (min-width: 640px) {
+  .hud-pad {
+    padding-top: max(1.25rem, env(safe-area-inset-top));
+    padding-right: max(1.25rem, env(safe-area-inset-right));
+    padding-bottom: 1.25rem;
+    padding-left: max(1.25rem, env(safe-area-inset-left));
+  }
+}
+
+/* Keep tap targets from flashing the grey mobile highlight and stop the
+   browser from hijacking touch gestures over interactive HUD elements. */
+button,
+[role="button"],
+input {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 /* Custom Scrollbars */

@@ -447,7 +447,7 @@ export default function LobbyPage() {
   }
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-slate-950 text-slate-100 select-none overflow-hidden relative">
+    <div className="w-screen h-screen-dvh flex flex-col bg-slate-950 text-slate-100 select-none overflow-hidden relative">
       
       {/* Reactions Layer Overlay */}
       <ReactionsHandler />
@@ -504,7 +504,7 @@ export default function LobbyPage() {
 
 
       {/* Toast Notifications Container */}
-      <div className="fixed top-4 right-4 z-[999] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
+      <div className="fixed top-16 sm:top-4 right-2 sm:right-4 z-[999] flex flex-col gap-2 pointer-events-none max-w-[72vw] sm:max-w-sm w-full safe-x">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
@@ -567,22 +567,22 @@ export default function LobbyPage() {
         )}
 
         {/* HUD: Overlay Top Header Panel */}
-        <header className="absolute top-0 left-0 right-0 p-5 flex justify-between items-start z-20 pointer-events-none">
+        <header className="absolute top-0 left-0 right-0 hud-pad flex justify-between items-start z-20 pointer-events-none gap-2">
           {/* Top Left: Compact Lobby Panel */}
           {room && (
             <div className="pointer-events-auto">
               <button
                 onClick={handleCopyCode}
-                className="group chip-arcade flex items-center gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-4 py-2"
+                className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2"
                 title="Copy Room Code"
               >
-                <span className="font-arcade text-xs text-yellow-300 uppercase tracking-widest">
+                <span className="font-arcade text-[10px] sm:text-xs text-yellow-300 uppercase tracking-widest">
                   Lobby
                 </span>
-                <span className="font-arcade text-base text-white tracking-wider">
+                <span className="font-arcade text-sm sm:text-base text-white tracking-wider">
                   {room.code}
                 </span>
-                <div className="text-white/80 group-hover:text-white transition-colors ml-1">
+                <div className="text-white/80 group-hover:text-white transition-colors ml-0.5 sm:ml-1">
                   {copied ? <Check size={14} className="text-lime-300" /> : <Copy size={14} />}
                 </div>
               </button>
@@ -590,12 +590,12 @@ export default function LobbyPage() {
           )}
 
           {/* Top Right: Essential Actions */}
-          <div className="flex gap-3 items-center pointer-events-auto">
+          <div className="flex gap-1.5 sm:gap-3 items-center pointer-events-auto">
             <button
               onClick={() => {
                 toggleMic();
               }}
-              className={`chip-arcade w-11 h-11 flex items-center justify-center text-white ${
+              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white ${
                 isMicEnabled
                   ? 'bg-gradient-to-b from-lime-400 to-green-600'
                   : 'bg-gradient-to-b from-rose-500 to-red-700'
@@ -610,7 +610,7 @@ export default function LobbyPage() {
                 setSpeakerEnabled(!isSpeakerEnabled);
                 addToast(!isSpeakerEnabled ? 'Voice Chat Enabled' : 'Voice Chat Muted', 'info');
               }}
-              className={`chip-arcade w-11 h-11 flex items-center justify-center text-white ${
+              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white ${
                 isSpeakerEnabled
                   ? 'bg-gradient-to-b from-blue-400 to-blue-600'
                   : 'bg-gradient-to-b from-rose-500 to-red-700'
@@ -624,7 +624,7 @@ export default function LobbyPage() {
               onClick={() => {
                 setIsSettingsOpen(true);
               }}
-              className="chip-arcade w-11 h-11 flex items-center justify-center text-white bg-gradient-to-b from-neutral-700 to-neutral-900"
+              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white bg-gradient-to-b from-neutral-700 to-neutral-900"
               title="Settings"
             >
               <Settings size={16} className="text-white" />
@@ -635,7 +635,7 @@ export default function LobbyPage() {
                 leaveRoom();
                 router.push('/');
               }}
-              className="chip-arcade w-11 h-11 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
+              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
               title="Exit Table"
             >
               <LogOut size={16} />
@@ -644,7 +644,7 @@ export default function LobbyPage() {
         </header>
 
         {/* HUD: Bottom Table Actions */}
-        <div className="absolute top-16 left-0 right-0 flex flex-col items-center z-20 pointer-events-none">
+        <div className="absolute top-14 sm:top-16 left-0 right-0 flex flex-col items-center z-20 pointer-events-none px-3 text-center">
           <div className="pointer-events-auto">
             {/* Display state alert banners */}
             <div className="flex flex-col items-center gap-1.5">
@@ -800,8 +800,8 @@ export default function LobbyPage() {
       {/* OVERLAYS: Color Selection Wheel Dialog                              */}
       {/* =================================================================== */}
       {gameStatus === 'awaiting_color_selection' && player && colorChooserId === player.id && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 flex flex-col items-center gap-6 max-w-sm text-center pointer-events-auto">
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none p-4">
+          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto">
             <div>
               <h3 className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">Choose Color</h3>
               <p className="font-rounded font-semibold text-white/80 text-xs mt-1">Pick the active color for the Wild card</p>
@@ -856,7 +856,7 @@ export default function LobbyPage() {
       {/* OVERLAYS: Confetti Canvas Game Over Standings & Play Again          */}
       {/* =================================================================== */}
       {gameStatus === 'ended' && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 pointer-events-auto overflow-hidden">
+        <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 pointer-events-auto overflow-hidden p-4">
           {/* Confetti canvas animation */}
           <ConfettiCanvas />
 
@@ -868,7 +868,7 @@ export default function LobbyPage() {
               ? (player && match?.matchWinnerName === player.name ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
               : (player && winnerName === player.name ? 'You won the round!' : `${winnerName} won the round!`);
             return (
-          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-7 flex flex-col items-center gap-5 max-w-sm w-full text-center z-20 relative">
+          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto">
             <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce">
               <Trophy size={30} className="fill-white/30" />
             </div>

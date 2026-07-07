@@ -44,7 +44,7 @@ export const PlayerNameplates: React.FC = () => {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.5 }}
-              className={`absolute -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-full border shadow-xl backdrop-blur-md transition-all ${
+              className={`absolute -translate-x-1/2 flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full border shadow-xl backdrop-blur-md transition-all ${
                 isSpeaking 
                   ? 'bg-green-950/80 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)] ring-2 ring-green-400 animate-pulse'
                   : isActiveTurn
@@ -57,7 +57,7 @@ export const PlayerNameplates: React.FC = () => {
                 transform: `translate(-50%, -200%)`, // Raise it slightly above the seat
               }}
             >
-              <span className={`text-[11px] font-black uppercase tracking-widest ${isActiveTurn ? 'text-white' : 'text-slate-300'}`}>
+              <span className={`text-[11px] sm:text-[11px] font-black uppercase tracking-wide sm:tracking-widest max-w-[32vw] truncate ${isActiveTurn ? 'text-white' : 'text-slate-300'}`}>
                 {occupant.name}
               </span>
 
