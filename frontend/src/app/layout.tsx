@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Lilita_One, Fredoka } from "next/font/google";
 import { MotionProvider } from "../components/providers/MotionProvider";
+import { PWARegistration } from "../components/providers/PWARegistration";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,6 +31,41 @@ export const metadata: Metadata = {
   description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
   keywords: ["UNO", "multiplayer game", "3D card game", "Unoverse", "React Three Fiber", "Socket.io"],
   authors: [{ name: "Unoverse Team" }],
+  metadataBase: new URL("https://unoverse-ivory.vercel.app"),
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
+    description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+    url: "https://unoverse-ivory.vercel.app",
+    siteName: "Unoverse",
+    images: [
+      {
+        url: "/web-app-manifest-512x512.png",
+        width: 512,
+        height: 512,
+        alt: "Unoverse 3D Multiplayer UNO",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
+    description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+    images: ["/web-app-manifest-512x512.png"],
+  },
+  appleWebApp: {
+    capable: true,
+    title: "Unoverse",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 // Critical for mobile: without this, phones render at ~980px desktop width and
@@ -60,6 +96,7 @@ export default function RootLayout({
         className="min-h-full flex flex-col bg-slate-950 text-slate-50 bg-grid-pattern antialiased"
         suppressHydrationWarning
       >
+        <PWARegistration />
         <MotionProvider>{children}</MotionProvider>
       </body>
     </html>
