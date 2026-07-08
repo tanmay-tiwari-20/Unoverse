@@ -35,10 +35,13 @@ export const FPSCounter: React.FC = () => {
   if (!showFPS) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 pointer-events-none">
-      <div className="bg-black/60 backdrop-blur-md border border-white/10 px-3 py-1 rounded-lg shadow-lg flex flex-col items-center">
+    // High z-index + bottom-left corner keeps it clear of the full-width card
+    // HUD (z-100) and the right-side reaction button; the safe-area max() offsets
+    // stop it hiding behind mobile browser chrome / the home indicator.
+    <div className="fixed z-[1200] pointer-events-none bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))]">
+      <div className="bg-black/70 backdrop-blur-md border border-white/15 px-3 py-1 rounded-lg shadow-lg flex flex-col items-center">
         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none">FPS</span>
-        <span className={`text-sm font-mono font-black ${fps >= 50 ? 'text-green-400' : fps >= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
+        <span className={`text-sm font-mono font-black tabular-nums ${fps >= 50 ? 'text-green-400' : fps >= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
           {fps}
         </span>
       </div>

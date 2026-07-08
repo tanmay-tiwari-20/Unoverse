@@ -3,7 +3,6 @@ import { io, Socket } from 'socket.io-client';
 import { useGameStore } from '../store/useGameStore';
 import { CardColor, CardItem } from '../lib/cards/cardEngine';
 import { soundManager } from '../utils/soundManager';
-import { useSettingsStore } from '../store/useSettingsStore';
 import { getSeatCoords } from '../utils/seating';
 import { logger } from '../utils/logger';
 
@@ -378,17 +377,6 @@ export const useSocket = () => {
         socketId: socket.id
       });
       useGameStore.setState({ isProcessing: true });
-
-      // Auto-declare UNO BEFORE playing, when this play will leave the local
-      // player on a single card (they currently hold exactly 2). The declaration
-      // must reach the server first — otherwise the play triggers the automatic
-      // +4 penalty. The hand lives in the store keyed by seat number.
-      const { autoDeclareUno } = useSettingsStore.getState();
-      const mySeat = state.player?.seatNumber;
-      const myHandCount = mySeat != null ? (state.playerCards[mySeat]?.length ?? 0) : 0;
-      if (autoDeclareUno && myHandCount === 2) {
-        socket.emit('call-uno');
-      }
 
       socket.emit('play-card', { cardId, playerId: state.player?.id });
     }

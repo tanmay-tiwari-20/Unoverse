@@ -24,8 +24,7 @@ interface SettingsState {
   cardAnimations: boolean;
   cameraMotion: boolean;
   cameraSensitivity: number;
-  autoDeclareUno: boolean;
-  
+
   // Setters
   setIsSettingsOpen: (isOpen: boolean) => void;
   setIsReportBugOpen: (isOpen: boolean) => void;
@@ -47,7 +46,6 @@ interface SettingsState {
   setCardAnimations: (enabled: boolean) => void;
   setCameraMotion: (enabled: boolean) => void;
   setCameraSensitivity: (sens: number) => void;
-  setAutoDeclareUno: (enabled: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -75,7 +73,6 @@ export const useSettingsStore = create<SettingsState>()(
       cardAnimations: true,
       cameraMotion: true,
       cameraSensitivity: 50,
-      autoDeclareUno: false,
 
       // UI Actions (don't technically need persistence but they are part of the store)
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
@@ -99,7 +96,6 @@ export const useSettingsStore = create<SettingsState>()(
       setCardAnimations: (enabled) => set({ cardAnimations: enabled }),
       setCameraMotion: (enabled) => set({ cameraMotion: enabled }),
       setCameraSensitivity: (sens) => set({ cameraSensitivity: sens }),
-      setAutoDeclareUno: (enabled) => set({ autoDeclareUno: enabled }),
     }),
     {
       name: 'uno-real-settings', // unique name
@@ -118,7 +114,6 @@ export const useSettingsStore = create<SettingsState>()(
         cardAnimations: state.cardAnimations,
         cameraMotion: state.cameraMotion,
         cameraSensitivity: state.cameraSensitivity,
-        autoDeclareUno: state.autoDeclareUno,
       }),
     }
   )

@@ -243,7 +243,7 @@ export default function LandingPage() {
               <button
                 onClick={handleJoinRoom}
                 disabled={loading}
-                className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed"
+                className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
               >
                 Join
               </button>
@@ -251,7 +251,7 @@ export default function LandingPage() {
               <button
                 onClick={handleCreateRoom}
                 disabled={loading}
-                className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed"
+                className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
               >
                 Create
               </button>
@@ -310,7 +310,7 @@ export default function LandingPage() {
               <div className="relative w-full flex flex-col gap-3">
                 <button
                   onClick={handleCopyInvite}
-                  className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2"
+                  className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {copied ? <Check size={16} /> : <Copy size={16} />}
                   {copied ? "Link Copied!" : "Copy Invitation Link"}
@@ -318,14 +318,14 @@ export default function LandingPage() {
 
                 <button
                   onClick={handleShareInvite}
-                  className="btn-arcade w-full bg-gradient-to-b from-fuchsia-400 to-purple-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2"
+                  className="btn-arcade w-full bg-gradient-to-b from-fuchsia-400 to-purple-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Share2 size={16} /> Share Invitation
                 </button>
 
                 <button
                   onClick={handleEnterLobby}
-                  className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2"
+                  className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <LogIn size={16} /> Enter Lobby
                 </button>

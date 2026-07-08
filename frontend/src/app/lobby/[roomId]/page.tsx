@@ -573,7 +573,7 @@ export default function LobbyPage() {
             <div className="pointer-events-auto">
               <button
                 onClick={handleCopyCode}
-                className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2"
+                className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2 cursor-pointer"
                 title="Copy Room Code"
               >
                 <span className="font-arcade text-[10px] sm:text-xs text-yellow-300 uppercase tracking-widest">
@@ -595,7 +595,7 @@ export default function LobbyPage() {
               onClick={() => {
                 toggleMic();
               }}
-              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white ${
+              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
                 isMicEnabled
                   ? 'bg-gradient-to-b from-lime-400 to-green-600'
                   : 'bg-gradient-to-b from-rose-500 to-red-700'
@@ -610,7 +610,7 @@ export default function LobbyPage() {
                 setSpeakerEnabled(!isSpeakerEnabled);
                 addToast(!isSpeakerEnabled ? 'Voice Chat Enabled' : 'Voice Chat Muted', 'info');
               }}
-              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white ${
+              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
                 isSpeakerEnabled
                   ? 'bg-gradient-to-b from-blue-400 to-blue-600'
                   : 'bg-gradient-to-b from-rose-500 to-red-700'
@@ -624,7 +624,7 @@ export default function LobbyPage() {
               onClick={() => {
                 setIsSettingsOpen(true);
               }}
-              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white bg-gradient-to-b from-neutral-700 to-neutral-900"
+              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-700 to-neutral-900"
               title="Settings"
             >
               <Settings size={16} className="text-white" />
@@ -635,7 +635,7 @@ export default function LobbyPage() {
                 leaveRoom();
                 router.push('/');
               }}
-              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
+              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-rose-500 to-red-700"
               title="Exit Table"
             >
               <LogOut size={16} />

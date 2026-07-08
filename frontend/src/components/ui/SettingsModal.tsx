@@ -29,8 +29,7 @@ export const SettingsModal: React.FC = () => {
     performanceMode, setPerformanceMode,
     cardAnimations, setCardAnimations,
     cameraMotion, setCameraMotion,
-    cameraSensitivity, setCameraSensitivity,
-    autoDeclareUno, setAutoDeclareUno
+    cameraSensitivity, setCameraSensitivity
   } = useSettingsStore();
 
   const { addToast } = useGameStore();
@@ -211,8 +210,6 @@ export const SettingsModal: React.FC = () => {
                   <div className="pt-2">
                     <SliderField icon={Eye} label="Camera Sensitivity" value={cameraSensitivity} setter={setCameraSensitivity} color="amber" />
                   </div>
-
-                  <ToggleField icon={Zap} label="Auto Declare UNO" checked={autoDeclareUno} setter={setAutoDeclareUno} />
                 </div>
               </div>
             </div>
@@ -223,28 +220,28 @@ export const SettingsModal: React.FC = () => {
           <div className="mt-10 pt-6 border-t border-slate-800/50 grid grid-cols-2 sm:grid-cols-4 gap-3">
             <button 
               onClick={() => { setIsReportBugOpen(true); setIsSettingsOpen(false); }}
-              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group"
+              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group cursor-pointer"
             >
               <Bug size={18} className="group-hover:scale-110 transition-transform text-rose-400" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Report Bug</span>
             </button>
             <button 
               onClick={() => { setIsControlsOpen(true); setIsSettingsOpen(false); }}
-              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group"
+              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group cursor-pointer"
             >
               <Keyboard size={18} className="group-hover:scale-110 transition-transform text-blue-400" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Controls</span>
             </button>
             <button 
               onClick={() => { setIsAboutOpen(true); setIsSettingsOpen(false); }}
-              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group"
+              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group cursor-pointer"
             >
               <Info size={18} className="group-hover:scale-110 transition-transform text-emerald-400" />
               <span className="text-[9px] font-bold uppercase tracking-wider">About</span>
             </button>
             <button 
               onClick={handleLeaveLobby}
-              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-red-950/20 hover:bg-red-900/40 border border-red-900/30 transition-colors text-red-500 hover:text-red-400 group"
+              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-red-950/20 hover:bg-red-900/40 border border-red-900/30 transition-colors text-red-500 hover:text-red-400 group cursor-pointer"
             >
               <LogOut size={18} className="group-hover:scale-110 transition-transform" />
               <span className="text-[9px] font-bold uppercase tracking-wider">Leave Room</span>
