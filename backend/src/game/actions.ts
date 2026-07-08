@@ -46,6 +46,51 @@ const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string
 };
 
 /**
+ * Advanced helper to transition the active turn to the next player who still holds cards.
+ * If only 1 player remains with cards, the game/round is immediately ended.
+ */
+const advanceTurn = (
+  state: UnoGameState,
+  players: Player[],
+  skipCount: number = 1
+): void => {
+  const activePlayersWithCards = players.filter(p => (state.hands[p.id]?.length || 0) > 0);
+  
+  if (activePlayersWithCards.length <= 1) {
+    state.status = 'ended';
+    if (!state.winnerId) {
+      const finishedPlayer = players.find(p => (state.hands[p.id]?.length || 0) === 0);
+      state.winnerId = finishedPlayer ? finishedPlayer.id : players[0].id;
+    }
+    return;
+  }
+
+  const currentIndex = players.findIndex(p => p.id === state.currentPlayerId);
+  if (currentIndex === -1) return;
+
+  let currentIdx = currentIndex;
+  
+  // Advance by skipCount active player positions
+  for (let s = 0; s < skipCount; s++) {
+    let foundActive = false;
+    for (let step = 0; step < players.length; step++) {
+      currentIdx = getNextPlayerIndex(currentIdx, state.direction, players.length, 1);
+      const candidatePlayer = players[currentIdx];
+      if ((state.hands[candidatePlayer.id]?.length || 0) > 0) {
+        foundActive = true;
+        break;
+      }
+    }
+    if (!foundActive) {
+      state.status = 'ended';
+      return;
+    }
+  }
+
+  state.currentPlayerId = players[currentIdx].id;
+};
+
+/**
  * Validates a 7-card opening hand according to smart shuffle rules:
  * - No more than 4 cards of the same color
  * - No more than 3 action cards
@@ -217,8 +262,7 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
     state.lastAction = { type: 'draw', playerId, drawCount: penalty };
 
     // The player who eats the chain is skipped (advance by 1 past them).
-    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-    state.currentPlayerId = players[nextIndex].id;
+    advanceTurn(state, players, 1);
     logger.debug(`[DRAW CHAIN] ${playerId} ate ${penalty} cards and was skipped.`);
     return state;
   }
@@ -245,8 +289,7 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
 
   // Nothing playable (or the deck was exhausted) — pass the turn.
   state.drawnCardId = null;
-  const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-  state.currentPlayerId = players[nextIndex].id;
+  advanceTurn(state, players, 1);
 
   state.lastAction = { type: 'draw', playerId, drawCount: drawnCard ? 1 : 0 };
 
@@ -271,9 +314,7 @@ export const passTurnAction = (state: UnoGameState, players: Player[], playerId:
 
   state.drawnCardId = null;
 
-  const currentIndex = players.findIndex(p => p.id === playerId);
-  const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-  state.currentPlayerId = players[nextIndex].id;
+  advanceTurn(state, players, 1);
 
   state.lastAction = { type: 'pass', playerId };
   logger.debug(`[PASS] ${playerId} kept their drawn card and passed the turn.`);
@@ -334,11 +375,18 @@ export const playCardAction = (
   // Reset wild color chooser variables
   state.wildColor = null;
 
-  // Check if player won immediately (played their last card)
+  // Check if player finished their hand
   if (playerHand.length === 0) {
-    state.status = 'ended';
-    state.winnerId = playerId;
-    return state;
+    if (!state.winnerId) {
+      state.winnerId = playerId;
+    }
+
+    const activePlayersWithCards = players.filter(p => (state.hands[p.id]?.length || 0) > 0);
+    if (activePlayersWithCards.length <= 1) {
+      state.status = 'ended';
+      state.lastAction = { type: 'play', playerId, card, unoPenalty: false };
+      return state;
+    }
   }
 
   // Auto UNO penalty: if this play dropped the player to exactly 1 card and they
@@ -372,8 +420,7 @@ export const playCardAction = (
     // player who must stack another draw card or eat the accumulated stack.
     state.drawStack += 2;
     state.pendingDrawType = 'draw_two';
-    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-    state.currentPlayerId = players[nextIndex].id;
+    advanceTurn(state, players, 1);
   } else {
     let skipCount = 1;
 
@@ -385,8 +432,7 @@ export const playCardAction = (
     }
 
     // Advance turn
-    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, skipCount);
-    state.currentPlayerId = players[nextIndex].id;
+    advanceTurn(state, players, skipCount);
   }
 
   state.lastAction = { type: 'play', playerId, card, unoPenalty };
@@ -419,20 +465,17 @@ export const chooseColorAction = (
 
   // Retrieve top card (Wild / Wild Draw Four)
   const topCard = state.discardPile[state.discardPile.length - 1];
-  const currentIndex = players.findIndex(p => p.id === playerId);
 
   if (topCard.value === 'wild_draw_four') {
     // The +4's cards were already banked into the draw chain when it was played.
     // Just pass the turn to the next player, who may stack another +4 or eat the
     // accumulated stack.
-    const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-    state.currentPlayerId = players[nextIndex].id;
+    advanceTurn(state, players, 1);
     return state;
   }
 
   // Plain Wild: advance one seat normally.
-  const nextIndex = getNextPlayerIndex(currentIndex, state.direction, players.length, 1);
-  state.currentPlayerId = players[nextIndex].id;
+  advanceTurn(state, players, 1);
 
   return state;
 };
