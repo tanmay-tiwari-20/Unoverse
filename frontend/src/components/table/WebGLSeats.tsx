@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameStore } from '../../store/useGameStore';
 import { getSeatCoords } from '../../utils/seating';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 interface HumanSilhouetteProps {
   angle: number;
@@ -33,10 +34,12 @@ const HumanSilhouette: React.FC<HumanSilhouetteProps> = ({ angle, radius, isActi
   const rotation = useMemo(() => {
     return new THREE.Euler(0, angle + Math.PI, 0);
   }, [angle]);
+  const prefersReduced = useReducedMotion();
 
   // Idle animations
   useFrame((state) => {
     if (!groupRef.current || !headRef.current) return;
+    if (prefersReduced) return;
     
     const time = state.clock.getElapsedTime();
     const offset = angle * 10; // offset animation phase per player

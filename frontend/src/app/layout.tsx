@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Lilita_One, Fredoka } from "next/font/google";
+import { MotionProvider } from "../components/providers/MotionProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -59,7 +60,7 @@ export default function RootLayout({
         className="min-h-full flex flex-col bg-slate-950 text-slate-50 bg-grid-pattern antialiased"
         suppressHydrationWarning
       >
-        {children}
+        <MotionProvider>{children}</MotionProvider>
       </body>
     </html>
   );

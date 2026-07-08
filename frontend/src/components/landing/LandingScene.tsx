@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RoomEnvironment } from '../table/RoomEnvironment';
 import { PhysicalCard } from '../cards/PhysicalCard';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 /**
  * Premium 3D background for the landing page.
@@ -13,15 +14,18 @@ import { PhysicalCard } from '../cards/PhysicalCard';
  */
 const LandingSceneContent: React.FC = () => {
   const cardsGroupRef = useRef<THREE.Group>(null);
+  const prefersReduced = useReducedMotion();
 
   // Subtle ambient rotation for the scattered cards
   useFrame(({ clock }) => {
+    if (prefersReduced) return;
     if (cardsGroupRef.current) {
       const t = clock.getElapsedTime();
       // Extremely subtle table floating or breathing effect
       cardsGroupRef.current.position.y = Math.sin(t * 0.8) * 0.002;
     }
   });
+
 
   return (
     <group ref={cardsGroupRef}>

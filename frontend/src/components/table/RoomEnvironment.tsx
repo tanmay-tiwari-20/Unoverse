@@ -5,6 +5,22 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
+
+// Suppress Three.js Clock deprecation warnings originating from React Three Fiber v9 internals
+if (typeof window !== 'undefined') {
+  const originalWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    if (
+      args[0] &&
+      typeof args[0] === 'string' &&
+      args[0].includes('THREE.Clock: This module has been deprecated')
+    ) {
+      return;
+    }
+    originalWarn(...args);
+  };
+}
 
 export interface RoomEnvironmentProps {
   numPlayers: number;
@@ -69,8 +85,10 @@ function Flies() {
   const fly2Ref = useRef<THREE.Group>(null);
   const wings1Ref = useRef<THREE.Group>(null);
   const wings2Ref = useRef<THREE.Group>(null);
+  const prefersReduced = useReducedMotion();
 
   useFrame(({ clock }) => {
+    if (prefersReduced) return;
     const t = clock.getElapsedTime();
     if (fly1Ref.current && wings1Ref.current) {
       fly1Ref.current.position.x = Math.sin(t * 1.5) * 0.3;
@@ -271,8 +289,10 @@ function HangingLamp({ isLandingPage }: { isLandingPage?: boolean }) {
       spotRef.current.shadow.camera.far = 15;
     }
   }, []);
+  const prefersReduced = useReducedMotion();
 
   useFrame(({ clock }) => {
+    if (prefersReduced) return;
     if (isLandingPage && lampGroupRef.current) {
       const t = clock.getElapsedTime();
       // Extremely subtle, slow swing (about 1 degree)
@@ -563,7 +583,7 @@ export const RoomEnvironment: React.FC<RoomEnvironmentProps> = ({ numPlayers, lo
 
   return (
     <Canvas
-      shadows={enableShadows}
+      shadows={enableShadows ? { type: THREE.PCFShadowMap } : false}
       camera={{ fov: 60, near: 0.1, far: 100 }}
       gl={{
         antialias: postProcessing,

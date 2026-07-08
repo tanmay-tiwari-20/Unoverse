@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { getReducedMotionPreference } from '../hooks/useReducedMotion';
 
 interface SettingsState {
   // UI State (Not persisted)
@@ -24,6 +25,7 @@ interface SettingsState {
   cardAnimations: boolean;
   cameraMotion: boolean;
   cameraSensitivity: number;
+  reducedMotion: boolean;
 
   // Setters
   setIsSettingsOpen: (isOpen: boolean) => void;
@@ -46,6 +48,7 @@ interface SettingsState {
   setCardAnimations: (enabled: boolean) => void;
   setCameraMotion: (enabled: boolean) => void;
   setCameraSensitivity: (sens: number) => void;
+  setReducedMotion: (enabled: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -73,6 +76,7 @@ export const useSettingsStore = create<SettingsState>()(
       cardAnimations: true,
       cameraMotion: true,
       cameraSensitivity: 50,
+      reducedMotion: false,
 
       // UI Actions (don't technically need persistence but they are part of the store)
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
@@ -96,6 +100,7 @@ export const useSettingsStore = create<SettingsState>()(
       setCardAnimations: (enabled) => set({ cardAnimations: enabled }),
       setCameraMotion: (enabled) => set({ cameraMotion: enabled }),
       setCameraSensitivity: (sens) => set({ cameraSensitivity: sens }),
+      setReducedMotion: (enabled) => set({ reducedMotion: enabled }),
     }),
     {
       name: 'uno-real-settings', // unique name
@@ -114,7 +119,21 @@ export const useSettingsStore = create<SettingsState>()(
         cardAnimations: state.cardAnimations,
         cameraMotion: state.cameraMotion,
         cameraSensitivity: state.cameraSensitivity,
+        reducedMotion: state.reducedMotion,
       }),
+      // On first load (no persisted data), respect the OS reduced-motion pref
+      // and auto-disable heavy animation settings.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const osPrefers = getReducedMotionPreference();
+        if (osPrefers && !state.reducedMotion) {
+          // First time user with OS reduced-motion enabled
+          state.setReducedMotion(true);
+          state.setCardAnimations(false);
+          state.setCameraMotion(false);
+          state.setVfxQuality('low');
+        }
+      },
     }
   )
 );

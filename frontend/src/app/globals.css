@@ -278,3 +278,21 @@ input {
   background-image: radial-gradient(rgba(255, 255, 255, 0.06) 2px, transparent 2px);
   background-size: 26px 26px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Accessibility: Reduced Motion                                       */
+/* When the OS has prefers-reduced-motion: reduce, kill all CSS         */
+/* animations and transitions globally. Framer Motion is handled        */
+/* separately via <MotionConfig reducedMotion="user">, and Three.js     */
+/* useFrame loops are gated by the useReducedMotion() hook.             */
+/* ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
