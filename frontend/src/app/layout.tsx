@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Lilita_One, Fredoka } from "next/font/google";
 import { MotionProvider } from "../components/providers/MotionProvider";
 import { PWARegistration } from "../components/providers/PWARegistration";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,8 +29,16 @@ const fredoka = Fredoka({
 
 export const metadata: Metadata = {
   title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
-  description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
-  keywords: ["UNO", "multiplayer game", "3D card game", "Unoverse", "React Three Fiber", "Socket.io"],
+  description:
+    "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+  keywords: [
+    "UNO",
+    "multiplayer game",
+    "3D card game",
+    "Unoverse",
+    "React Three Fiber",
+    "Socket.io",
+  ],
   authors: [{ name: "Unoverse Team" }],
   metadataBase: new URL("https://unoverse-ivory.vercel.app"),
   alternates: {
@@ -37,7 +46,8 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
-    description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+    description:
+      "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
     url: "https://unoverse-ivory.vercel.app",
     siteName: "Unoverse",
     images: [
@@ -54,7 +64,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
-    description: "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+    description:
+      "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
     images: ["/web-app-manifest-512x512.png"],
   },
   appleWebApp: {
@@ -92,10 +103,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${lilitaOne.variable} ${fredoka.variable} h-full antialiased dark`}
       suppressHydrationWarning
     >
-      <body 
+      <body
         className="min-h-full flex flex-col bg-slate-950 text-slate-50 bg-grid-pattern antialiased"
         suppressHydrationWarning
       >
+        <Analytics />
         <PWARegistration />
         <MotionProvider>{children}</MotionProvider>
       </body>
