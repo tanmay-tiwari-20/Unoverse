@@ -4,9 +4,6 @@ An immersive **3D real-time multiplayer UNO** game. Sit around a virtual table w
 friends, play with a fully server-authoritative rules engine, react with emotes, and
 talk over built-in WebRTC voice chat.
 
-> ⚠️ This repo targets a recent Next.js (16) with breaking changes from older versions.
-> See [`frontend/AGENTS.md`](frontend/AGENTS.md) before touching the frontend.
-
 ## Stack
 
 | Layer | Tech |
