@@ -60,6 +60,63 @@ export const chooseColorSchema = z.object({
   color: cardColor,
 });
 
+/**
+ * House rules update. Every field is optional so a client may send only what it
+ * changed; the server merges onto the existing rules and normalizes (clamping
+ * numbers and enforcing dependencies), so bounds here are intentionally loose —
+ * normalizeHouseRules is the authority. Unknown keys are stripped.
+ */
+export const houseRulesSchema = z
+  .object({
+    jumpIn: z.boolean(),
+    sevenSwap: z.boolean(),
+    zeroRotate: z.boolean(),
+    drawThenPlay: z.boolean(),
+    forcePlayDrawnCard: z.boolean(),
+    drawUntilPlayable: z.boolean(),
+    mustPlayIfPlayable: z.boolean(),
+
+    stacking: z.boolean(),
+    stackDrawTwoOnWildFour: z.boolean(),
+    stackToEat: z.boolean(),
+
+    challengeWildDrawFour: z.boolean(),
+    bluffingWildDrawFour: z.boolean(),
+
+    mustSayUno: z.boolean(),
+    unoCallMode: z.enum(['manual', 'auto']),
+    allowLateUno: z.boolean(),
+    unoPenaltyCards: z.number().int().min(0).max(50),
+
+    reverseAsSkipInTwoPlayer: z.boolean(),
+    skipChaining: z.boolean(),
+
+    allowWinWithWild: z.boolean(),
+    allowWinWithDrawCard: z.boolean(),
+    allowWinWithActionCard: z.boolean(),
+    numberCardFinishOnly: z.boolean(),
+
+    autoReshuffle: z.boolean(),
+    turnTimer: z.boolean(),
+    turnTimerSeconds: z.number().int().min(0).max(600),
+    spectatorMode: z.boolean(),
+    allowRejoin: z.boolean(),
+    targetScore: z.number().int().min(0).max(100000),
+  })
+  .partial();
+
+export const updateHouseRulesSchema = z.object({
+  rules: houseRulesSchema,
+});
+
+export const jumpInSchema = z.object({
+  cardId,
+});
+
+export const swapTargetSchema = z.object({
+  targetId: z.string().min(1).max(100),
+});
+
 export type CreateRoomPayload = z.infer<typeof createRoomSchema>;
 export type JoinRoomPayload = z.infer<typeof joinRoomSchema>;
 export type SendReactionPayload = z.infer<typeof sendReactionSchema>;
@@ -67,3 +124,7 @@ export type WebrtcSignalPayload = z.infer<typeof webrtcSignalSchema>;
 export type VoiceStatusPayload = z.infer<typeof voiceStatusSchema>;
 export type PlayCardPayload = z.infer<typeof playCardSchema>;
 export type ChooseColorPayload = z.infer<typeof chooseColorSchema>;
+export type HouseRulesPayload = z.infer<typeof houseRulesSchema>;
+export type UpdateHouseRulesPayload = z.infer<typeof updateHouseRulesSchema>;
+export type JumpInPayload = z.infer<typeof jumpInSchema>;
+export type SwapTargetPayload = z.infer<typeof swapTargetSchema>;

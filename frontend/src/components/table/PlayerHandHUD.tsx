@@ -4,14 +4,14 @@ import React from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HtmlCard } from '../cards/HtmlCard';
-import { isValidMove } from '../../lib/cards/cardEngine';
+import { isValidMove, CardItem } from '../../lib/cards/cardEngine';
 import { useViewport } from '../../hooks/useViewport';
 
 import { useSocket } from '../../hooks/useSocket';
 
 export const PlayerHandHUD: React.FC = () => {
-  const { room, player, currentPlayerId, playerCards, isProcessing, gameStatus, discardPile, wildColor, pendingDrawType } = useGameStore();
-  const { playCard } = useSocket();
+  const { room, player, currentPlayerId, playerCards, isProcessing, gameStatus, discardPile, wildColor, pendingDrawType, houseRules } = useGameStore();
+  const { playCard, jumpIn } = useSocket();
   const { width, isMobile, isTablet, isTouch } = useViewport();
 
   // Hide hand when game is not active or has ended
@@ -26,6 +26,17 @@ export const PlayerHandHUD: React.FC = () => {
   const cardCount = hand.length;
   const isMyTurn = currentPlayerId === player.id && !isProcessing;
   const topCard = discardPile.length > 0 ? discardPile[discardPile.length - 1] : null;
+
+  // Jump-In: when the rule is on and it's NOT our turn, a card that is identical
+  // (same color AND value) to the top card can be played out of turn to seize it.
+  const jumpInEnabled = !!houseRules?.jumpIn && gameStatus === 'playing' && !pendingDrawType && !isProcessing;
+  const canJumpIn = (card: CardItem): boolean =>
+    jumpInEnabled &&
+    currentPlayerId !== player.id &&
+    !!topCard &&
+    topCard.color !== 'wild' &&
+    card.color === topCard.color &&
+    card.value === topCard.value;
 
   // ---------------------------------------------------------------------------
   // Responsive sizing. Rather than fixed Tailwind sizes (which made cards tiny
@@ -84,17 +95,18 @@ export const PlayerHandHUD: React.FC = () => {
     const normalizedIdx = cardCount > 1 ? (idx / (cardCount - 1)) * 2 - 1 : 0; // -1 to 1
     const yArchOffset = Math.abs(normalizedIdx) * archMax;
 
-    const canPlay = isMyTurn;
     // Highlight every card that is a legal play this turn (server is the final
     // authority; this just mirrors the same rule for visual affordance).
     const isPlayable = isMyTurn && !!topCard && isValidMove(card, topCard, wildColor, pendingDrawType);
+    const isJumpIn = canJumpIn(card);
+    const canPlay = isMyTurn || isJumpIn;
 
     return (
       <motion.div
         key={card.id}
         initial={{ y: 100, opacity: 0 }}
         animate={{
-          y: isPlayable ? yArchOffset - liftPlayable : yArchOffset,
+          y: (isPlayable || isJumpIn) ? yArchOffset - liftPlayable : yArchOffset,
           rotate: angle,
           opacity: 1
         }}
@@ -110,14 +122,16 @@ export const PlayerHandHUD: React.FC = () => {
           height: cardH,
           marginLeft: idx === 0 ? 0 : -(cardW - step),
           transformOrigin: 'bottom center',
-          zIndex: isPlayable ? 40 : idx,
+          zIndex: (isPlayable || isJumpIn) ? 40 : idx,
         }}
         onClick={() => {
-          if (canPlay) playCard(card.id);
+          if (isMyTurn) playCard(card.id);
+          else if (isJumpIn) jumpIn(card.id);
         }}
         className={`relative shrink-0 pointer-events-auto
           ${canPlay ? 'cursor-pointer hover:shadow-2xl' : 'opacity-80 cursor-not-allowed'}
           ${isPlayable ? 'rounded-xl ring-[3px] sm:ring-4 ring-yellow-300 shadow-[0_0_22px_6px_rgba(253,224,71,0.55)]' : ''}
+          ${isJumpIn ? 'rounded-xl ring-[3px] sm:ring-4 ring-fuchsia-400 shadow-[0_0_22px_6px_rgba(232,121,249,0.55)]' : ''}
           transition-shadow duration-200 ease-out`}
       >
         <HtmlCard color={card.color} value={card.value} />

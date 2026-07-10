@@ -1,6 +1,7 @@
 import { CardItem, CardColor, CardValue } from '../game/deck';
 import { UnoGameState } from '../game/gameState';
 import { Player } from '../rooms/roomManager';
+import { HouseRules, normalizeHouseRules } from '../game/houseRules';
 
 /**
  * Deterministic builders for engine unit tests. The real startGameState() uses a
@@ -41,6 +42,11 @@ export interface StateOverrides {
   drawnCardId?: string | null;
   unoCalled?: Record<string, boolean>;
   winnerId?: string | null;
+  rules?: Partial<HouseRules>;
+  swapChooserId?: string | null;
+  challengeableById?: string | null;
+  wildFourPlayerId?: string | null;
+  wildFourWasBluff?: boolean | null;
 }
 
 /**
@@ -62,10 +68,15 @@ export const makeState = (overrides: StateOverrides = {}): UnoGameState => {
     wildColor: overrides.wildColor ?? null,
     status: overrides.status ?? 'playing',
     colorChooserId: overrides.colorChooserId ?? null,
+    swapChooserId: overrides.swapChooserId ?? null,
     winnerId: overrides.winnerId ?? null,
     unoCalled: overrides.unoCalled ?? unoCalled,
+    rules: normalizeHouseRules(overrides.rules),
     drawStack: overrides.drawStack ?? 0,
     pendingDrawType: overrides.pendingDrawType ?? null,
+    wildFourPlayerId: overrides.wildFourPlayerId ?? null,
+    wildFourWasBluff: overrides.wildFourWasBluff ?? null,
+    challengeableById: overrides.challengeableById ?? null,
     drawnCardId: overrides.drawnCardId ?? null,
   };
 };

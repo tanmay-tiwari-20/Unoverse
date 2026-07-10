@@ -3,6 +3,7 @@ import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextPlayerIndex } from '../game/turnManager';
 import { calculateRoundPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
+import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../game/houseRules';
 import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
 
@@ -48,6 +49,9 @@ export interface Room {
   status: 'lobby' | 'playing';
   game?: UnoGameState;
   match?: MatchState;
+  // Host-configured house rules for this lobby. Editable only while status is
+  // 'lobby'; snapshotted into the game state (locked) when a round starts.
+  houseRules: HouseRules;
 }
 
 class RoomManager {
@@ -79,6 +83,9 @@ class RoomManager {
   public async hydrate(): Promise<void> {
     const rooms = await this.store.loadAll();
     for (const room of rooms) {
+      // Backward compatibility: rooms persisted before House Rules existed (or with
+      // a partial rule set) are normalized against current defaults on load.
+      room.houseRules = normalizeHouseRules(room.houseRules);
       this.rooms.set(room.code.toUpperCase(), room);
     }
     if (rooms.length) {
@@ -172,6 +179,7 @@ class RoomManager {
       hostId: '',
       players: [],
       status: 'lobby',
+      houseRules: { ...DEFAULT_HOUSE_RULES },
     };
     this.rooms.set(code, newRoom);
     logger.debug(`[ROOM_CREATED] Code: ${code}`);
@@ -238,6 +246,12 @@ class RoomManager {
     const name = player ? player.name : spectator!.name;
     const isPlayer = !!player;
     const key = `${upperCode}:${name.toLowerCase()}`;
+
+    // Rejoin support can be disabled via house rules — skip the grace period so the
+    // seat is freed immediately on disconnect.
+    if (room.houseRules && room.houseRules.allowRejoin === false) {
+      return null;
+    }
 
     // Cancel existing timer if any (defensive check)
     if (this.disconnectTimers.has(key)) {
@@ -380,6 +394,10 @@ class RoomManager {
     const shouldSpectate = room.players.length >= 6;
 
     if (shouldSpectate) {
+      // Spectator mode can be disabled via house rules — reject instead of seating.
+      if (room.houseRules && room.houseRules.spectatorMode === false) {
+        throw new Error('This table is full and spectating is disabled.');
+      }
       if (!room.spectators) {
         room.spectators = [];
       }
@@ -542,6 +560,29 @@ class RoomManager {
     return null;
   }
 
+  /**
+   * Update a room's house rules. Host-only, and only while the room is in the
+   * lobby — once a game is in progress the rules are locked. The incoming partial
+   * is merged onto the existing rules and normalized (dependencies enforced,
+   * numbers clamped), so a client can send just the fields it changed.
+   */
+  public updateHouseRules(code: string, hostSocketId: string, partial: Partial<HouseRules>): Room {
+    const room = this.rooms.get(code.toUpperCase());
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.hostId !== hostSocketId) {
+      throw new Error('Only the host can change the house rules');
+    }
+    if (room.status !== 'lobby') {
+      throw new Error('House rules are locked once the game has started');
+    }
+
+    room.houseRules = normalizeHouseRules({ ...room.houseRules, ...partial });
+    this.markDirty(code);
+    return room;
+  }
+
   // Set room game status to playing. Starts either a brand-new match (first play,
   // or after a previous match was won) or the next round of the ongoing match.
   public startGame(code: string, hostSocketId: string): Room {
@@ -556,12 +597,16 @@ class RoomManager {
       throw new Error('At least 2 players are required to start the game');
     }
 
+    // Lock in the current house rules for this game.
+    const rules = normalizeHouseRules(room.houseRules);
+    room.houseRules = rules;
+
     // Begin a fresh match if there is none yet or the previous one was already
     // won; otherwise this is the next round and scores carry over.
     if (!room.match || room.match.matchWinnerName) {
       room.match = {
         scores: {},
-        targetScore: DEFAULT_TARGET_SCORE,
+        targetScore: rules.targetScore ?? DEFAULT_TARGET_SCORE,
         round: 1,
         lastRound: null,
         matchWinnerName: null,
@@ -579,7 +624,7 @@ class RoomManager {
     }
 
     room.status = 'playing';
-    room.game = startGameState(room.players);
+    room.game = startGameState(room.players, rules);
     this.markDirty(code);
     return room;
   }

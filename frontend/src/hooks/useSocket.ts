@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useGameStore } from '../store/useGameStore';
 import { CardColor, CardItem } from '../lib/cards/cardEngine';
+import { HouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
 import { getSeatCoords } from '../utils/seating';
 import { logger } from '../utils/logger';
@@ -168,6 +169,7 @@ export const useSocket = () => {
         saveSecret(room.code, player.name, player.secret);
       }
       setRoom(room);
+      if (room?.houseRules) useGameStore.getState().setHouseRules(room.houseRules);
       setPlayer(player);
       setIsSpectator(!!isSpectator);
       setError(null);
@@ -179,7 +181,27 @@ export const useSocket = () => {
     socketInstance.on('lobby-updated', (updatedRoom) => {
       logger.debug('[Socket] Lobby updated:', updatedRoom);
       setRoom(updatedRoom);
+      if (updatedRoom?.houseRules) useGameStore.getState().setHouseRules(updatedRoom.houseRules);
       setIsProcessing(false);
+    });
+
+    // House rules changed by the host — mirror them locally in real time.
+    socketInstance.off('house-rules-updated');
+    socketInstance.on('house-rules-updated', ({ houseRules }) => {
+      logger.debug('[Socket] House rules updated');
+      if (houseRules) useGameStore.getState().setHouseRules(houseRules);
+    });
+
+    // A Wild Draw Four was challenged — surface the outcome.
+    socketInstance.off('wild-four-challenge');
+    socketInstance.on('wild-four-challenge', ({ challengerName, accusedName, success }) => {
+      soundManager.play('card_draw');
+      addToast(
+        success
+          ? `${challengerName} caught ${accusedName}'s +4 bluff!`
+          : `${challengerName} challenged ${accusedName}'s +4 and was wrong!`,
+        success ? 'success' : 'info'
+      );
     });
 
     socketInstance.off('game-started');
@@ -319,6 +341,8 @@ export const useSocket = () => {
       socketInstance.off('game-ended');
       socketInstance.off('uno-penalty');
       socketInstance.off('game-stopped');
+      socketInstance.off('house-rules-updated');
+      socketInstance.off('wild-four-challenge');
       socketInstance.off('error');
       socketInstance.off('player-reacted');
       socketInstance.off('player-joined');
@@ -414,6 +438,38 @@ export const useSocket = () => {
     }
   };
 
+  // Host-only: push a house-rules change. The server validates authority + lock.
+  const updateHouseRules = (rules: Partial<HouseRules>) => {
+    if (socket) {
+      socket.emit('update-house-rules', { rules });
+    }
+  };
+
+  // Play an identical card out of turn (Jump-In house rule).
+  const jumpIn = (cardId: string) => {
+    const state = useGameStore.getState();
+    if (state.isProcessing) return;
+    if (socket) {
+      useGameStore.setState({ isProcessing: true });
+      socket.emit('jump-in', { cardId });
+    }
+  };
+
+  // Choose the opponent to swap hands with after a 7 (Seven-O house rule).
+  const chooseSwapTarget = (targetId: string) => {
+    if (socket) {
+      useGameStore.setState({ isProcessing: true });
+      socket.emit('swap-target', { targetId });
+    }
+  };
+
+  // Challenge a pending Wild Draw Four (house rule).
+  const challengeWildFour = () => {
+    if (socket) {
+      socket.emit('challenge-wild-four');
+    }
+  };
+
   return {
     socket,
     createRoom,
@@ -425,5 +481,9 @@ export const useSocket = () => {
     passTurn,
     chooseColor,
     callUno,
+    updateHouseRules,
+    jumpIn,
+    chooseSwapTarget,
+    challengeWildFour,
   };
 };

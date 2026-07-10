@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Socket } from 'socket.io-client';
 import { Room, Player } from '../types/game';
 import { CardItem, CardColor } from '../lib/cards/cardEngine';
+import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
 import { logger } from '../utils/logger';
 
@@ -35,8 +36,13 @@ interface GameState {
   currentPlayerSeat: number | null;
   direction: 'clockwise' | 'counter-clockwise' | null;
   wildColor: CardColor | null;
-  gameStatus: 'lobby' | 'playing' | 'awaiting_color_selection' | 'ended';
+  gameStatus: 'lobby' | 'playing' | 'awaiting_color_selection' | 'awaiting_swap_target' | 'ended';
   colorChooserId: string | null;
+  swapChooserId: string | null;
+  challengeableById: string | null;
+  // Active house rules. Sourced from the lobby (host-editable) and locked into the
+  // game payload once a round starts. Always a complete, normalized object.
+  houseRules: HouseRules;
   winnerId: string | null;
   winnerName: string | null;
   unoCalled: Record<string, boolean>; // socketId -> boolean
@@ -57,6 +63,7 @@ interface GameState {
   setTableTheme: (theme: 'classic-green' | 'premium-blue' | 'dark-night') => void;
   toggleMute: () => void;
   setGameStoppedNotice: (val: boolean) => void;
+  setHouseRules: (rules: HouseRules) => void;
   
   setSocket: (socket: Socket | null) => void;
   setIsProcessing: (val: boolean) => void;
@@ -88,8 +95,10 @@ interface GameState {
     currentPlayerSeat: number;
     direction: 'clockwise' | 'counter-clockwise';
     wildColor: CardColor | null;
-    gameStatus: 'playing' | 'awaiting_color_selection' | 'ended';
+    gameStatus: 'playing' | 'awaiting_color_selection' | 'awaiting_swap_target' | 'ended';
     colorChooserId: string | null;
+    swapChooserId?: string | null;
+    challengeableById?: string | null;
     winnerId: string | null;
     winnerName: string | null;
     unoCalled: Record<string, boolean>;
@@ -98,6 +107,7 @@ interface GameState {
     drawnCardId?: string | null;
     turnDeadline?: number | null;
     match?: MatchState | null;
+    houseRules?: HouseRules | null;
   }) => void;
   
   reset: () => void;
@@ -125,6 +135,9 @@ export const useGameStore = create<GameState>((set) => ({
   wildColor: null,
   gameStatus: 'lobby',
   colorChooserId: null,
+  swapChooserId: null,
+  challengeableById: null,
+  houseRules: { ...DEFAULT_HOUSE_RULES },
   winnerId: null,
   winnerName: null,
   unoCalled: {},
@@ -153,6 +166,7 @@ export const useGameStore = create<GameState>((set) => ({
   })),
   setTableTheme: (tableTheme) => set({ tableTheme }),
   setGameStoppedNotice: (gameStoppedNotice) => set({ gameStoppedNotice }),
+  setHouseRules: (houseRules) => set({ houseRules: normalizeHouseRules(houseRules) }),
   toggleMute: () => set((state) => {
     const nextMuted = !state.isMuted;
     soundManager.setEnabled(!nextMuted);
@@ -214,6 +228,8 @@ export const useGameStore = create<GameState>((set) => ({
     wildColor: null,
     gameStatus: 'lobby',
     colorChooserId: null,
+    swapChooserId: null,
+    challengeableById: null,
     winnerId: null,
     winnerName: null,
     unoCalled: {},
@@ -237,6 +253,9 @@ export const useGameStore = create<GameState>((set) => ({
       wildColor: payload.wildColor,
       gameStatus: payload.gameStatus,
       colorChooserId: payload.colorChooserId,
+      swapChooserId: payload.swapChooserId ?? null,
+      challengeableById: payload.challengeableById ?? null,
+      houseRules: payload.houseRules ? normalizeHouseRules(payload.houseRules) : state.houseRules,
       winnerId: payload.winnerId,
       winnerName: payload.winnerName,
       unoCalled: payload.unoCalled,
@@ -270,6 +289,8 @@ export const useGameStore = create<GameState>((set) => ({
     wildColor: null,
     gameStatus: 'lobby',
     colorChooserId: null,
+    swapChooserId: null,
+    challengeableById: null,
     winnerId: null,
     winnerName: null,
     unoCalled: {},

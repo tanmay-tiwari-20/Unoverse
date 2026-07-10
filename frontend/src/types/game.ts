@@ -1,3 +1,5 @@
+import { HouseRules } from '../lib/houseRules';
+
 export interface Player {
   id: string; // Socket ID
   name: string;
@@ -6,9 +8,16 @@ export interface Player {
   secret?: string; // Private per-session token — only present on your own player.
 }
 
+export interface Spectator {
+  id: string;
+  name: string;
+}
+
 export interface Room {
   code: string;
   hostId: string;
   players: Player[];
+  spectators?: Spectator[];
   status: 'lobby' | 'playing';
+  houseRules?: HouseRules; // present on all rooms; optional for backward compatibility
 }

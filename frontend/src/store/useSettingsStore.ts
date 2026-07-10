@@ -8,6 +8,7 @@ interface SettingsState {
   isReportBugOpen: boolean;
   isControlsOpen: boolean;
   isAboutOpen: boolean;
+  isHouseRulesOpen: boolean;
 
   // Persisted Settings
   masterVolume: number;
@@ -32,6 +33,7 @@ interface SettingsState {
   setIsReportBugOpen: (isOpen: boolean) => void;
   setIsControlsOpen: (isOpen: boolean) => void;
   setIsAboutOpen: (isOpen: boolean) => void;
+  setIsHouseRulesOpen: (isOpen: boolean) => void;
 
   setMasterVolume: (vol: number) => void;
   setGameVolume: (vol: number) => void;
@@ -59,6 +61,7 @@ export const useSettingsStore = create<SettingsState>()(
       isReportBugOpen: false,
       isControlsOpen: false,
       isAboutOpen: false,
+      isHouseRulesOpen: false,
 
       // Default Persisted Settings
       masterVolume: 100,
@@ -83,6 +86,7 @@ export const useSettingsStore = create<SettingsState>()(
       setIsReportBugOpen: (isOpen) => set({ isReportBugOpen: isOpen }),
       setIsControlsOpen: (isOpen) => set({ isControlsOpen: isOpen }),
       setIsAboutOpen: (isOpen) => set({ isAboutOpen: isOpen }),
+      setIsHouseRulesOpen: (isOpen) => set({ isHouseRulesOpen: isOpen }),
 
       // Settings Actions
       setMasterVolume: (vol) => set({ masterVolume: vol }),

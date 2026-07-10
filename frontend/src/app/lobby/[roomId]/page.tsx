@@ -34,12 +34,17 @@ import {
   CheckCircle2,
   AlertTriangle,
   Play,
-  WifiOff
+  WifiOff,
+  ScrollText,
+  Gavel,
+  ArrowLeftRight
 } from 'lucide-react';
 import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
+import { summarizeActiveRules } from '../../../lib/houseRules';
 import { PlayerNameplates } from '../../../components/table/PlayerNameplates';
 import { TurnTimer } from '../../../components/table/TurnTimer';
 import { SettingsModal } from '../../../components/ui/SettingsModal';
+import { HouseRulesModal } from '../../../components/ui/HouseRulesModal';
 import { HelpModals } from '../../../components/ui/HelpModals';
 import { FPSCounter } from '../../../components/ui/FPSCounter';
 import { useVoiceChat } from '../../../hooks/useVoiceChat';
@@ -259,7 +264,9 @@ export default function LobbyPage() {
     chooseColor,
     callUno,
     drawCard,
-    passTurn
+    passTurn,
+    chooseSwapTarget,
+    challengeWildFour
   } = useSocket();
 
   const { 
@@ -282,6 +289,9 @@ export default function LobbyPage() {
     drawStack,
     pendingDrawType,
     drawnCardId,
+    swapChooserId,
+    challengeableById,
+    houseRules,
     match,
     clearAllCards,
     isProcessing,
@@ -300,7 +310,7 @@ export default function LobbyPage() {
 
   const { toggleMic } = useVoiceChat();
   const { isMicEnabled, isSpeakerEnabled, setSpeakerEnabled } = useVoiceStore();
-  const { setIsSettingsOpen } = useSettingsStore();
+  const { setIsSettingsOpen, setIsHouseRulesOpen } = useSettingsStore();
   
   const [copied, setCopied] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
@@ -497,6 +507,9 @@ export default function LobbyPage() {
       {/* Premium Settings Modal */}
       <SettingsModal />
 
+      {/* House Rules Configuration Modal */}
+      <HouseRulesModal />
+
       {/* Help & Utility Modals */}
       <HelpModals />
       <FPSCounter />
@@ -649,29 +662,72 @@ export default function LobbyPage() {
             {/* Display state alert banners */}
             <div className="flex flex-col items-center gap-1.5">
               {gameStatus === 'lobby' ? (
-                isHost ? (
-                  <div className="flex flex-col items-center gap-1.5">
-                    <button
-                      disabled={!canStart || isProcessing || isSpectator}
-                      onClick={() => {
-                        setIsProcessing(true);
-                        startGame();
-                      }}
-                      className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-2.5 px-7 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                    >
-                      <Play size={15} className="fill-white" /> Start Game
-                    </button>
-                    {!canStart && (
+                <div className="flex flex-col items-center gap-2">
+                  {isHost ? (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={!canStart || isProcessing || isSpectator}
+                          onClick={() => {
+                            setIsProcessing(true);
+                            startGame();
+                          }}
+                          className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-2.5 px-7 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                        >
+                          <Play size={15} className="fill-white" /> Start Game
+                        </button>
+                        <button
+                          onClick={() => setIsHouseRulesOpen(true)}
+                          className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2.5 px-5 text-sm uppercase inline-flex items-center gap-1.5"
+                          title="Configure House Rules"
+                        >
+                          <ScrollText size={15} /> House Rules
+                        </button>
+                      </div>
+                      {!canStart && (
+                        <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3 py-1 rounded-full shadow-md">
+                          Waiting for players to sit ({totalPlayers}/2 minimum)
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5">
                       <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3 py-1 rounded-full shadow-md">
-                        Waiting for players to sit ({totalPlayers}/2 minimum)
+                        Waiting for host...
                       </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3 py-1 rounded-full shadow-md">
-                    Waiting for host...
-                  </span>
-                )
+                      <button
+                        onClick={() => setIsHouseRulesOpen(true)}
+                        className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2 px-5 text-xs uppercase inline-flex items-center gap-1.5"
+                        title="View House Rules"
+                      >
+                        <ScrollText size={14} /> View Rules
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Compact summary of the notable active house rules */}
+                  {houseRules && (() => {
+                    const active = summarizeActiveRules(houseRules);
+                    if (!active.length) return null;
+                    return (
+                      <div className="flex flex-wrap items-center justify-center gap-1 max-w-md">
+                        {active.slice(0, 6).map((r) => (
+                          <span
+                            key={r}
+                            className="font-rounded font-bold text-[9px] uppercase tracking-wider bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-200 px-2 py-0.5 rounded-full"
+                          >
+                            {r}
+                          </span>
+                        ))}
+                        {active.length > 6 && (
+                          <span className="font-rounded font-bold text-[9px] text-slate-400">
+                            +{active.length - 6} more
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
               ) : gameStatus === 'playing' ? (
                 isMyTurn ? (
                   <span className="font-arcade text-xs bg-gradient-to-b from-lime-400 to-green-600 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide animate-pulse inline-flex items-center gap-1.5">
@@ -689,6 +745,12 @@ export default function LobbyPage() {
                   Waiting for color selection...
                   <TurnTimer className="text-[10px]" />
                 </span>
+              ) : gameStatus === 'awaiting_swap_target' ? (
+                <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-fuchsia-300 px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1.5">
+                  <ArrowLeftRight size={12} />
+                  {swapChooserId === player?.id ? 'Choose a player to swap hands with...' : 'Waiting for Seven-Swap...'}
+                  <TurnTimer className="text-[10px]" />
+                </span>
               ) : null}
 
               {/* Pending Draw Stack banner — shown while a +2/+4 chain is live. The
@@ -704,6 +766,22 @@ export default function LobbyPage() {
                     ? `Stack a ${pendingDrawType === 'wild_draw_four' ? '+4' : '+2 / +4'} or draw ${drawStack}!`
                     : `Draw stack building: +${drawStack}`}
                 </motion.div>
+              )}
+
+              {/* Challenge Wild Draw Four — shown to the targeted player when the
+                  challenge house rule is on and a +4 is pending against them. */}
+              {isMyTurn && !isSpectator && pendingDrawType === 'wild_draw_four' &&
+                challengeableById === player?.id && houseRules?.challengeWildDrawFour && (
+                <motion.button
+                  disabled={isProcessing}
+                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  whileTap={{ scale: 0.94, y: 3 }}
+                  onClick={() => challengeWildFour()}
+                  className="btn-arcade mt-1.5 text-white uppercase inline-flex items-center gap-1.5 px-6 py-2 text-sm bg-gradient-to-b from-violet-500 to-purple-700 disabled:cursor-not-allowed"
+                >
+                  <Gavel size={16} /> Challenge +4
+                </motion.button>
               )}
 
               {/* Declare UNO Button — shown while holding exactly 2 cards. Declaring
@@ -847,6 +925,44 @@ export default function LobbyPage() {
               >
                 Yellow
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* OVERLAYS: Seven-O Swap Target Selection                             */}
+      {/* =================================================================== */}
+      {gameStatus === 'awaiting_swap_target' && player && swapChooserId === player.id && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none p-4">
+          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto">
+            <div>
+              <h3 className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm inline-flex items-center gap-2">
+                <ArrowLeftRight size={22} /> Seven Swap
+              </h3>
+              <p className="font-rounded font-semibold text-white/80 text-xs mt-1">
+                Choose a player to swap your entire hand with
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2.5 w-full">
+              {room?.players
+                .filter((p) => p.id !== player.id)
+                .map((p) => {
+                  const cardCount = playerCards[p.seatNumber]?.length ?? 0;
+                  return (
+                    <button
+                      key={p.id}
+                      disabled={isProcessing}
+                      onClick={() => chooseSwapTarget(p.id)}
+                      className="btn-arcade bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-between gap-2"
+                    >
+                      <span className="truncate">{p.name}</span>
+                      <span className="font-rounded text-[10px] bg-black/30 px-2 py-0.5 rounded-full shrink-0">
+                        {cardCount} cards
+                      </span>
+                    </button>
+                  );
+                })}
             </div>
           </div>
         </div>

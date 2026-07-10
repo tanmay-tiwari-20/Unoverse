@@ -4,7 +4,16 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { roomManager } from './rooms/roomManager';
 import { createRoomStore } from './rooms/roomStore';
-import { drawCardAction, playCardAction, chooseColorAction, callUnoAction, passTurnAction } from './game/actions';
+import {
+  drawCardAction,
+  playCardAction,
+  chooseColorAction,
+  callUnoAction,
+  passTurnAction,
+  jumpInAction,
+  swapTargetAction,
+  challengeWildFourAction,
+} from './game/actions';
 import { CardColor } from './game/deck';
 import { logger } from './utils/logger';
 import type { ZodType } from 'zod';
@@ -16,6 +25,9 @@ import {
   voiceStatusSchema,
   playCardSchema,
   chooseColorSchema,
+  updateHouseRulesSchema,
+  jumpInSchema,
+  swapTargetSchema,
 } from './validation/socketSchemas';
 
 // Load environment variables from backend/.env if present (optional in dev).
@@ -30,14 +42,18 @@ try {
 // does nothing before it expires, the server auto-resolves the turn so a single
 // AFK or disconnected player can't freeze the table forever.
 
+// Fallback duration when a game has no rules snapshot yet (legacy safety). The
+// authoritative per-turn duration comes from each game's locked house rules.
 const TURN_DURATION_MS = Number(process.env.TURN_TIMEOUT_MS) || 45000;
 const turnTimers = new Map<string, NodeJS.Timeout>();
 // Tracks which turn (status + active socket id) the current timer belongs to, so
 // idempotent re-broadcasts (e.g. a reconnect) don't restart the clock.
 const turnSignatures = new Map<string, string>();
 
-function turnSignatureOf(game: { status: string; currentPlayerId: string; colorChooserId: string | null; drawnCardId?: string | null }): string {
-  const activeId = game.status === 'awaiting_color_selection' ? game.colorChooserId : game.currentPlayerId;
+function turnSignatureOf(game: { status: string; currentPlayerId: string; colorChooserId: string | null; swapChooserId?: string | null; drawnCardId?: string | null }): string {
+  let activeId = game.currentPlayerId;
+  if (game.status === 'awaiting_color_selection') activeId = game.colorChooserId ?? game.currentPlayerId;
+  else if (game.status === 'awaiting_swap_target') activeId = game.swapChooserId ?? game.currentPlayerId;
   // Opening a draw-then-play decision window keeps the same player & status but is
   // a distinct timed phase, so fold it into the signature to (re)arm a fresh clock.
   const decision = game.drawnCardId ? ':decision' : '';
@@ -73,13 +89,17 @@ function armTurnTimer(code: string) {
   if (!room || !room.game) { clearTurnTimer(code); return; }
   const game = room.game;
 
-  const timed = game.status === 'playing' || game.status === 'awaiting_color_selection';
-  // A timer only makes sense with at least 2 players actively in the game.
-  if (!timed || room.players.length < 2) {
+  const timed = game.status === 'playing' || game.status === 'awaiting_color_selection' || game.status === 'awaiting_swap_target';
+  // The turn timer is itself a house rule — honor it. It also only makes sense
+  // with at least 2 players actively in the game.
+  const timerEnabled = game.rules?.turnTimer !== false;
+  if (!timed || !timerEnabled || room.players.length < 2) {
     clearTurnTimer(code);
     game.turnDeadline = null;
     return;
   }
+
+  const durationMs = (game.rules?.turnTimerSeconds ? game.rules.turnTimerSeconds * 1000 : TURN_DURATION_MS);
 
   const signature = turnSignatureOf(game);
   if (turnSignatures.get(code) === signature && turnTimers.has(code)) {
@@ -87,9 +107,9 @@ function armTurnTimer(code: string) {
   }
 
   clearTurnTimer(code);
-  game.turnDeadline = Date.now() + TURN_DURATION_MS;
+  game.turnDeadline = Date.now() + durationMs;
   turnSignatures.set(code, signature);
-  turnTimers.set(code, setTimeout(() => handleTurnTimeout(code, signature), TURN_DURATION_MS));
+  turnTimers.set(code, setTimeout(() => handleTurnTimeout(code, signature), durationMs));
 }
 
 // Fired when a turn's deadline expires. Auto-draws (playing) or auto-picks a
@@ -107,6 +127,16 @@ function handleTurnTimeout(code: string, signature: string) {
       const color = pickAutoColor(game.hands, game.colorChooserId);
       logger.info(`[TURN_TIMEOUT] Auto-choosing '${color}' for ${game.colorChooserId} in room ${code}`);
       room.game = chooseColorAction(game, room.players, game.colorChooserId, color);
+    } else if (game.status === 'awaiting_swap_target' && game.swapChooserId) {
+      // Auto-pick the opponent holding the most cards (best swap for the chooser).
+      const chooser = game.swapChooserId;
+      const target = room.players
+        .filter((p) => p.id !== chooser && (game.hands[p.id]?.length || 0) >= 0)
+        .sort((a, b) => (game.hands[b.id]?.length || 0) - (game.hands[a.id]?.length || 0))[0];
+      if (target) {
+        logger.info(`[TURN_TIMEOUT] Auto-swapping ${chooser} with ${target.id} in room ${code}`);
+        room.game = swapTargetAction(game, room.players, chooser, target.id);
+      }
     } else if (game.status === 'playing') {
       const activePlayerId = game.currentPlayerId;
       if (game.drawnCardId) {
@@ -219,15 +249,20 @@ function broadcastGameState(code: string) {
       wildColor: game.wildColor,
       gameStatus: game.status,
       colorChooserId: game.colorChooserId,
+      swapChooserId: game.swapChooserId ?? null,
       winnerId: game.winnerId,
       winnerName: winnerObj ? winnerObj.name : null,
       unoCalled: game.unoCalled,
       drawStack: game.drawStack,
       pendingDrawType: game.pendingDrawType,
+      challengeableById: game.challengeableById ?? null,
       drawnCardId: game.drawnCardId ?? null,
       turnDeadline: game.turnDeadline ?? null,
       lastAction: game.lastAction,
       match: room.match ?? null,
+      // The locked, active house rules travel with every game update so clients
+      // render/enforce exactly what the server is enforcing.
+      houseRules: game.rules,
     });
   });
 
@@ -241,6 +276,29 @@ function broadcastGameState(code: string) {
   // so this single hook covers durability for active games. Coalesced + async
   // inside the manager, so it never blocks the broadcast.
   roomManager.markDirty(code);
+}
+
+/**
+ * If the room's game just ended, bank the round, re-broadcast, and announce the
+ * winner. Returns true when the game was ended (caller can skip its own emit).
+ * Centralizes the end-of-round handling shared by every gameplay action.
+ */
+function handlePossibleGameEnd(code: string): boolean {
+  const room = roomManager.getRoom(code);
+  if (!room || !room.game || room.game.status !== 'ended') return false;
+  clearTurnTimer(code);
+  const finalized = roomManager.finalizeRound(code);
+  broadcastGameState(code);
+  const winner = room.players.find((p) => p.id === room.game!.winnerId);
+  io.to(code).emit('game-ended', {
+    winnerId: room.game.winnerId,
+    winnerName: winner ? winner.name : null,
+    roundResult: finalized?.result ?? null,
+    matchWon: finalized?.matchWon ?? false,
+    match: room.match ?? null,
+  });
+  logger.debug(`[Socket] Round in room ${code} ended. Winner: ${winner?.name ?? 'Unknown'}`);
+  return true;
 }
 
 const app = express();
@@ -521,6 +579,21 @@ io.on('connection', (socket) => {
   }));
 
 
+  // Update house rules (host only, lobby only). The merged+normalized rules are
+  // broadcast to everyone so all clients stay in sync in real time.
+  socket.on('update-house-rules', guard(updateHouseRulesSchema, ({ rules }) => {
+    if (!currentRoomCode) return;
+    try {
+      const room = roomManager.updateHouseRules(currentRoomCode, socket.id, rules);
+      logger.debug(`[HOUSE_RULES] Updated for room ${currentRoomCode} by host ${socket.id}`);
+      io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
+      io.to(currentRoomCode).emit('house-rules-updated', { houseRules: room.houseRules });
+    } catch (error: any) {
+      logger.error(`[Socket] Update house rules error:`, error.message);
+      socket.emit('error', { message: error.message || 'Failed to update house rules' });
+    }
+  }));
+
   // Trigger game start (host only)
   socket.on('start-game', () => {
     if (!currentRoomCode) return;
@@ -690,6 +763,67 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: error.message || 'Failed to select color' });
     }
   }));
+
+  // Jump-In event — play an identical card out of turn (house rule).
+  socket.on('jump-in', guard(jumpInSchema, ({ cardId }) => {
+    if (!currentRoomCode) return;
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room || !room.game) return;
+
+    try {
+      room.game = jumpInAction(room.game, room.players, socket.id, cardId);
+      const player = room.players.find(p => p.id === socket.id);
+      logger.debug(`[JUMP_IN] ${player?.name ?? socket.id} jumped in with ${cardId}`);
+      broadcastGameState(currentRoomCode);
+      if (room.game.lastAction?.type === 'play' && room.game.lastAction.unoPenalty) {
+        io.to(currentRoomCode).emit('uno-penalty', { playerId: socket.id, playerName: player?.name ?? 'A player' });
+      }
+      handlePossibleGameEnd(currentRoomCode);
+    } catch (error: any) {
+      logger.debug(`[Socket] Jump-in rejected:`, error.message);
+      socket.emit('error', { message: error.message || 'Failed to jump in' });
+    }
+  }));
+
+  // Seven-O swap target selection (host of the play chooses whose hand to take).
+  socket.on('swap-target', guard(swapTargetSchema, ({ targetId }) => {
+    if (!currentRoomCode) return;
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room || !room.game) return;
+
+    try {
+      room.game = swapTargetAction(room.game, room.players, socket.id, targetId);
+      broadcastGameState(currentRoomCode);
+      handlePossibleGameEnd(currentRoomCode);
+    } catch (error: any) {
+      logger.error(`[Socket] Swap target error:`, error.message);
+      socket.emit('error', { message: error.message || 'Failed to choose swap target' });
+    }
+  }));
+
+  // Challenge a Wild Draw Four (house rule).
+  socket.on('challenge-wild-four', () => {
+    if (!currentRoomCode) return;
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room || !room.game) return;
+
+    try {
+      const updated = challengeWildFourAction(room.game, room.players, socket.id);
+      room.game = updated;
+      const player = room.players.find(p => p.id === socket.id);
+      const accused = room.players.find(p => p.id === updated.lastAction?.targetId);
+      io.to(currentRoomCode).emit('wild-four-challenge', {
+        challengerName: player?.name ?? 'A player',
+        accusedName: accused?.name ?? 'A player',
+        success: !!updated.lastAction?.challengeSuccess,
+      });
+      broadcastGameState(currentRoomCode);
+      handlePossibleGameEnd(currentRoomCode);
+    } catch (error: any) {
+      logger.debug(`[Socket] Challenge rejected:`, error.message);
+      socket.emit('error', { message: error.message || 'Failed to challenge' });
+    }
+  });
 
   // Call UNO event
   socket.on('call-uno', () => {
