@@ -2,7 +2,7 @@
 
 <img src=".github/banner.png" alt="UNOVERSE — 3D Multiplayer UNO" width="100%" />
 
-# 🎴 UNOVERSE
+# UNOVERSE
 
 ### **Real-time 3D Multiplayer UNO — Right in Your Browser**
 
@@ -80,9 +80,9 @@
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │              Browser (Client)                │
+                    │              Browser (Client)               │
                     │                                             │
-                    │   Next.js 16 ─── React 19 ─── Zustand      │
+                    │   Next.js 16 ─── React 19 ─── Zustand       │
                     │       │              │                      │
                     │   R3F/drei      Framer Motion               │
                     │   (3D Table)    (UI Animations)             │
@@ -91,23 +91,23 @@
                     HTTPS (SSR)    WSS (Socket.IO)    WebRTC (Voice)
                            │              │                │
                     ┌──────▼──────────────▼────────┐       │
-                    │        Backend Server         │       │
+                    │        Backend Server        │       │
                     │                              │       │
                     │   Express 4 ── Socket.IO 4   │   P2P via STUN
                     │        │                     │       │
                     │   UNO Rules Engine           │       │
                     │   ├── actions.ts (moves)     │       │
                     │   ├── rules.ts (validation)  │       │
-                    │   ├── houseRules.ts (config)  │       │
-                    │   ├── deck.ts (cards)         │       │
-                    │   └── scoring.ts              │       │
+                    │   ├── houseRules.ts (config) │       │
+                    │   ├── deck.ts (cards)        │       │
+                    │   └── scoring.ts             │       │
                     │        │                     │       │
                     │   Room Manager               │       │
                     └────────┬─────────────────────┘       │
                              │                             │
                     ┌────────▼─────────┐                   │
-                    │   Redis 7        │          Browser ◄─┘
-                    │   (State + Pub/Sub)│
+                    │   Redis 7        │         Browser ◄─┘
+                    │ (State + Pub/Sub)│
                     └──────────────────┘
 ```
 
