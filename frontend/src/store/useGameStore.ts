@@ -16,6 +16,21 @@ export interface MatchState {
   matchWinnerName: string | null;
 }
 
+// A single real-time chat message, server-stamped (mirrors the reaction payload).
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  name: string;
+  seatNumber: number | null;
+  isSpectator: boolean;
+  isHost: boolean;
+  text: string;
+  timestamp: number;
+}
+
+// Cap the in-memory chat history so a long session can't grow unbounded.
+const MAX_CHAT_MESSAGES = 200;
+
 interface GameState {
   socket: Socket | null;
   room: Room | null;
@@ -54,6 +69,10 @@ interface GameState {
   gameStoppedNotice: boolean; // true when a game was just stopped due to too few players
   isSpectator: boolean;
   reactions: Array<{ id: string; name: string; seatNumber: number | null; emoji: string; isSpectator: boolean }>;
+  // Text chat
+  chatMessages: ChatMessage[];
+  isChatOpen: boolean;
+  unreadChatCount: number;
   toasts: Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>;
   tableTheme: 'classic-green' | 'premium-blue' | 'dark-night';
   isMuted: boolean;
@@ -70,6 +89,8 @@ interface GameState {
   setIsSpectator: (val: boolean) => void;
   addReaction: (reaction: { id: string; name: string; seatNumber: number | null; emoji: string; isSpectator: boolean }) => void;
   removeReaction: (id: string) => void;
+  addChatMessage: (message: ChatMessage) => void;
+  setChatOpen: (open: boolean) => void;
   setRoom: (room: Room | null) => void;
   setPlayer: (player: Player | null) => void;
   setError: (error: string | null) => void;
@@ -149,6 +170,9 @@ export const useGameStore = create<GameState>((set) => ({
   gameStoppedNotice: false,
   isSpectator: false,
   reactions: [],
+  chatMessages: [],
+  isChatOpen: false,
+  unreadChatCount: 0,
   toasts: [],
   tableTheme: 'premium-blue',
   isMuted: false,
@@ -178,6 +202,20 @@ export const useGameStore = create<GameState>((set) => ({
   setIsSpectator: (isSpectator) => set({ isSpectator }),
   addReaction: (reaction) => set((state) => ({ reactions: [...state.reactions, reaction] })),
   removeReaction: (id) => set((state) => ({ reactions: state.reactions.filter(r => r.id !== id) })),
+  addChatMessage: (message) => set((state) => {
+    // De-dupe by id (defensive against a double-emit) and cap history length.
+    if (state.chatMessages.some((m) => m.id === message.id)) return {};
+    const next = [...state.chatMessages, message].slice(-MAX_CHAT_MESSAGES);
+    // Only count as unread when the panel is closed and it isn't our own message.
+    const isOwn = message.senderId === state.player?.id;
+    const unreadChatCount = state.isChatOpen || isOwn ? state.unreadChatCount : state.unreadChatCount + 1;
+    return { chatMessages: next, unreadChatCount };
+  }),
+  setChatOpen: (open) => set((state) => ({
+    isChatOpen: open,
+    // Opening the panel clears the unread indicator.
+    unreadChatCount: open ? 0 : state.unreadChatCount,
+  })),
   setRoom: (room) => set({ room }),
   setPlayer: (player) => set({ player }),
   setError: (error) => set({ error }),
@@ -221,6 +259,9 @@ export const useGameStore = create<GameState>((set) => ({
     isProcessing: false,
     isSpectator: false,
     reactions: [],
+    chatMessages: [],
+    isChatOpen: false,
+    unreadChatCount: 0,
     toasts: [],
     tableTheme: 'premium-blue',
     currentPlayerId: null,
@@ -281,6 +322,9 @@ export const useGameStore = create<GameState>((set) => ({
     isProcessing: false,
     isSpectator: false,
     reactions: [],
+    chatMessages: [],
+    isChatOpen: false,
+    unreadChatCount: 0,
     toasts: [],
     tableTheme: 'premium-blue',
     currentPlayerId: null,

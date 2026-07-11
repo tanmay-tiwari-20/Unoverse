@@ -39,6 +39,12 @@ export const sendReactionSchema = z.object({
   emoji: z.string().min(1).max(32),
 });
 
+export const sendChatSchema = z.object({
+  // Trim + bound the message. Empty (after trim) is rejected; long messages are
+  // capped so a single client can't broadcast an oversized payload to the room.
+  text: z.string().trim().min(1).max(500),
+});
+
 export const webrtcSignalSchema = z.object({
   targetId: z.string().min(1).max(100),
   // SDP/ICE payloads are opaque to us — relayed verbatim. Just ensure it exists.
@@ -120,6 +126,7 @@ export const swapTargetSchema = z.object({
 export type CreateRoomPayload = z.infer<typeof createRoomSchema>;
 export type JoinRoomPayload = z.infer<typeof joinRoomSchema>;
 export type SendReactionPayload = z.infer<typeof sendReactionSchema>;
+export type SendChatPayload = z.infer<typeof sendChatSchema>;
 export type WebrtcSignalPayload = z.infer<typeof webrtcSignalSchema>;
 export type VoiceStatusPayload = z.infer<typeof voiceStatusSchema>;
 export type PlayCardPayload = z.infer<typeof playCardSchema>;

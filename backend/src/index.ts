@@ -21,6 +21,7 @@ import {
   createRoomSchema,
   joinRoomSchema,
   sendReactionSchema,
+  sendChatSchema,
   webrtcSignalSchema,
   voiceStatusSchema,
   playCardSchema,
@@ -563,6 +564,38 @@ io.on('connection', (socket) => {
 
     logger.debug(`[REACTION] ${name} sent emoji ${emoji} in room ${currentRoomCode}`);
     io.to(currentRoomCode).emit('player-reacted', { name, seatNumber, emoji, isSpectator });
+  }));
+
+  // Real-time text chat. Mirrors the reaction flow: validate, resolve the sender's
+  // identity from the room, then broadcast the server-stamped message to everyone
+  // (including the sender, so all clients render from one authoritative payload).
+  socket.on('send-chat', guard(sendChatSchema, ({ text }) => {
+    if (!currentRoomCode) return;
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room) return;
+
+    const player = room.players.find(p => p.id === socket.id);
+    const spectator = room.spectators?.find(s => s.id === socket.id);
+    if (!player && !spectator) return; // only room members may chat
+
+    const name = player ? player.name : spectator!.name;
+    const seatNumber = player ? player.seatNumber : null;
+    const isSpectator = !player;
+    const isHost = player ? player.isHost : false;
+
+    const message = {
+      id: `${socket.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      senderId: socket.id,
+      name,
+      seatNumber,
+      isSpectator,
+      isHost,
+      text,
+      timestamp: Date.now(),
+    };
+
+    logger.debug(`[CHAT] ${name} in room ${currentRoomCode}: ${text.slice(0, 60)}`);
+    io.to(currentRoomCode).emit('chat-message', message);
   }));
 
   // WebRTC Signaling

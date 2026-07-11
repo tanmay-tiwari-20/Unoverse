@@ -280,6 +280,19 @@ export const useSocket = () => {
       });
     });
 
+    // Real-time text chat — mirrors the reaction listener. The server broadcasts to
+    // everyone (including the sender) so all clients render from one payload.
+    socketInstance.off('chat-message');
+    socketInstance.on('chat-message', (message) => {
+      logger.debug('[Socket] Chat message:', message?.name);
+      const store = useGameStore.getState();
+      // Soft chime only for other people's messages while the panel is closed.
+      if (message?.senderId !== store.player?.id && !store.isChatOpen) {
+        soundManager.play('reaction', 0.5);
+      }
+      store.addChatMessage(message);
+    });
+
     socketInstance.off('player-joined');
     socketInstance.on('player-joined', (newPlayer) => {
       logger.debug('[Socket] Player joined:', newPlayer?.name);
@@ -345,6 +358,7 @@ export const useSocket = () => {
       socketInstance.off('wild-four-challenge');
       socketInstance.off('error');
       socketInstance.off('player-reacted');
+      socketInstance.off('chat-message');
       socketInstance.off('player-joined');
       socketInstance.off('player-left');
       socketInstance.off('spectator-joined');
@@ -470,6 +484,14 @@ export const useSocket = () => {
     }
   };
 
+  // Send a text chat message. Trimmed/bounded client-side; the server re-validates
+  // and broadcasts the stamped message back to everyone (including us).
+  const sendChat = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || !socket) return;
+    socket.emit('send-chat', { text: trimmed.slice(0, 500) });
+  };
+
   return {
     socket,
     createRoom,
@@ -485,5 +507,6 @@ export const useSocket = () => {
     jumpIn,
     chooseSwapTarget,
     challengeWildFour,
+    sendChat,
   };
 };

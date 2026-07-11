@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { useSocket } from '../../../hooks/useSocket';
 import { useGameStore } from '../../../store/useGameStore';
 import { ReactionsHandler } from '../../../components/social/ReactionsHandler';
+import { ChatPanel } from '../../../components/social/ChatPanel';
 import { getSeatCoords } from '../../../utils/seating';
 import { TurnGlowIndicator } from '../../../components/table/TurnGlowIndicator';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,7 +38,8 @@ import {
   WifiOff,
   ScrollText,
   Gavel,
-  ArrowLeftRight
+  ArrowLeftRight,
+  MessageCircle
 } from 'lucide-react';
 import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
 import { summarizeActiveRules } from '../../../lib/houseRules';
@@ -305,7 +307,10 @@ export default function LobbyPage() {
     isMuted,
     toggleMute,
     gameStoppedNotice,
-    setGameStoppedNotice
+    setGameStoppedNotice,
+    isChatOpen,
+    setChatOpen,
+    unreadChatCount
   } = useGameStore();
 
   const { toggleMic } = useVoiceChat();
@@ -510,6 +515,9 @@ export default function LobbyPage() {
       {/* House Rules Configuration Modal */}
       <HouseRulesModal />
 
+      {/* Real-time Table Chat (desktop side panel / mobile bottom sheet) */}
+      <ChatPanel />
+
       {/* Help & Utility Modals */}
       <HelpModals />
       <FPSCounter />
@@ -631,6 +639,24 @@ export default function LobbyPage() {
               title={isSpeakerEnabled ? 'Mute Voice Chat' : 'Enable Voice Chat'}
             >
               <Headphones size={16} />
+            </button>
+
+            <button
+              onClick={() => setChatOpen(!isChatOpen)}
+              className={`chip-arcade relative w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
+                isChatOpen
+                  ? 'bg-gradient-to-b from-blue-400 to-blue-600'
+                  : 'bg-gradient-to-b from-neutral-700 to-neutral-900'
+              }`}
+              title="Table Chat"
+            >
+              <MessageCircle size={16} />
+              {/* Unread indicator — only when the panel is closed */}
+              {!isChatOpen && unreadChatCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-b from-rose-500 to-red-600 border-2 border-neutral-900 text-white text-[9px] font-black flex items-center justify-center shadow-md">
+                  {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                </span>
+              )}
             </button>
 
             <button

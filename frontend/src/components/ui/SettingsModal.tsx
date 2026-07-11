@@ -146,7 +146,7 @@ export const SettingsModal: React.FC = () => {
           </h2>
           <button
             onClick={() => setIsSettingsOpen(false)}
-            className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
+            className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700 cursor-pointer"
           >
             <X size={16} />
           </button>

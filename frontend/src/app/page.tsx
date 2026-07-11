@@ -214,47 +214,57 @@ export default function LandingPage() {
             </AnimatePresence>
 
             {/* Inputs Container */}
-            <div className="panel-arcade bg-gradient-to-b from-neutral-900/95 to-black/95 backdrop-blur-md p-4 flex flex-col gap-3 relative overflow-hidden">
+            <div className="panel-arcade bg-gradient-to-b from-neutral-900/95 to-black/95 backdrop-blur-md p-4 flex flex-col gap-3 relative overflow-hidden" suppressHydrationWarning>
               <div className="absolute inset-0 arcade-dots pointer-events-none" />
 
-              <input
-                type="text"
-                maxLength={12}
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Your Name"
-                disabled={loading}
-                className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-wide font-rounded font-bold uppercase focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all text-base"
-              />
+              <form autoComplete="off" data-form-type="other" data-lpignore="true" onSubmit={(e) => e.preventDefault()} className="contents">
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Your Name"
+                  disabled={loading}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-wide font-rounded font-bold uppercase focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all text-base"
+                />
 
-              <input
-                type="text"
-                maxLength={6}
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="ROOM CODE"
-                disabled={loading}
-                className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-[0.3em] font-arcade uppercase text-xl focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all"
-              />
-            </div>
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  placeholder="ROOM CODE"
+                  disabled={loading}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-[0.3em] font-arcade uppercase text-xl focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all"
+                />
 
-            {/* Actions */}
-            <div className="flex gap-3">
-              <button
-                onClick={handleJoinRoom}
-                disabled={loading}
-                className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
-              >
-                Join
-              </button>
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={handleJoinRoom}
+                    disabled={loading}
+                    className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Join
+                  </button>
 
-              <button
-                onClick={handleCreateRoom}
-                disabled={loading}
-                className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
-              >
-                Create
-              </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateRoom}
+                    disabled={loading}
+                    className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Create
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </motion.div>
