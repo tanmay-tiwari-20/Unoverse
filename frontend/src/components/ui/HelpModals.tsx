@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettingsStore } from "../../store/useSettingsStore";
 import { X, Bug, Keyboard, Info, Send, Layers } from "lucide-react";
 import { useGameStore } from "../../store/useGameStore";
+import { useDialogA11y } from "../../hooks/useDialogA11y";
 
 interface ModalBaseProps {
   isOpen: boolean;
@@ -21,6 +22,12 @@ const ModalBase = ({
   icon: Icon,
   children,
 }: ModalBaseProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = `help-modal-${title.replace(/\s+/g, "-").toLowerCase()}`;
+
+  // Focus trap + initial focus + focus restore + Escape-to-close.
+  useDialogA11y(dialogRef, isOpen, onClose);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -32,6 +39,11 @@ const ModalBase = ({
           onClick={onClose}
         >
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -40,12 +52,13 @@ const ModalBase = ({
             className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col"
           >
             <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20">
-              <h2 className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
+              <h2 id={titleId} className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
                 <Icon size={20} className="text-white" /> {title}
               </h2>
               <button
                 onClick={onClose}
                 className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
+                aria-label={`Close ${title.toLowerCase()}`}
               >
                 <X size={16} />
               </button>

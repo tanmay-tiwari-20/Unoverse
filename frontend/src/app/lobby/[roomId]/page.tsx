@@ -52,6 +52,7 @@ import { FPSCounter } from '../../../components/ui/FPSCounter';
 import { useVoiceChat } from '../../../hooks/useVoiceChat';
 import { useVoiceStore } from '../../../store/useVoiceStore';
 import { useSettingsStore } from '../../../store/useSettingsStore';
+import { useDialogA11y } from '../../../hooks/useDialogA11y';
 
 // Mini UNO cards used in the loader's shuffle animation
 const SHUFFLE_CARDS = [
@@ -379,6 +380,20 @@ export default function LobbyPage() {
 
   const isMyTurn = currentPlayerId === player?.id && gameStatus === 'playing';
 
+  // ---- Accessibility: game-driven overlays behave as modal dialogs ----------
+  // These are forced choices (color / swap), so Escape must NOT dismiss them —
+  // but focus is still moved in, trapped, and restored when they resolve.
+  const colorDialogRef = useRef<HTMLDivElement>(null);
+  const swapDialogRef = useRef<HTMLDivElement>(null);
+  const isColorPromptOpen = gameStatus === 'awaiting_color_selection' && !!player && colorChooserId === player.id;
+  const isSwapPromptOpen = gameStatus === 'awaiting_swap_target' && !!player && swapChooserId === player.id;
+  useDialogA11y(colorDialogRef, isColorPromptOpen, undefined, { closeOnEscape: false });
+  useDialogA11y(swapDialogRef, isSwapPromptOpen, undefined, { closeOnEscape: false });
+
+  // End-of-round summary is a modal dialog (not dismissible — the host advances).
+  const endDialogRef = useRef<HTMLDivElement>(null);
+  useDialogA11y(endDialogRef, gameStatus === 'ended', undefined, { closeOnEscape: false });
+
   // Find winner coordinates for localized spotlight render
   const getWinnerCoords = () => {
     const winnerPlayer = room?.players.find(p => p.id === winnerId);
@@ -525,7 +540,12 @@ export default function LobbyPage() {
 
 
       {/* Toast Notifications Container */}
-      <div className="fixed top-16 sm:top-4 right-2 sm:right-4 z-[999] flex flex-col gap-2 pointer-events-none max-w-[72vw] sm:max-w-sm w-full safe-x">
+      <div
+        className="fixed top-16 sm:top-4 right-2 sm:right-4 z-[999] flex flex-col gap-2 pointer-events-none max-w-[72vw] sm:max-w-sm w-full safe-x"
+        role="status"
+        aria-live="polite"
+        aria-atomic="false"
+      >
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
@@ -556,6 +576,7 @@ export default function LobbyPage() {
               <button
                 onClick={() => removeToast(toast.id)}
                 className="text-white/70 hover:text-white transition-colors ml-4"
+                aria-label="Dismiss notification"
               >
                 <X size={13} />
               </button>
@@ -596,6 +617,7 @@ export default function LobbyPage() {
                 onClick={handleCopyCode}
                 className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2 cursor-pointer"
                 title="Copy Room Code"
+                aria-label={copied ? `Room code ${room.code} copied to clipboard` : `Room code ${room.code}. Copy to clipboard`}
               >
                 <span className="font-arcade text-[10px] sm:text-xs text-yellow-300 uppercase tracking-widest">
                   Lobby
@@ -622,6 +644,8 @@ export default function LobbyPage() {
                   : 'bg-gradient-to-b from-rose-500 to-red-700'
               }`}
               title={isMicEnabled ? 'Mute Microphone' : 'Enable Microphone'}
+              aria-label={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
+              aria-pressed={isMicEnabled}
             >
               {isMicEnabled ? <Mic size={16} /> : <MicOff size={16} />}
             </button>
@@ -637,6 +661,8 @@ export default function LobbyPage() {
                   : 'bg-gradient-to-b from-rose-500 to-red-700'
               }`}
               title={isSpeakerEnabled ? 'Mute Voice Chat' : 'Enable Voice Chat'}
+              aria-label={isSpeakerEnabled ? 'Mute voice chat' : 'Enable voice chat'}
+              aria-pressed={isSpeakerEnabled}
             >
               <Headphones size={16} />
             </button>
@@ -649,11 +675,23 @@ export default function LobbyPage() {
                   : 'bg-gradient-to-b from-neutral-700 to-neutral-900'
               }`}
               title="Table Chat"
+              aria-label={
+                isChatOpen
+                  ? 'Close table chat'
+                  : unreadChatCount > 0
+                    ? `Open table chat, ${unreadChatCount} unread ${unreadChatCount === 1 ? 'message' : 'messages'}`
+                    : 'Open table chat'
+              }
+              aria-expanded={isChatOpen}
+              aria-controls="table-chat-panel"
             >
               <MessageCircle size={16} />
               {/* Unread indicator — only when the panel is closed */}
               {!isChatOpen && unreadChatCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-b from-rose-500 to-red-600 border-2 border-neutral-900 text-white text-[9px] font-black flex items-center justify-center shadow-md">
+                <span
+                  className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-b from-rose-500 to-red-600 border-2 border-neutral-900 text-white text-[9px] font-black flex items-center justify-center shadow-md"
+                  aria-hidden="true"
+                >
                   {unreadChatCount > 9 ? '9+' : unreadChatCount}
                 </span>
               )}
@@ -665,6 +703,8 @@ export default function LobbyPage() {
               }}
               className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-700 to-neutral-900"
               title="Settings"
+              aria-label="Open settings"
+              aria-haspopup="dialog"
             >
               <Settings size={16} className="text-white" />
             </button>
@@ -676,6 +716,7 @@ export default function LobbyPage() {
               }}
               className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-rose-500 to-red-700"
               title="Exit Table"
+              aria-label="Exit room"
             >
               <LogOut size={16} />
             </button>
@@ -876,6 +917,7 @@ export default function LobbyPage() {
                 onClick={() => setGameStoppedNotice(false)}
                 className="absolute top-2.5 right-2.5 chip-arcade w-7 h-7 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
                 title="Dismiss"
+                aria-label="Dismiss game stopped notice"
               >
                 <X size={13} />
               </button>
@@ -905,9 +947,15 @@ export default function LobbyPage() {
       {/* =================================================================== */}
       {gameStatus === 'awaiting_color_selection' && player && colorChooserId === player.id && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none p-4">
-          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto">
+          <div
+            ref={colorDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="color-dialog-title"
+            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto"
+          >
             <div>
-              <h3 className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">Choose Color</h3>
+              <h3 id="color-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">Choose Color</h3>
               <p className="font-rounded font-semibold text-white/80 text-xs mt-1">Pick the active color for the Wild card</p>
             </div>
             <div className="grid grid-cols-2 gap-4 w-full">
@@ -961,9 +1009,15 @@ export default function LobbyPage() {
       {/* =================================================================== */}
       {gameStatus === 'awaiting_swap_target' && player && swapChooserId === player.id && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none p-4">
-          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto">
+          <div
+            ref={swapDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="swap-dialog-title"
+            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto"
+          >
             <div>
-              <h3 className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm inline-flex items-center gap-2">
+              <h3 id="swap-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm inline-flex items-center gap-2">
                 <ArrowLeftRight size={22} /> Seven Swap
               </h3>
               <p className="font-rounded font-semibold text-white/80 text-xs mt-1">
@@ -980,6 +1034,7 @@ export default function LobbyPage() {
                       key={p.id}
                       disabled={isProcessing}
                       onClick={() => chooseSwapTarget(p.id)}
+                      aria-label={`Swap hands with ${p.name}, ${cardCount} ${cardCount === 1 ? 'card' : 'cards'}`}
                       className="btn-arcade bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-between gap-2"
                     >
                       <span className="truncate">{p.name}</span>
@@ -1010,12 +1065,18 @@ export default function LobbyPage() {
               ? (player && match?.matchWinnerName === player.name ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
               : (player && winnerName === player.name ? 'You won the round!' : `${winnerName} won the round!`);
             return (
-          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto">
+          <div
+            ref={endDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="game-over-title"
+            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto"
+          >
             <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce">
               <Trophy size={30} className="fill-white/30" />
             </div>
             <div>
-              <h2 className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse">
+              <h2 id="game-over-title" className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse">
                 {matchWon ? 'Match Over!' : `Round ${match?.round ?? 1}`}
               </h2>
               <p className="font-rounded font-bold text-white text-md mt-1 inline-flex items-center gap-1.5">

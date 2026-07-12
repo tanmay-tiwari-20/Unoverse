@@ -321,14 +321,17 @@ export const ReactionsHandler: React.FC = () => {
                       onClick={() => {
                         sendEmoji(item.emoji);
                       }}
+                      aria-label={`React with ${item.label}`}
                     >
-                      <span className="text-xl sm:text-2xl leading-none">{item.emoji}</span>
+                      <span className="text-xl sm:text-2xl leading-none" aria-hidden="true">{item.emoji}</span>
                     </motion.button>
                   );
                 })}
 
                 {/* Center Status Hub */}
-                <motion.div
+                <motion.button
+                  type="button"
+                  aria-label="Close reactions menu"
                   initial={{ scale: 0, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0, opacity: 0 }}
@@ -365,7 +368,7 @@ export const ReactionsHandler: React.FC = () => {
                       </span>
                     </div>
                   )}
-                </motion.div>
+                </motion.button>
 
               </div>
             )}
@@ -377,6 +380,9 @@ export const ReactionsHandler: React.FC = () => {
             onPointerDown={handlePointerDown}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
+            aria-label="Open reactions menu"
+            aria-haspopup="menu"
+            aria-expanded={isOpen}
             className={`pointer-events-auto glass-panel bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded-full px-4 py-2.5 sm:px-3.5 sm:py-1.5 text-[11px] sm:text-[10px] font-extrabold text-slate-300 hover:text-white transition-all shadow-lg flex items-center gap-1.5 touch-none select-none ${
               isOpen ? 'opacity-0 pointer-events-none scale-75' : ''
             }`}
@@ -384,7 +390,7 @@ export const ReactionsHandler: React.FC = () => {
               transition: 'opacity 0.2s, transform 0.2s'
             }}
           >
-            <Smile size={16} className="sm:size-3.5" />
+            <Smile size={16} className="sm:size-3.5" aria-hidden="true" />
             <span className="uppercase tracking-wider">React</span>
           </motion.button>
 

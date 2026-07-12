@@ -224,6 +224,7 @@ export default function LandingPage() {
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="Your Name"
+                  aria-label="Your display name"
                   disabled={loading}
                   autoComplete="off"
                   data-lpignore="true"
@@ -237,6 +238,7 @@ export default function LandingPage() {
                   value={roomCode}
                   onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                   placeholder="ROOM CODE"
+                  aria-label="Room code to join"
                   disabled={loading}
                   autoComplete="off"
                   data-lpignore="true"

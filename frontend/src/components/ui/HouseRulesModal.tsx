@@ -7,6 +7,7 @@ import { X, Lock, ScrollText, RotateCcw, Minus, Plus, Eye, LucideIcon } from 'lu
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
+import { useDialogA11y } from '../../hooks/useDialogA11y';
 import {
   HouseRules,
   DEFAULT_HOUSE_RULES,
@@ -40,6 +41,10 @@ export const HouseRulesModal: React.FC = () => {
   const { houseRules, player, gameStatus, addToast } = useGameStore();
   const { updateHouseRules } = useSocket();
   const modalRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap + initial focus + focus restore + Escape-to-close. Called before
+  // the early return so hook order stays stable.
+  useDialogA11y(modalRef, isHouseRulesOpen, () => setIsHouseRulesOpen(false));
 
   const rules = useMemo(() => normalizeHouseRules(houseRules), [houseRules]);
   const isHost = !!player?.isHost;
@@ -87,6 +92,10 @@ export const HouseRulesModal: React.FC = () => {
     >
       <motion.div
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="house-rules-title"
+        tabIndex={-1}
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
@@ -94,7 +103,7 @@ export const HouseRulesModal: React.FC = () => {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b-2 border-white/15 bg-fuchsia-600/15">
-          <h2 className="font-arcade text-lg sm:text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
+          <h2 id="house-rules-title" className="font-arcade text-lg sm:text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
             <ScrollText size={20} className="text-white" /> House Rules
           </h2>
           <div className="flex items-center gap-2">
@@ -103,6 +112,7 @@ export const HouseRulesModal: React.FC = () => {
                 onClick={resetDefaults}
                 className="chip-arcade h-9 px-3 hidden sm:inline-flex items-center gap-1.5 text-white bg-gradient-to-b from-neutral-700 to-neutral-900 text-[10px] font-bold uppercase tracking-wider"
                 title="Reset to defaults"
+                aria-label="Reset house rules to defaults"
               >
                 <RotateCcw size={13} /> Reset
               </button>
@@ -110,6 +120,7 @@ export const HouseRulesModal: React.FC = () => {
             <button
               onClick={() => setIsHouseRulesOpen(false)}
               className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
+              aria-label="Close house rules"
             >
               <X size={16} />
             </button>
@@ -211,7 +222,7 @@ const RuleRow: React.FC<{
 
       <div className="shrink-0">
         {field.control.type === 'toggle' && (
-          <Toggle checked={!!value} disabled={disabled} onChange={onToggle} />
+          <Toggle checked={!!value} disabled={disabled} onChange={onToggle} label={field.label} />
         )}
         {field.control.type === 'segment' && (
           <Segment
@@ -219,6 +230,7 @@ const RuleRow: React.FC<{
             value={String(value)}
             disabled={disabled}
             onChange={onSegment}
+            label={field.label}
           />
         )}
         {field.control.type === 'stepper' && (
@@ -230,6 +242,7 @@ const RuleRow: React.FC<{
             unit={field.control.unit}
             disabled={disabled}
             onChange={onNumber}
+            label={field.label}
           />
         )}
       </div>
@@ -237,14 +250,18 @@ const RuleRow: React.FC<{
   );
 };
 
-const Toggle: React.FC<{ checked: boolean; disabled: boolean; onChange: (v: boolean) => void }> = ({
+const Toggle: React.FC<{ checked: boolean; disabled: boolean; onChange: (v: boolean) => void; label: string }> = ({
   checked,
   disabled,
   onChange,
+  label,
 }) => (
   <button
     onClick={() => !disabled && onChange(!checked)}
     disabled={disabled}
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
     className={`w-11 h-6 rounded-full relative transition-colors ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'} ${
       checked ? 'bg-lime-600' : 'bg-slate-700'
     }`}
@@ -263,13 +280,17 @@ const Segment: React.FC<{
   value: string;
   disabled: boolean;
   onChange: (v: string) => void;
-}> = ({ options, value, disabled, onChange }) => (
-  <div className="flex gap-1 bg-slate-950/60 rounded-lg p-0.5 border border-slate-800">
+  label: string;
+}> = ({ options, value, disabled, onChange, label }) => (
+  <div className="flex gap-1 bg-slate-950/60 rounded-lg p-0.5 border border-slate-800" role="radiogroup" aria-label={label}>
     {options.map((o) => (
       <button
         key={o.value}
         onClick={() => !disabled && onChange(o.value)}
         disabled={disabled}
+        role="radio"
+        aria-checked={value === o.value}
+        aria-label={`${label}: ${o.label}`}
         className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors ${
           value === o.value ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
         } ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
@@ -288,24 +309,31 @@ const Stepper: React.FC<{
   unit?: string;
   disabled: boolean;
   onChange: (v: number) => void;
-}> = ({ value, min, max, step, unit, disabled, onChange }) => {
+  label: string;
+}> = ({ value, min, max, step, unit, disabled, onChange, label }) => {
   const clamp = (v: number) => Math.min(max, Math.max(min, v));
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5" role="group" aria-label={label}>
       <button
         onClick={() => !disabled && onChange(clamp(value - step))}
         disabled={disabled || value <= min}
+        aria-label={`Decrease ${label}`}
         className="chip-arcade w-7 h-7 flex items-center justify-center text-white bg-gradient-to-b from-neutral-700 to-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <Minus size={12} />
       </button>
-      <span className="min-w-[52px] text-center text-[11px] font-arcade text-yellow-300 tabular-nums">
+      <span
+        className="min-w-[52px] text-center text-[11px] font-arcade text-yellow-300 tabular-nums"
+        aria-live="polite"
+        aria-label={`${label}: ${value}${unit ? ' ' + unit : ''}`}
+      >
         {value}
         {unit ? <span className="text-[8px] text-slate-400 ml-0.5">{unit}</span> : null}
       </span>
       <button
         onClick={() => !disabled && onChange(clamp(value + step))}
         disabled={disabled || value >= max}
+        aria-label={`Increase ${label}`}
         className="chip-arcade w-7 h-7 flex items-center justify-center text-white bg-gradient-to-b from-neutral-700 to-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <Plus size={12} />

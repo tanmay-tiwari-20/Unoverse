@@ -254,6 +254,34 @@ input {
     inset 0 2px 0 0 rgba(255, 255, 255, 0.3);
 }
 
+/* ------------------------------------------------------------------ */
+/* Accessible keyboard focus indicator                                 */
+/* Uses :focus-visible so it only appears for keyboard/AT navigation,   */
+/* leaving mouse & touch interactions visually unchanged. A high-       */
+/* contrast sky ring sits clearly over the dark arcade theme and hugs   */
+/* the rounded controls. Never removes an outline without replacement.  */
+/* ------------------------------------------------------------------ */
+:focus-visible {
+  outline: 3px solid #38bdf8; /* sky-400 */
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+/* Pill controls: the outline already follows their border-radius, but add
+   a dark inner halo so the ring reads on any background color. */
+.btn-arcade:focus-visible,
+.chip-arcade:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 3px;
+}
+/* Elements that intentionally use a colored border/background as their focus
+   affordance still get the ring for consistency. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 1px;
+}
+
 /* Animated festive background — classic UNO colors on a dark table */
 .arcade-bg {
   background:

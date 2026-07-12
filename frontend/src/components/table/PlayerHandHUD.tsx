@@ -82,6 +82,22 @@ export const PlayerHandHUD: React.FC = () => {
   const liftHover = cardH * 0.28;
   const archMax = cardH * 0.14;
 
+  // Human-readable card name for screen readers (e.g. "Red 7", "Wild Draw Four").
+  const describeCard = (card: CardItem): string => {
+    const color = card.color === 'wild' ? 'Wild' : card.color.charAt(0).toUpperCase() + card.color.slice(1);
+    const valueLabels: Record<string, string> = {
+      draw_two: 'Draw Two',
+      wild_draw_four: 'Wild Draw Four',
+      skip: 'Skip',
+      reverse: 'Reverse',
+      wild: 'Wild',
+    };
+    const value = valueLabels[card.value] ?? card.value;
+    // Avoid "Wild Wild" for plain wild cards.
+    if (card.color === 'wild') return value;
+    return `${color} ${value}`;
+  };
+
   // Render a CSS replica of an UNO card
   const renderCard = (card: any, idx: number) => {
     // Max fan angle based on hand size (gentler on small screens so tall cards
@@ -101,9 +117,26 @@ export const PlayerHandHUD: React.FC = () => {
     const isJumpIn = canJumpIn(card);
     const canPlay = isMyTurn || isJumpIn;
 
+    const activate = () => {
+      if (isMyTurn) playCard(card.id);
+      else if (isJumpIn) jumpIn(card.id);
+    };
+
+    // Accessible name conveys the card and what activating it does.
+    const name = describeCard(card);
+    const ariaLabel = isJumpIn
+      ? `Jump in with ${name}`
+      : isMyTurn
+        ? isPlayable ? `Play ${name}` : `${name} (not playable)`
+        : name;
+
     return (
-      <motion.div
+      <motion.button
         key={card.id}
+        type="button"
+        aria-label={ariaLabel}
+        aria-disabled={!canPlay}
+        tabIndex={canPlay ? 0 : -1}
         initial={{ y: 100, opacity: 0 }}
         animate={{
           y: (isPlayable || isJumpIn) ? yArchOffset - liftPlayable : yArchOffset,
@@ -125,17 +158,16 @@ export const PlayerHandHUD: React.FC = () => {
           zIndex: (isPlayable || isJumpIn) ? 40 : idx,
         }}
         onClick={() => {
-          if (isMyTurn) playCard(card.id);
-          else if (isJumpIn) jumpIn(card.id);
+          if (canPlay) activate();
         }}
-        className={`relative shrink-0 pointer-events-auto
+        className={`relative shrink-0 pointer-events-auto bg-transparent p-0 border-0
           ${canPlay ? 'cursor-pointer hover:shadow-2xl' : 'opacity-80 cursor-not-allowed'}
           ${isPlayable ? 'rounded-xl ring-[3px] sm:ring-4 ring-yellow-300 shadow-[0_0_22px_6px_rgba(253,224,71,0.55)]' : ''}
           ${isJumpIn ? 'rounded-xl ring-[3px] sm:ring-4 ring-fuchsia-400 shadow-[0_0_22px_6px_rgba(232,121,249,0.55)]' : ''}
           transition-shadow duration-200 ease-out`}
       >
         <HtmlCard color={card.color} value={card.value} />
-      </motion.div>
+      </motion.button>
     );
   };
 

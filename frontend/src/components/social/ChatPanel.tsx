@@ -150,6 +150,10 @@ export const ChatPanel: React.FC = () => {
 
           <motion.aside
             key="chat-panel"
+            id="table-chat-panel"
+            role={isCompact ? "dialog" : "complementary"}
+            aria-modal={isCompact ? true : undefined}
+            aria-label="Table chat"
             initial={isCompact ? { y: "100%" } : { x: "105%", opacity: 0.6 }}
             animate={isCompact ? { y: 0 } : { x: 0, opacity: 1 }}
             exit={isCompact ? { y: "100%" } : { x: "105%", opacity: 0.6 }}
@@ -174,10 +178,14 @@ export const ChatPanel: React.FC = () => {
               isCompact={isCompact}
             />
 
-            {/* Message list */}
+            {/* Message list — a polite log so new messages are announced */}
             <div
               ref={scrollRef}
               onScroll={handleScroll}
+              role="log"
+              aria-label="Chat messages"
+              aria-live="polite"
+              aria-atomic="false"
               className="relative flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-3 py-3 space-y-0.5 overscroll-contain"
             >
               {chatMessages.length === 0 ? (
@@ -405,6 +413,8 @@ const ChatComposer: React.FC<{
             rows={1}
             enterKeyHint={isCompact ? "enter" : "send"}
             placeholder={isSpectator ? "Chat as spectator…" : "Type a message…"}
+            aria-label="Chat message"
+            aria-keyshortcuts={isCompact ? undefined : "Enter"}
             className="w-full resize-none bg-transparent outline-none font-rounded text-[13px] text-slate-100 placeholder:text-slate-500 leading-snug max-h-24"
           />
         </div>
