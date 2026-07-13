@@ -110,7 +110,7 @@ export const HouseRulesModal: React.FC = () => {
             {canEdit && (
               <button
                 onClick={resetDefaults}
-                className="chip-arcade h-9 px-3 hidden sm:inline-flex items-center gap-1.5 text-white bg-gradient-to-b from-neutral-700 to-neutral-900 text-[10px] font-bold uppercase tracking-wider"
+                className="chip-arcade h-9 px-3 hidden sm:inline-flex items-center gap-1.5 text-white bg-gradient-to-b from-neutral-700 to-neutral-900 text-[10px] font-bold uppercase tracking-wider cursor-pointer"
                 title="Reset to defaults"
                 aria-label="Reset house rules to defaults"
               >
@@ -119,7 +119,7 @@ export const HouseRulesModal: React.FC = () => {
             )}
             <button
               onClick={() => setIsHouseRulesOpen(false)}
-              className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
+              className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700 cursor-pointer"
               aria-label="Close house rules"
             >
               <X size={16} />

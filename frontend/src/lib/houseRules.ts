@@ -332,3 +332,115 @@ export function summarizeActiveRules(rules: HouseRules): string[] {
   if (!rules.turnTimer) active.push('No Timer');
   return active;
 }
+
+// ---------------------------------------------------------------------------
+// Player-facing rule explanations for the in-game "How to Play" panel.
+// This is the SINGLE SOURCE OF TRUTH that maps the ACTIVE house-rule
+// configuration to human-readable text. It always reflects the real value of
+// each rule (on/off/number/mode), so the panel never contradicts the game
+// logic — e.g. it explains "no stacking" rather than the default stacking text
+// when the host has turned stacking off.
+//
+//   kind:
+//     'addon'    — an extra mechanic layered on top of the standard game
+//     'modifier' — changes how a standard rule behaves
+//     'config'   — a configurable value (timer length, penalty size, target)
+// ---------------------------------------------------------------------------
+
+export type ActiveRuleKind = 'addon' | 'modifier' | 'config';
+
+export interface ActiveRuleExplanation {
+  key: string;
+  label: string;
+  text: string;
+  kind: ActiveRuleKind;
+}
+
+export function getActiveRuleExplanations(rules: HouseRules): ActiveRuleExplanation[] {
+  const out: ActiveRuleExplanation[] = [];
+  const push = (key: string, label: string, text: string, kind: ActiveRuleKind) =>
+    out.push({ key, label, text, kind });
+
+  // --- Extra card powers (only shown when switched on) ---
+  if (rules.jumpIn)
+    push('jumpIn', 'Jump-In', 'Anyone holding a card identical to the top card (same color and value) may play it out of turn to jump ahead.', 'addon');
+  if (rules.sevenSwap)
+    push('sevenSwap', 'Seven Swap', 'Playing a 7 lets you swap your entire hand with another player of your choice.', 'addon');
+  if (rules.zeroRotate)
+    push('zeroRotate', 'Zero Rotate', 'Playing a 0 makes every player pass their whole hand to the next player in the direction of play.', 'addon');
+
+  // --- Stacking (always shown — it defines how Draw cards behave) ---
+  if (rules.stacking) {
+    let t = 'Answer a +2 or +4 with your own Draw card to pass the growing penalty to the next player.';
+    t += rules.stackDrawTwoOnWildFour ? ' A +2 may be stacked onto a +4.' : ' A +2 cannot be stacked onto a +4.';
+    if (!rules.stackToEat) t += " A player who can't stack draws only the last card's value.";
+    push('stacking', 'Stacking', t, 'addon');
+  } else {
+    push('stacking', 'No Stacking', 'Draw cards take effect immediately — you cannot answer a +2 or +4 with another Draw card.', 'modifier');
+  }
+
+  // --- Draw & turn flow ---
+  if (!rules.drawThenPlay)
+    push('drawThenPlay', 'Draw Ends Turn', 'After you draw, your turn ends immediately — you cannot play the card you just drew.', 'modifier');
+  else if (rules.forcePlayDrawnCard)
+    push('forcePlayDrawnCard', 'Force Play Drawn', 'If the card you draw can be played, you must play it right away.', 'modifier');
+  if (rules.drawUntilPlayable)
+    push('drawUntilPlayable', 'Draw Until Playable', 'When you draw, you keep drawing until you get a card you can play.', 'modifier');
+  if (rules.mustPlayIfPlayable)
+    push('mustPlayIfPlayable', 'Must Play If Able', 'You may not draw while you already hold a playable card — you must play it.', 'modifier');
+
+  // --- Wild Draw Four ---
+  if (rules.challengeWildDrawFour) {
+    let t = 'You may challenge a Wild Draw Four played against you.';
+    t += rules.bluffingWildDrawFour
+      ? ' If they played it while holding the current color, they draw instead; if your challenge is wrong, you draw extra.'
+      : ' If your challenge is wrong, you draw extra cards.';
+    push('challengeWildDrawFour', 'Challenge +4', t, 'addon');
+  }
+
+  // --- UNO calls (always shown — reflects the active mode/penalty) ---
+  if (!rules.mustSayUno) {
+    push('uno', 'UNO Calls Off', 'You never need to call UNO — there is no penalty for reaching one card silently.', 'modifier');
+  } else if (rules.unoCallMode === 'auto') {
+    push('uno', 'Auto UNO', 'UNO is called automatically when you reach one card — no penalty.', 'config');
+  } else {
+    let t = `Call UNO when you reach one card, or draw ${rules.unoPenaltyCards} penalty ${rules.unoPenaltyCards === 1 ? 'card' : 'cards'}.`;
+    if (rules.allowLateUno) t += ' You may still call it late, before the next player acts.';
+    push('uno', 'Call UNO', t, 'config');
+  }
+
+  // --- Turn mechanics (only shown when they deviate from standard) ---
+  if (!rules.reverseAsSkipInTwoPlayer)
+    push('reverseAsSkipInTwoPlayer', 'Reverse in 2-Player', 'In a 2-player game, Reverse does NOT act as a Skip.', 'modifier');
+  if (!rules.skipChaining)
+    push('skipChaining', 'Skips Disabled', 'Skip cards do not skip the next player.', 'modifier');
+
+  // --- Winning restrictions ---
+  if (rules.numberCardFinishOnly) {
+    push('numberCardFinishOnly', 'Number Finish Only', 'You can only win by playing a number card as your final card.', 'modifier');
+  } else {
+    const banned: string[] = [];
+    if (!rules.allowWinWithWild) banned.push('a Wild / +4');
+    if (!rules.allowWinWithDrawCard) banned.push('a +2 / +4');
+    if (!rules.allowWinWithActionCard) banned.push('a Skip / Reverse');
+    if (banned.length)
+      push('finish', 'Finish Restrictions', `You cannot win by playing ${banned.join(' or ')} as your last card.`, 'modifier');
+  }
+
+  // --- Table / system ---
+  if (rules.turnTimer)
+    push('turnTimer', 'Turn Timer', `Each turn has a ${rules.turnTimerSeconds}-second limit; if it runs out, your turn auto-resolves.`, 'config');
+  else
+    push('turnTimer', 'No Turn Timer', 'There is no turn timer — take as long as you need on your turn.', 'modifier');
+
+  if (!rules.autoReshuffle)
+    push('autoReshuffle', 'No Auto Reshuffle', 'The discard pile is not reshuffled back into the draw pile when it runs out.', 'modifier');
+  if (!rules.spectatorMode)
+    push('spectatorMode', 'No Spectators', 'Extra players cannot watch once the table is full.', 'modifier');
+  if (!rules.allowRejoin)
+    push('allowRejoin', 'No Rejoin', 'Disconnected players cannot reclaim their seat.', 'modifier');
+
+  push('targetScore', 'Match Target', `First player to reach ${rules.targetScore} points wins the match.`, 'config');
+
+  return out;
+}

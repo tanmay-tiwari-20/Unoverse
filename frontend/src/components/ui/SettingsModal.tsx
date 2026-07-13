@@ -7,17 +7,18 @@ import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
 import { useDialogA11y } from '../../hooks/useDialogA11y';
 import { useRouter } from 'next/navigation';
-import { 
-  X, Volume2, Volume1, Mic, Monitor, Layers, 
+import {
+  X, Volume2, Volume1, Mic, Monitor, Layers,
   Sparkles, Bug, Keyboard, Info, LogOut,
   Headphones, Zap, Video, Eye, Speaker,
-  Gamepad2, Wand2
+  Gamepad2, Wand2, BookOpen, Tag
 } from 'lucide-react';
 
 export const SettingsModal: React.FC = () => {
   const { 
     isSettingsOpen, setIsSettingsOpen,
-    setIsReportBugOpen, setIsControlsOpen, setIsAboutOpen,
+    setIsReportBugOpen, setIsControlsOpen, setIsAboutOpen, setIsRulesOpen,
+    showLastPlayedBy, setShowLastPlayedBy,
     masterVolume, setMasterVolume,
     gameVolume, setGameVolume,
     ambientVolume, setAmbientVolume,
@@ -212,7 +213,8 @@ export const SettingsModal: React.FC = () => {
                 <div className="space-y-3">
                   <ToggleField icon={Layers} label="Card Animations" checked={cardAnimations} setter={setCardAnimations} />
                   <ToggleField icon={Video} label="Camera Motion" checked={cameraMotion} setter={setCameraMotion} />
-                  
+                  <ToggleField icon={Tag} label="Show Last Played By" checked={showLastPlayedBy} setter={setShowLastPlayedBy} />
+
                   <div className="pt-2">
                     <SliderField icon={Eye} label="Camera Sensitivity" value={cameraSensitivity} setter={setCameraSensitivity} color="amber" />
                   </div>
@@ -223,8 +225,16 @@ export const SettingsModal: React.FC = () => {
           </div>
 
           {/* Quick Actions / Footer inside scroll area */}
-          <div className="mt-10 pt-6 border-t border-slate-800/50 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <button 
+          <div className="mt-10 pt-6 border-t border-slate-800/50 grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <button
+              onClick={() => { setIsRulesOpen(true); setIsSettingsOpen(false); }}
+              className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group cursor-pointer"
+              aria-label="Open rules and how to play"
+            >
+              <BookOpen size={18} className="group-hover:scale-110 transition-transform text-yellow-400" />
+              <span className="text-[9px] font-bold uppercase tracking-wider">Rules</span>
+            </button>
+            <button
               onClick={() => { setIsReportBugOpen(true); setIsSettingsOpen(false); }}
               className="flex flex-col items-center justify-center gap-2 p-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800 transition-colors text-slate-400 hover:text-white group cursor-pointer"
             >

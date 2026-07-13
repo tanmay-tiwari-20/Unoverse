@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useGameStore } from '../../store/useGameStore';
+import { useSettingsStore } from '../../store/useSettingsStore';
 import { useSocket } from '../../hooks/useSocket';
 import { PhysicalCard } from '../cards/PhysicalCard';
 import { CinematicSharedTopCard } from './CinematicSharedTopCard';
@@ -45,8 +46,22 @@ const DrawPileHitbox: React.FC<{ stackHeight: number; onDraw: () => void }> = ({
   );
 };
 
+// Verb shown in the "last played by" indicator, matched to the authoritative
+// lastAction.type so special actions (jump-in, swap, rotate, challenge, draw,
+// pass) each read correctly rather than everything saying "Played by".
+const LAST_ACTION_VERB: Record<string, string> = {
+  play: 'Played by',
+  jump_in: 'Jumped in by',
+  swap: 'Swapped by',
+  rotate: 'Rotated by',
+  challenge: 'Challenged by',
+  draw: 'Drawn by',
+  pass: 'Passed by',
+};
+
 export const WebGLCards: React.FC = () => {
-  const { room, player, currentPlayerId, playerCards, discardPile, drawPileCount, gameStatus, isProcessing, wildColor, drawnCardId } = useGameStore();
+  const { room, player, currentPlayerId, playerCards, discardPile, drawPileCount, gameStatus, isProcessing, wildColor, drawnCardId, lastAction } = useGameStore();
+  const showLastPlayedBy = useSettingsStore((s) => s.showLastPlayedBy);
   const { playCard, drawCard } = useSocket();
 
   const isMyTurn = currentPlayerId === player?.id && (gameStatus === 'playing' || gameStatus === 'awaiting_color_selection') && !isProcessing;
@@ -61,6 +76,17 @@ export const WebGLCards: React.FC = () => {
   const numPlayers = Math.max(playersList.length, 2);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
+
+  // "Last played by" — derived purely from the authoritative lastAction. The
+  // actor is resolved by id against the current room roster (the server remaps
+  // lastAction.playerId across reconnects), so it never goes stale or wrong. It
+  // is hidden with no action yet, once the round has ended, or if the actor is
+  // no longer in the room.
+  const lastActor = lastAction ? playersList.find(p => p.id === lastAction.playerId) : null;
+  const lastPlayedByLabel =
+    showLastPlayedBy && lastAction && lastActor && gameStatus !== 'ended'
+      ? `${LAST_ACTION_VERB[lastAction.type] ?? 'Played by'} ${lastActor.name}`
+      : null;
 
   return (
     <group>
@@ -96,6 +122,17 @@ export const WebGLCards: React.FC = () => {
 
         {/* Standing top card display — part of the pile */}
         <CinematicSharedTopCard />
+
+        {/* Subtle "last played by" indicator, anchored to the front edge of the
+            discard pile so it gives context without covering the top card. */}
+        {lastPlayedByLabel && (
+          <Html position={[0, 0.02, 0.22]} center zIndexRange={[90, 0]}>
+            <div className="pointer-events-none select-none whitespace-nowrap flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-black/55 backdrop-blur-sm border border-white/10 text-white/75 text-[10px] sm:text-[9px] font-rounded font-bold shadow-md max-w-[42vw]">
+              <span className="w-1.5 h-1.5 rounded-full bg-yellow-400/80 shrink-0" aria-hidden="true" />
+              <span className="truncate">{lastPlayedByLabel}</span>
+            </div>
+          </Html>
+        )}
       </group>
 
       {/* 2. DRAW PILE (LEFT SIDE) */}

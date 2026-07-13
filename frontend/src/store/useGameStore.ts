@@ -31,6 +31,18 @@ export interface ChatMessage {
 // Cap the in-memory chat history so a long session can't grow unbounded.
 const MAX_CHAT_MESSAGES = 200;
 
+// The most recent gameplay action, mirrored from the authoritative game state.
+// Drives the subtle "last played by" indicator near the discard pile.
+export interface GameLastAction {
+  type: 'play' | 'draw' | 'pass' | 'jump_in' | 'swap' | 'rotate' | 'challenge';
+  playerId: string;
+  card?: CardItem;
+  unoPenalty?: boolean;
+  drawCount?: number;
+  targetId?: string;
+  challengeSuccess?: boolean;
+}
+
 interface GameState {
   socket: Socket | null;
   room: Room | null;
@@ -64,6 +76,7 @@ interface GameState {
   drawStack: number; // accumulated +2/+4 cards the next player must stack or draw
   pendingDrawType: 'draw_two' | 'wild_draw_four' | null; // top of an active draw chain
   drawnCardId: string | null; // id of a just-drawn, still-playable card awaiting a play-or-pass decision
+  lastAction: GameLastAction | null; // most recent action from the authoritative game state
   match: MatchState | null; // running match scoreboard across rounds
   turnDeadline: number | null; // epoch ms when the active turn auto-resolves on the server
   gameStoppedNotice: boolean; // true when a game was just stopped due to too few players
@@ -129,6 +142,7 @@ interface GameState {
     turnDeadline?: number | null;
     match?: MatchState | null;
     houseRules?: HouseRules | null;
+    lastAction?: GameLastAction | null;
   }) => void;
   
   reset: () => void;
@@ -165,6 +179,7 @@ export const useGameStore = create<GameState>((set) => ({
   drawStack: 0,
   pendingDrawType: null,
   drawnCardId: null,
+  lastAction: null,
   match: null,
   turnDeadline: null,
   gameStoppedNotice: false,
@@ -277,6 +292,7 @@ export const useGameStore = create<GameState>((set) => ({
     drawStack: 0,
     pendingDrawType: null,
     drawnCardId: null,
+    lastAction: null,
     match: null,
     turnDeadline: null,
     gameStoppedNotice: false,
@@ -303,6 +319,7 @@ export const useGameStore = create<GameState>((set) => ({
       drawStack: payload.drawStack ?? 0,
       pendingDrawType: payload.pendingDrawType ?? null,
       drawnCardId: payload.drawnCardId ?? null,
+      lastAction: payload.lastAction ?? null,
       match: payload.match ?? state.match ?? null,
       turnDeadline: payload.turnDeadline ?? null,
       gameStoppedNotice: false,
@@ -341,6 +358,7 @@ export const useGameStore = create<GameState>((set) => ({
     drawStack: 0,
     pendingDrawType: null,
     drawnCardId: null,
+    lastAction: null,
     match: null,
     turnDeadline: null,
     gameStoppedNotice: false,

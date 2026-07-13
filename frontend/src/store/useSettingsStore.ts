@@ -9,6 +9,7 @@ interface SettingsState {
   isControlsOpen: boolean;
   isAboutOpen: boolean;
   isHouseRulesOpen: boolean;
+  isRulesOpen: boolean;
 
   // Persisted Settings
   masterVolume: number;
@@ -27,6 +28,7 @@ interface SettingsState {
   cameraMotion: boolean;
   cameraSensitivity: number;
   reducedMotion: boolean;
+  showLastPlayedBy: boolean;
 
   // Setters
   setIsSettingsOpen: (isOpen: boolean) => void;
@@ -34,6 +36,7 @@ interface SettingsState {
   setIsControlsOpen: (isOpen: boolean) => void;
   setIsAboutOpen: (isOpen: boolean) => void;
   setIsHouseRulesOpen: (isOpen: boolean) => void;
+  setIsRulesOpen: (isOpen: boolean) => void;
 
   setMasterVolume: (vol: number) => void;
   setGameVolume: (vol: number) => void;
@@ -51,6 +54,7 @@ interface SettingsState {
   setCameraMotion: (enabled: boolean) => void;
   setCameraSensitivity: (sens: number) => void;
   setReducedMotion: (enabled: boolean) => void;
+  setShowLastPlayedBy: (enabled: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -62,6 +66,7 @@ export const useSettingsStore = create<SettingsState>()(
       isControlsOpen: false,
       isAboutOpen: false,
       isHouseRulesOpen: false,
+      isRulesOpen: false,
 
       // Default Persisted Settings
       masterVolume: 100,
@@ -80,6 +85,8 @@ export const useSettingsStore = create<SettingsState>()(
       cameraMotion: true,
       cameraSensitivity: 50,
       reducedMotion: false,
+      // Subtle "last played by" indicator near the discard pile — on by default.
+      showLastPlayedBy: true,
 
       // UI Actions (don't technically need persistence but they are part of the store)
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
@@ -87,6 +94,7 @@ export const useSettingsStore = create<SettingsState>()(
       setIsControlsOpen: (isOpen) => set({ isControlsOpen: isOpen }),
       setIsAboutOpen: (isOpen) => set({ isAboutOpen: isOpen }),
       setIsHouseRulesOpen: (isOpen) => set({ isHouseRulesOpen: isOpen }),
+      setIsRulesOpen: (isOpen) => set({ isRulesOpen: isOpen }),
 
       // Settings Actions
       setMasterVolume: (vol) => set({ masterVolume: vol }),
@@ -105,6 +113,7 @@ export const useSettingsStore = create<SettingsState>()(
       setCameraMotion: (enabled) => set({ cameraMotion: enabled }),
       setCameraSensitivity: (sens) => set({ cameraSensitivity: sens }),
       setReducedMotion: (enabled) => set({ reducedMotion: enabled }),
+      setShowLastPlayedBy: (enabled) => set({ showLastPlayedBy: enabled }),
     }),
     {
       name: 'uno-real-settings', // unique name
@@ -124,6 +133,7 @@ export const useSettingsStore = create<SettingsState>()(
         cameraMotion: state.cameraMotion,
         cameraSensitivity: state.cameraSensitivity,
         reducedMotion: state.reducedMotion,
+        showLastPlayedBy: state.showLastPlayedBy,
       }),
       // On first load (no persisted data), respect the OS reduced-motion pref
       // and auto-disable heavy animation settings.
