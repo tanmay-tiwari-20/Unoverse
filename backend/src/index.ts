@@ -214,63 +214,70 @@ function broadcastGameState(code: string) {
     logger.debug(`  Player -> playerId: ${p.id}, socketId: ${p.id}, seat: ${p.seatNumber}, cards.length: ${game.hands[p.id]?.length || 0}`);
   });
   
+  // Face-down placeholder view of every hand, built ONCE per broadcast. This is
+  // both the spectator view and the base each player's own hand is merged over,
+  // so no recipient can ever see another player's actual cards.
+  const faceDownHands: Record<number, any[]> = {};
+  room.players.forEach((p) => {
+    const actualHand = game.hands[p.id] || [];
+    faceDownHands[p.seatNumber] = actualHand.map((_c, idx) => ({
+      id: `${p.id}-back-${idx}`,
+      color: 'wild',
+      value: 'wild',
+    }));
+  });
+
+  const activeSeat = activePlayerObj ? activePlayerObj.seatNumber : 1;
+  const winnerObj = game.winnerId ? room.players.find(p => p.id === game.winnerId) : null;
+
+  // One shared payload for every recipient (player or spectator); only `hands`
+  // (each player's own view) and `drawnCardId` (players only) are overridden per
+  // recipient. Keeping a single literal means a future game-state field can never
+  // reach players but silently miss spectators.
+  const basePayload = {
+    roomCode: room.code,
+    hands: faceDownHands,
+    discardPile: game.discardPile,
+    drawPileCount: game.deck.length,
+    currentPlayerId: game.currentPlayerId,
+    currentPlayerSeat: activeSeat,
+    direction: game.direction,
+    wildColor: game.wildColor,
+    gameStatus: game.status,
+    colorChooserId: game.colorChooserId,
+    swapChooserId: game.swapChooserId ?? null,
+    winnerId: game.winnerId,
+    winnerName: winnerObj ? winnerObj.name : null,
+    unoCalled: game.unoCalled,
+    drawStack: game.drawStack,
+    pendingDrawType: game.pendingDrawType,
+    challengeableById: game.challengeableById ?? null,
+    drawnCardId: game.drawnCardId ?? null,
+    turnDeadline: game.turnDeadline ?? null,
+    lastAction: game.lastAction,
+    match: room.match ?? null,
+    // The locked, active house rules travel with every game update so clients
+    // render/enforce exactly what the server is enforcing.
+    houseRules: game.rules,
+  };
+
   room.players.forEach((targetPlayer) => {
-    // Sanitize hands: targetPlayer sees their own cards, and placeholders for others
-    const sanitizedHands: Record<number, any[]> = {};
-    
-    room.players.forEach((p) => {
-      const isTarget = p.id === targetPlayer.id;
-      const actualHand = game.hands[p.id] || [];
-      if (isTarget) {
-        sanitizedHands[p.seatNumber] = actualHand;
-      } else {
-        sanitizedHands[p.seatNumber] = actualHand.map((c, idx) => ({
-          id: `${p.id}-back-${idx}`,
-          color: 'wild',
-          value: 'wild',
-        }));
-      }
-    });
-
-    const activePlayerObj = room.players.find(p => p.id === game.currentPlayerId);
-    const activeSeat = activePlayerObj ? activePlayerObj.seatNumber : 1;
-
-    const winnerObj = game.winnerId ? room.players.find(p => p.id === game.winnerId) : null;
-
-    logger.debug(`[BROADCAST] Room ${room.code} Player ${targetPlayer.id} Discard Pile Length: ${game.discardPile?.length}`);
-
     io.to(targetPlayer.id).emit('game-updated', {
-      roomCode: room.code,
-      hands: sanitizedHands,
-      discardPile: game.discardPile,
-      drawPileCount: game.deck.length,
-      currentPlayerId: game.currentPlayerId,
-      currentPlayerSeat: activeSeat,
-      direction: game.direction,
-      wildColor: game.wildColor,
-      gameStatus: game.status,
-      colorChooserId: game.colorChooserId,
-      swapChooserId: game.swapChooserId ?? null,
-      winnerId: game.winnerId,
-      winnerName: winnerObj ? winnerObj.name : null,
-      unoCalled: game.unoCalled,
-      drawStack: game.drawStack,
-      pendingDrawType: game.pendingDrawType,
-      challengeableById: game.challengeableById ?? null,
-      drawnCardId: game.drawnCardId ?? null,
-      turnDeadline: game.turnDeadline ?? null,
-      lastAction: game.lastAction,
-      match: room.match ?? null,
-      // The locked, active house rules travel with every game update so clients
-      // render/enforce exactly what the server is enforcing.
-      houseRules: game.rules,
+      ...basePayload,
+      // The recipient sees their own real cards; everyone else stays face-down.
+      hands: { ...faceDownHands, [targetPlayer.seatNumber]: game.hands[targetPlayer.id] || [] },
     });
   });
 
-  const activePlayer = room.players.find(p => p.id === game.currentPlayerId);
-  if (activePlayer) {
-    logger.debug(`[TURN_START] Player: ${activePlayer.name} (${game.currentPlayerId})`);
+  if (activePlayerObj) {
+    logger.debug(`[TURN_START] Player: ${activePlayerObj.name} (${game.currentPlayerId})`);
   }
+
+  // Spectators observe the live game in real time — piles, turn order, counts and
+  // action banners — with every hand face-down and no pending draw decision.
+  room.spectators?.forEach((s) => {
+    io.to(s.id).emit('game-updated', { ...basePayload, drawnCardId: null });
+  });
 
   // Persist the room after every game-state broadcast. All in-game mutations
   // (play/draw/pass/chooseColor/UNO, plus reconnection remaps) flow through here,
@@ -391,18 +398,38 @@ app.post('/api/rooms/join', (req, res) => {
     return;
   }
 
-  // If player is reconnecting with same name, allow it
-  const isReconnecting = room.players.some(p => p.name.toLowerCase() === name.toLowerCase());
-  
+  // If the player is reconnecting with the same name (as a seated player OR an
+  // existing spectator), let them through and predict their existing role.
+  const reconnectingAsPlayer = room.players.some(p => p.name.toLowerCase() === name.toLowerCase());
+  const reconnectingAsSpectator = room.spectators?.some(s => s.name.toLowerCase() === name.toLowerCase()) ?? false;
+
+  // Capacity numbers come from the SAME roomManager helper the join gate uses,
+  // so this pre-check can never drift from the authoritative decision.
+  const { maxPlayers, playerCount, spectatorCount, isFull } = roomManager.getCapacityInfo(room);
+
   let isSpectator = false;
-  if (!isReconnecting) {
-    if (room.players.length >= 6) {
-      isSpectator = true;
-    }
+  if (reconnectingAsSpectator && !reconnectingAsPlayer) {
+    isSpectator = true;
+  } else if (!reconnectingAsPlayer) {
+    isSpectator = isFull;
+  }
+
+  // If the table is full and spectating is disabled, this join would be rejected
+  // by the socket layer — surface that to the client now with a clear message.
+  if (isSpectator && !reconnectingAsSpectator && room.houseRules?.spectatorMode === false) {
+    res.status(403).json({ error: 'This table is full and spectating is disabled.' });
+    return;
   }
 
   logger.debug(`[REST] Validated join request for name "${name}" to room ${code} (isSpectator: ${isSpectator})`);
-  res.status(200).json({ success: true, isSpectator });
+  res.status(200).json({
+    success: true,
+    isSpectator,
+    isFull,
+    playerCount,
+    maxPlayers,
+    spectatorCount,
+  });
 });
 
 // --- Socket.IO Server Setup ---
@@ -513,7 +540,7 @@ io.on('connection', (socket) => {
 
     try {
       const upperCode = code.toUpperCase();
-      const { room, player, isSpectator } = roomManager.joinRoom(upperCode, name, socket.id, secret);
+      const { room, player, isSpectator, spectator } = roomManager.joinRoom(upperCode, name, socket.id, secret);
 
       currentRoomCode = upperCode;
       currentName = name;
@@ -525,9 +552,9 @@ io.on('connection', (socket) => {
         logger.debug(`[Socket] Player ${name} (${socket.id}) joined room ${upperCode} at Seat ${player?.seatNumber}`);
       }
 
-      // Notify the joining socket. Their own player object keeps its secret so
-      // they can prove identity on reconnect; the room view is sanitized.
-      socket.emit('joined-successfully', { room: roomManager.publicRoom(room), player, isSpectator });
+      // Notify the joining socket. Their own player/spectator object keeps its
+      // secret so they can prove identity on reconnect; the room view is sanitized.
+      socket.emit('joined-successfully', { room: roomManager.publicRoom(room), player, isSpectator, spectator });
 
       if (isSpectator) {
         // Notify others that a spectator joined

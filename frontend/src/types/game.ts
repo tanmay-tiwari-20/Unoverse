@@ -11,6 +11,7 @@ export interface Player {
 export interface Spectator {
   id: string;
   name: string;
+  secret?: string; // Private per-session token — only present on your own spectator object.
 }
 
 export interface Room {

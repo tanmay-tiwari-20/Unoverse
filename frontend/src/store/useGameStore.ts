@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Socket } from 'socket.io-client';
-import { Room, Player } from '../types/game';
+import { Room, Player, Spectator } from '../types/game';
 import { CardItem, CardColor } from '../lib/cards/cardEngine';
 import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
@@ -47,6 +47,9 @@ interface GameState {
   socket: Socket | null;
   room: Room | null;
   player: Player | null;
+  // The local user's spectator identity when they joined as a spectator (player is
+  // null in that case). Carries the private reconnect secret like player does.
+  spectator: Spectator | null;
   error: string | null;
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
   cameraMode: 'seated' | 'orbit';
@@ -106,6 +109,7 @@ interface GameState {
   setChatOpen: (open: boolean) => void;
   setRoom: (room: Room | null) => void;
   setPlayer: (player: Player | null) => void;
+  setSpectator: (spectator: Spectator | null) => void;
   setError: (error: string | null) => void;
   setConnectionStatus: (status: 'disconnected' | 'connecting' | 'connected' | 'error') => void;
   setCameraMode: (mode: 'seated' | 'orbit') => void;
@@ -152,6 +156,7 @@ export const useGameStore = create<GameState>((set) => ({
   socket: null,
   room: null,
   player: null,
+  spectator: null,
   error: null,
   connectionStatus: 'disconnected',
   cameraMode: 'seated',
@@ -233,6 +238,7 @@ export const useGameStore = create<GameState>((set) => ({
   })),
   setRoom: (room) => set({ room }),
   setPlayer: (player) => set({ player }),
+  setSpectator: (spectator) => set({ spectator }),
   setError: (error) => set({ error }),
   setConnectionStatus: (status) => set({ connectionStatus: status }),
   setCameraMode: (cameraMode) => set({ cameraMode }),
@@ -272,7 +278,9 @@ export const useGameStore = create<GameState>((set) => ({
     drawPileCount: 52,
     selectedCardId: null,
     isProcessing: false,
-    isSpectator: false,
+    // NOTE: isSpectator/spectator are intentionally NOT reset here — the local
+    // user's role comes from the authoritative join result and must survive a
+    // game being stopped/reset back to the lobby.
     reactions: [],
     chatMessages: [],
     isChatOpen: false,
@@ -327,10 +335,11 @@ export const useGameStore = create<GameState>((set) => ({
     }));
   },
 
-  reset: () => set({ 
-    room: null, 
-    player: null, 
-    error: null, 
+  reset: () => set({
+    room: null,
+    player: null,
+    spectator: null,
+    error: null,
     cameraMode: 'seated',
     playerCards: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
     discardPile: [],

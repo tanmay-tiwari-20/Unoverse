@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 import { useVoiceStore } from '../../store/useVoiceStore';
 import { getSeatCoords } from '../../utils/seating';
+import { getLayoutSeatCount } from '../../utils/capacity';
 import { Mic, MicOff } from 'lucide-react';
 
 export const PlayerNameplates: React.FC = () => {
@@ -15,7 +16,7 @@ export const PlayerNameplates: React.FC = () => {
 
   const localSeatNumber = player?.seatNumber || 1;
   const playersList = room.players || [];
-  const numPlayers = playersList.length || 2;
+  const numPlayers = getLayoutSeatCount(room);
   const localIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localIndex >= 0 ? localIndex : 0;
 

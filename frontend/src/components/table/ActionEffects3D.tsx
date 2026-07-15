@@ -6,6 +6,8 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useGameStore } from '../../store/useGameStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { getHandRingRadii } from '../../utils/tableLayout';
+import { getLayoutSeatCount } from '../../utils/capacity';
 import { AnimatePresence, motion } from 'framer-motion';
 
 /**
@@ -48,15 +50,16 @@ export const ActionEffects3D: React.FC = () => {
   const prevUnoCalledRef = useRef<Record<string, boolean>>({});
 
   const playersList = room?.players || [];
-  const numPlayers = Math.max(playersList.length, 2);
+  const numPlayers = getLayoutSeatCount(room);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
 
   const getPlayerWorldPos = (playerIndex: number): [number, number, number] => {
     const relativeIndex = (playerIndex - safeLocalIndex + numPlayers) % numPlayers;
     const baseAngle = (Math.PI * 2 / numPlayers) * relativeIndex;
-    const rX = 1.15;
-    const rZ = 0.75;
+    // Ring radii scale with the active player count, matching WebGLCards so the
+    // effects spawn exactly where the player's hand sits on the resized table.
+    const { rX, rZ } = getHandRingRadii(numPlayers);
     return [
       Math.sin(baseAngle) * rX,
       1.1,

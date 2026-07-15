@@ -55,6 +55,9 @@ export interface HouseRules {
   spectatorMode: boolean;
   allowRejoin: boolean;
   targetScore: number;
+  /** Maximum number of ACTIVE players who may hold a seat (source of truth for
+   *  capacity). Extra joiners spectate when spectatorMode is on. */
+  maxPlayers: number;
 }
 
 export const DEFAULT_HOUSE_RULES: HouseRules = {
@@ -92,12 +95,14 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   spectatorMode: true,
   allowRejoin: true,
   targetScore: 500,
+  maxPlayers: 6,
 };
 
 export const RULE_BOUNDS = {
   unoPenaltyCards: { min: 1, max: 10, step: 1 },
   turnTimerSeconds: { min: 10, max: 180, step: 5 },
   targetScore: { min: 100, max: 1000, step: 50 },
+  maxPlayers: { min: 2, max: 10, step: 1 },
 } as const;
 
 const clampInt = (v: unknown, fallback: number, min: number, max: number): number => {
@@ -169,6 +174,7 @@ export function normalizeHouseRules(input?: Partial<HouseRules> | null): HouseRu
     spectatorMode: asBool(s.spectatorMode, d.spectatorMode),
     allowRejoin: asBool(s.allowRejoin, d.allowRejoin),
     targetScore: clampInt(s.targetScore, d.targetScore, RULE_BOUNDS.targetScore.min, RULE_BOUNDS.targetScore.max),
+    maxPlayers: clampInt(s.maxPlayers, d.maxPlayers, RULE_BOUNDS.maxPlayers.min, RULE_BOUNDS.maxPlayers.max),
   };
 
   for (const key of Object.keys(RULE_ENABLED) as (keyof HouseRules)[]) {
@@ -298,6 +304,7 @@ export const HOUSE_RULE_CATEGORIES: RuleCategoryDef[] = [
     icon: 'Settings2',
     accent: 'blue',
     fields: [
+      { key: 'maxPlayers', label: 'Max Players', description: 'How many people can actively play. Extra joiners watch as spectators.', control: { type: 'stepper', min: RULE_BOUNDS.maxPlayers.min, max: RULE_BOUNDS.maxPlayers.max, step: 1, unit: 'players' } },
       { key: 'turnTimer', label: 'Turn Timer', description: 'Auto-resolve an AFK player after a countdown.', control: { type: 'toggle' } },
       { key: 'turnTimerSeconds', label: 'Seconds Per Turn', description: 'Length of the per-turn countdown.', control: { type: 'stepper', min: RULE_BOUNDS.turnTimerSeconds.min, max: RULE_BOUNDS.turnTimerSeconds.max, step: 5, unit: 's' }, dependsOn: 'turnTimer', indent: true },
       { key: 'autoReshuffle', label: 'Auto Reshuffle', description: 'Reshuffle the discard pile into the draw pile when it runs out.', control: { type: 'toggle' } },
@@ -441,6 +448,7 @@ export function getActiveRuleExplanations(rules: HouseRules): ActiveRuleExplanat
     push('allowRejoin', 'No Rejoin', 'Disconnected players cannot reclaim their seat.', 'modifier');
 
   push('targetScore', 'Match Target', `First player to reach ${rules.targetScore} points wins the match.`, 'config');
+  push('maxPlayers', 'Table Size', `Up to ${rules.maxPlayers} players can take a seat; anyone joining after that watches as a spectator.`, 'config');
 
   return out;
 }

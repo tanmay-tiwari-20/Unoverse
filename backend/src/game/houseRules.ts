@@ -101,6 +101,10 @@ export interface HouseRules {
   allowRejoin: boolean;
   /** Cumulative points required to win the match. */
   targetScore: number;
+  /** Maximum number of ACTIVE players who may hold a seat. Extra joiners spectate
+   *  (when spectatorMode is on). This is the single source of truth for player
+   *  capacity — the UI and the join gate both read it. */
+  maxPlayers: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +153,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   spectatorMode: true,
   allowRejoin: true,
   targetScore: 500,
+  maxPlayers: 6,
 };
 
 // ---------------------------------------------------------------------------
@@ -159,6 +164,7 @@ export const RULE_BOUNDS = {
   unoPenaltyCards: { min: 1, max: 10 },
   turnTimerSeconds: { min: 10, max: 180 },
   targetScore: { min: 100, max: 1000 },
+  maxPlayers: { min: 2, max: 10 },
 } as const;
 
 const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -242,6 +248,7 @@ export function normalizeHouseRules(input?: Partial<HouseRules> | null): HouseRu
     spectatorMode: asBool(src.spectatorMode, d.spectatorMode),
     allowRejoin: asBool(src.allowRejoin, d.allowRejoin),
     targetScore: clampInt(src.targetScore, d.targetScore, RULE_BOUNDS.targetScore.min, RULE_BOUNDS.targetScore.max),
+    maxPlayers: clampInt(src.maxPlayers, d.maxPlayers, RULE_BOUNDS.maxPlayers.min, RULE_BOUNDS.maxPlayers.max),
   };
 
   // Enforce dependencies: any child whose parent condition is unmet reverts to default.

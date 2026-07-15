@@ -10,7 +10,7 @@ import { RoomStore, MemoryRoomStore } from './roomStore';
 export interface Player {
   id: string; // Socket ID
   name: string;
-  seatNumber: number; // 1 to 6
+  seatNumber: number; // 1 to maxPlayers (house rule; default 6)
   isHost: boolean;
   secret: string; // Private per-session token. Never broadcast to other clients.
 }
@@ -228,6 +228,24 @@ class RoomManager {
     );
   }
 
+  /**
+   * Capacity summary for a room — the SAME numbers the join gate enforces, so
+   * the REST pre-check and any UI read from one place and can never drift from
+   * the authoritative decision in joinRoom. Only active players count toward
+   * capacity; spectators never consume a slot.
+   */
+  public getCapacityInfo(room: Room): {
+    maxPlayers: number;
+    playerCount: number;
+    spectatorCount: number;
+    isFull: boolean;
+  } {
+    const maxPlayers = room.houseRules?.maxPlayers ?? DEFAULT_HOUSE_RULES.maxPlayers;
+    const playerCount = room.players.length;
+    const spectatorCount = room.spectators?.length ?? 0;
+    return { maxPlayers, playerCount, spectatorCount, isFull: playerCount >= maxPlayers };
+  }
+
   // Start disconnect grace period for player or spectator (60 seconds)
   public startDisconnectGracePeriod(
     socketId: string,
@@ -283,7 +301,7 @@ class RoomManager {
     playerName: string,
     playerSocketId: string,
     secret?: string
-  ): { room: Room; player: Player | null; isSpectator: boolean } {
+  ): { room: Room; player: Player | null; isSpectator: boolean; spectator?: Spectator } {
     const upperCode = code.toUpperCase();
     const room = this.rooms.get(upperCode);
 
@@ -296,7 +314,10 @@ class RoomManager {
 
     logger.debug(`[ROOM_JOIN_REQUEST] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${upperCode}, Status: ${room.status}`);
     logger.debug(`[ROOM_PLAYER_COUNT] Room: ${upperCode}, Count: ${room.players.length}`);
-    logger.debug(`[ROOM_CAPACITY] Room: ${upperCode}, Capacity: 6`);
+    // Active-player capacity is host-configurable via house rules (default 6). It
+    // is the single source of truth for how many players may hold a seat.
+    const { maxPlayers } = this.getCapacityInfo(room);
+    logger.debug(`[ROOM_CAPACITY] Room: ${upperCode}, Capacity: ${maxPlayers}`);
 
     // Cancel any active disconnect timer for this player/spectator
     const timerKey = `${upperCode}:${playerName.toLowerCase()}`;
@@ -386,12 +407,15 @@ class RoomManager {
         logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
         logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
         this.markDirty(room.code);
-        return { room, player: null, isSpectator: true };
+        return { room, player: null, isSpectator: true, spectator: existingSpectatorByName };
       }
     }
 
-    // Spectator Check: Only if the room has 6 or more seated players
-    const shouldSpectate = room.players.length >= 6;
+    // Spectator Check: overflow past the active-player capacity joins as a spectator.
+    // This gate is authoritative: because Node runs handlers on a single thread, two
+    // sockets can never pass this check "simultaneously" — the array push below is
+    // committed before the next join is processed, so capacity can't be exceeded.
+    const shouldSpectate = this.getCapacityInfo(room).isFull;
 
     if (shouldSpectate) {
       // Spectator mode can be disabled via house rules — reject instead of seating.
@@ -410,13 +434,13 @@ class RoomManager {
       logger.debug(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       this.markDirty(room.code);
-      return { room, player: null, isSpectator: true };
+      return { room, player: null, isSpectator: true, spectator };
     }
 
-    // Stable Seating System: Find the lowest vacant seat number between 1 and 6
+    // Stable Seating System: Find the lowest vacant seat number between 1 and maxPlayers
     const occupiedSeats = new Set(room.players.map((p) => p.seatNumber));
     let seatNumber = 1;
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= maxPlayers; i++) {
       if (!occupiedSeats.has(i)) {
         seatNumber = i;
         break;

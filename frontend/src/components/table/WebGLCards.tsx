@@ -6,6 +6,8 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useSocket } from '../../hooks/useSocket';
 import { PhysicalCard } from '../cards/PhysicalCard';
 import { CinematicSharedTopCard } from './CinematicSharedTopCard';
+import { getHandRingRadii } from '../../utils/tableLayout';
+import { getLayoutSeatCount } from '../../utils/capacity';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 
@@ -73,9 +75,13 @@ export const WebGLCards: React.FC = () => {
   if (!room || !['playing', 'awaiting_color_selection', 'ended'].includes(gameStatus)) return null;
 
   const playersList = room.players || [];
-  const numPlayers = Math.max(playersList.length, 2);
+  const numPlayers = getLayoutSeatCount(room);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
+
+  // Opponent hand groups sit at the (count-scaled) table edge, matching the seat
+  // ring so cards and silhouettes stay aligned as the table grows/shrinks.
+  const { rX: handRX, rZ: handRZ } = getHandRingRadii(numPlayers);
 
   // "Last played by" — derived purely from the authoritative lastAction. The
   // actor is resolved by id against the current room roster (the server remaps
@@ -185,8 +191,8 @@ export const WebGLCards: React.FC = () => {
         const cardCount = hand.length;
         if (cardCount === 0) return null;
 
-        const rX = 1.15;
-        const rZ = 0.75;
+        const rX = handRX;
+        const rZ = handRZ;
         const groupPosition: [number, number, number] = [
           Math.sin(baseAngle) * rX,
           1.1,

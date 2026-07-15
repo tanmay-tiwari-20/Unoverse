@@ -8,6 +8,7 @@ import { useGameStore } from '../../../store/useGameStore';
 import { ReactionsHandler } from '../../../components/social/ReactionsHandler';
 import { ChatPanel } from '../../../components/social/ChatPanel';
 import { getSeatCoords } from '../../../utils/seating';
+import { getMaxPlayers, getSpectatorCount, isRoomFull } from '../../../utils/capacity';
 import { TurnGlowIndicator } from '../../../components/table/TurnGlowIndicator';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -39,7 +40,8 @@ import {
   ScrollText,
   Gavel,
   ArrowLeftRight,
-  MessageCircle
+  MessageCircle,
+  Eye
 } from 'lucide-react';
 import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
 import { summarizeActiveRules } from '../../../lib/houseRules';
@@ -48,6 +50,7 @@ import { TurnTimer } from '../../../components/table/TurnTimer';
 import { SettingsModal } from '../../../components/ui/SettingsModal';
 import { HouseRulesModal } from '../../../components/ui/HouseRulesModal';
 import { HelpModals } from '../../../components/ui/HelpModals';
+import { RoomRoster } from '../../../components/ui/RoomRoster';
 import { FPSCounter } from '../../../components/ui/FPSCounter';
 import { useVoiceChat } from '../../../hooks/useVoiceChat';
 import { useVoiceStore } from '../../../store/useVoiceStore';
@@ -374,6 +377,11 @@ export default function LobbyPage() {
   const isHost = player?.isHost || false;
   const totalPlayers = room?.players.length || 0;
   const canStart = totalPlayers >= 2;
+  // Active-player capacity comes from the authoritative room config (house rules),
+  // derived through the shared helpers so every surface shows the same numbers.
+  const maxPlayers = getMaxPlayers(room, houseRules);
+  const spectatorCount = getSpectatorCount(room);
+  const roomIsFull = isRoomFull(room, houseRules);
   
   const localSeatNumber = player?.seatNumber || 1;
   const myHand = playerCards[localSeatNumber] || [];
@@ -610,25 +618,43 @@ export default function LobbyPage() {
 
         {/* HUD: Overlay Top Header Panel */}
         <header className="absolute top-0 left-0 right-0 hud-pad flex justify-between items-start z-20 pointer-events-none gap-2">
-          {/* Top Left: Compact Lobby Panel */}
+          {/* Top Left: Compact Lobby Panel + Roster */}
           {room && (
-            <div className="pointer-events-auto">
-              <button
-                onClick={handleCopyCode}
-                className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2 cursor-pointer"
-                title="Copy Room Code"
-                aria-label={copied ? `Room code ${room.code} copied to clipboard` : `Room code ${room.code}. Copy to clipboard`}
-              >
-                <span className="font-arcade text-[10px] sm:text-xs text-yellow-300 uppercase tracking-widest">
-                  Lobby
+            <div className="pointer-events-auto flex flex-col items-start gap-1.5">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <button
+                  onClick={handleCopyCode}
+                  className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2 cursor-pointer"
+                  title="Copy Room Code"
+                  aria-label={copied ? `Room code ${room.code} copied to clipboard` : `Room code ${room.code}. Copy to clipboard`}
+                >
+                  <span className="font-arcade text-[10px] sm:text-xs text-yellow-300 uppercase tracking-widest">
+                    Lobby
+                  </span>
+                  <span className="font-arcade text-sm sm:text-base text-white tracking-wider">
+                    {room.code}
+                  </span>
+                  <div className="text-white/80 group-hover:text-white transition-colors ml-0.5 sm:ml-1">
+                    {copied ? <Check size={14} className="text-lime-300" /> : <Copy size={14} />}
+                  </div>
+                </button>
+
+                {/* Players n/max · Spectators — authoritative roster */}
+                <RoomRoster />
+              </div>
+
+              {/* Persistent local-role indicator: you are watching, not playing */}
+              {isSpectator && (
+                <span
+                  className="chip-arcade flex items-center gap-1.5 bg-gradient-to-b from-cyan-600 to-cyan-800 px-2.5 py-1 sm:px-3 sm:py-1.5"
+                  role="status"
+                >
+                  <Eye size={12} className="text-white" aria-hidden="true" />
+                  <span className="font-arcade text-[9px] sm:text-[10px] text-white uppercase tracking-widest">
+                    Spectating
+                  </span>
                 </span>
-                <span className="font-arcade text-sm sm:text-base text-white tracking-wider">
-                  {room.code}
-                </span>
-                <div className="text-white/80 group-hover:text-white transition-colors ml-0.5 sm:ml-1">
-                  {copied ? <Check size={14} className="text-lime-300" /> : <Copy size={14} />}
-                </div>
-              </button>
+              )}
             </div>
           )}
 
@@ -730,6 +756,28 @@ export default function LobbyPage() {
             <div className="flex flex-col items-center gap-1.5">
               {gameStatus === 'lobby' ? (
                 <div className="flex flex-col items-center gap-2">
+                  {/* Capacity status — players vs the room's configured max, plus spectators */}
+                  <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-white px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
+                    Players: {totalPlayers} / {maxPlayers}
+                    {spectatorCount > 0 && (
+                      <span className="text-cyan-300">· Spectators: {spectatorCount}</span>
+                    )}
+                  </span>
+
+                  {/* Full-room notice — extra joiners become spectators */}
+                  {roomIsFull && (
+                    <span className="font-rounded font-bold text-[10px] bg-amber-500/15 border-2 border-amber-400/50 text-amber-200 px-3 py-1 rounded-full shadow-md text-center">
+                      Playing room is full — all player slots are filled. New participants will join as spectators.
+                    </span>
+                  )}
+
+                  {/* Local spectator explanation while waiting in the lobby */}
+                  {isSpectator && (
+                    <span className="font-rounded font-bold text-[10px] bg-cyan-500/15 border-2 border-cyan-400/50 text-cyan-200 px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5 text-center">
+                      <Eye size={12} aria-hidden="true" /> You joined as a spectator — you can watch, chat and react, but not play.
+                    </span>
+                  )}
+
                   {isHost ? (
                     <div className="flex flex-col items-center gap-1.5">
                       <div className="flex items-center gap-2">

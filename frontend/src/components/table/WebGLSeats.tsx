@@ -5,30 +5,30 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameStore } from '../../store/useGameStore';
 import { getSeatCoords } from '../../utils/seating';
+import { getSeatRingRadii } from '../../utils/tableLayout';
+import { getLayoutSeatCount } from '../../utils/capacity';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 interface HumanSilhouetteProps {
   angle: number;
-  radius: number;
+  rX: number;
+  rZ: number;
   isActiveTurn: boolean;
-  playerName: string;
 }
 
-const HumanSilhouette: React.FC<HumanSilhouetteProps> = ({ angle, radius, isActiveTurn, playerName }) => {
+const HumanSilhouette: React.FC<HumanSilhouetteProps> = ({ angle, rX, rZ, isActiveTurn }) => {
   const groupRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Mesh>(null);
-  
-  // Position the seat around the elliptical table
+
+  // Position the seat around the elliptical table. Radii are scaled by the active
+  // player count upstream so seats spread out as the table grows.
   const position = useMemo(() => {
-    // Table is an ellipse (X: 1.15, Z: 0.75). Add 0.3 offset so they sit back from the edge.
-    const rX = 1.15 + 0.3;
-    const rZ = 0.75 + 0.3;
     return new THREE.Vector3(
       Math.sin(angle) * rX,
       0.4, // Seat height
       Math.cos(angle) * rZ
     );
-  }, [angle]);
+  }, [angle, rX, rZ]);
 
   // Make the silhouette face the center
   const rotation = useMemo(() => {
@@ -102,12 +102,14 @@ export const WebGLSeats: React.FC = () => {
   if (!room) return null;
 
   const playersList = room.players || [];
-  const numPlayers = Math.max(playersList.length, 2);
+  const numPlayers = getLayoutSeatCount(room);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
 
-  // Table radius on Z axis is 0.96. We want them to sit right at the edge.
-  const radius = 1.15;
+  // Seat-ring radii scale with the active player count so seats spread out on a
+  // larger table and hug closer on a small one. Spectators aren't in playersList,
+  // so they never affect this.
+  const { rX, rZ } = getSeatRingRadii(numPlayers);
 
   return (
     <group>
@@ -116,7 +118,7 @@ export const WebGLSeats: React.FC = () => {
         // Use name matching since names are strictly unique per room, making it resilient to socket reconnects
         if (occupant.name === player?.name) return null;
 
-        // Calculate angle. 
+        // Calculate angle.
         // We want the local player to always be at Angle 0 (bottom).
         // So we shift the index.
         const relativeIndex = (idx - safeLocalIndex + numPlayers) % numPlayers;
@@ -125,12 +127,12 @@ export const WebGLSeats: React.FC = () => {
         const isActiveTurn = occupant.id === currentPlayerId;
 
         return (
-          <HumanSilhouette 
-            key={`3dseat-${occupant.id}`} 
-            angle={angle} 
-            radius={radius} 
+          <HumanSilhouette
+            key={`3dseat-${occupant.id}`}
+            angle={angle}
+            rX={rX}
+            rZ={rZ}
             isActiveTurn={isActiveTurn}
-            playerName={occupant.name}
           />
         );
       })}

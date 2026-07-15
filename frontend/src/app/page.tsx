@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Copy, Check, Share2, LogIn } from "lucide-react";
+import { AlertCircle, Copy, Check, Share2, LogIn, Eye as EyeIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 
 const LandingScene = dynamic(
@@ -26,6 +26,15 @@ export default function LandingPage() {
   // Invite interface shown right after a room is created
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Set when the target room's player slots are all full: the user is informed
+  // BEFORE entering that they will join as a spectator, and must confirm.
+  const [spectatorPrompt, setSpectatorPrompt] = useState<{
+    code: string;
+    playerCount: number;
+    maxPlayers: number;
+    spectatorCount: number;
+  } | null>(null);
 
   const backendUrl =
     (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001").replace(/\/$/, "");
@@ -151,6 +160,20 @@ export default function LandingPage() {
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to join room.");
+      }
+
+      // The playing room is full — tell the user BEFORE they enter that they
+      // will join as a spectator, and let them confirm or back out. (The socket
+      // join on the lobby page remains the authoritative role decision.)
+      if (data.isSpectator) {
+        setSpectatorPrompt({
+          code: roomCode.trim().toUpperCase(),
+          playerCount: data.playerCount ?? data.maxPlayers ?? 0,
+          maxPlayers: data.maxPlayers ?? 0,
+          spectatorCount: data.spectatorCount ?? 0,
+        });
+        setLoading(false);
+        return;
       }
 
       router.push(
@@ -340,6 +363,75 @@ export default function LandingPage() {
                   className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <LogIn size={16} /> Enter Lobby
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* =================================================================== */}
+      {/* SPECTATOR PROMPT — the playing room is full; confirm before joining   */}
+      {/* =================================================================== */}
+      <AnimatePresence>
+        {spectatorPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 pointer-events-auto"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.95 }}
+              transition={{ type: "spring", damping: 22, stiffness: 280 }}
+              role="alertdialog"
+              aria-labelledby="spectator-prompt-title"
+              aria-describedby="spectator-prompt-desc"
+              className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 flex flex-col items-center gap-4 w-full max-w-sm text-center relative overflow-hidden"
+            >
+              <div className="absolute inset-0 arcade-dots pointer-events-none" />
+
+              <div className="relative w-14 h-14 rounded-full bg-gradient-to-b from-cyan-400 to-cyan-700 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)]">
+                <EyeIcon size={26} />
+              </div>
+
+              <div className="relative">
+                <h2 id="spectator-prompt-title" className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">
+                  Playing Room Is Full
+                </h2>
+                <p id="spectator-prompt-desc" className="font-rounded font-semibold text-white/85 text-xs mt-2 leading-relaxed">
+                  All {spectatorPrompt.maxPlayers} player slots in room{" "}
+                  <span className="font-arcade text-white">{spectatorPrompt.code}</span>{" "}
+                  are filled ({spectatorPrompt.playerCount}/{spectatorPrompt.maxPlayers} players
+                  {spectatorPrompt.spectatorCount > 0 && (
+                    <>, {spectatorPrompt.spectatorCount} spectating</>
+                  )}
+                  ).
+                  <br />
+                  You will join as a <span className="text-cyan-300 font-bold">spectator</span> —
+                  you can watch the game, chat and react, but you won't get a seat or cards.
+                </p>
+              </div>
+
+              <div className="relative w-full flex flex-col gap-2.5">
+                <button
+                  onClick={() => {
+                    const code = spectatorPrompt.code;
+                    setSpectatorPrompt(null);
+                    router.push(
+                      `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
+                    );
+                  }}
+                  className="btn-arcade w-full bg-gradient-to-b from-cyan-400 to-cyan-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <EyeIcon size={16} /> Join as Spectator
+                </button>
+                <button
+                  onClick={() => setSpectatorPrompt(null)}
+                  className="btn-arcade w-full bg-gradient-to-b from-neutral-600 to-neutral-800 text-white py-3 text-xs uppercase cursor-pointer"
+                >
+                  Cancel
                 </button>
               </div>
             </motion.div>

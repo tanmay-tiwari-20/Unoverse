@@ -108,6 +108,7 @@ export const houseRulesSchema = z
     spectatorMode: z.boolean(),
     allowRejoin: z.boolean(),
     targetScore: z.number().int().min(0).max(100000),
+    maxPlayers: z.number().int().min(2).max(10),
   })
   .partial();
 

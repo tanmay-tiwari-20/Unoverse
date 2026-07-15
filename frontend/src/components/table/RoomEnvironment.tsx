@@ -6,6 +6,7 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { getTableGroupScale, getCameraDistanceBoost } from '../../utils/tableLayout';
 
 // Suppress Three.js Clock deprecation warnings originating from React Three Fiber v9 internals
 if (typeof window !== 'undefined') {
@@ -29,13 +30,18 @@ export interface RoomEnvironmentProps {
   isLandingPage?: boolean;
 }
 
-function CameraSetup({ isLandingPage }: { isLandingPage?: boolean }) {
+function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolean; numPlayers?: number }) {
   const { camera, size } = useThree();
 
   useEffect(() => {
     const aspect = size.width > 0 && size.height > 0 ? size.width / size.height : 16 / 9;
     // `aspect < 1` is a portrait phone; `< 1.3` covers narrow/tablet windows.
     const portrait = aspect < 1;
+
+    // Larger active-player counts widen the table footprint, so pull the camera
+    // back proportionally to keep every seat in frame. Spectators never affect this
+    // (they aren't counted in numPlayers).
+    const countBoost = isLandingPage ? 0 : getCameraDistanceBoost(numPlayers);
 
     // Base framing (landscape desktop).
     let y = 1.45;
@@ -58,13 +64,16 @@ function CameraSetup({ isLandingPage }: { isLandingPage?: boolean }) {
       // camera back and open the lens proportionally to how tall-and-narrow the
       // screen is. This keeps all opponents and both piles visible on phones.
       const narrowness = 1 / aspect - 1; // 0 at square, grows as it gets taller
-      z = 2.24 + narrowness * 2.1;
-      y = 1.45 + narrowness * 0.28;
+      z = 2.24 + narrowness * 2.1 + countBoost;
+      y = 1.45 + narrowness * 0.28 + countBoost * 0.18;
       fov = Math.min(90, 75 + narrowness * 24);
     } else if (aspect < 1.4) {
       // Slightly cramped landscape (small tablets / split-screen) — nudge back.
-      z = 2.5;
+      z = 2.5 + countBoost;
       fov = 78;
+    } else {
+      z = 2.24 + countBoost;
+      y = 1.45 + countBoost * 0.15;
     }
 
     camera.position.set(0, y, z);
@@ -73,7 +82,7 @@ function CameraSetup({ isLandingPage }: { isLandingPage?: boolean }) {
     const perspCam = camera as THREE.PerspectiveCamera;
     perspCam.fov = fov;
     perspCam.updateProjectionMatrix();
-  }, [camera, isLandingPage, size.width, size.height]);
+  }, [camera, isLandingPage, numPlayers, size.width, size.height]);
 
   return null;
 }
@@ -172,7 +181,7 @@ function Floor() {
   );
 }
 
-function GameTable() {
+function GameTable({ groupScale = [1, 1, 1] }: { groupScale?: [number, number, number] }) {
   const tabletopGeo = useMemo(() => {
     const shape = new THREE.Shape();
     // Reduced by ~20%: X: 1.15, Z: 0.75
@@ -210,7 +219,7 @@ function GameTable() {
   );
 
   return (
-    <group>
+    <group scale={groupScale}>
       {/* Tabletop */}
       <mesh geometry={tabletopGeo} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.83, 0]} castShadow receiveShadow>
         <meshPhysicalMaterial 
@@ -534,9 +543,12 @@ function RoomProps() {
 function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironmentProps) {
   const { cameraMotion, cameraSensitivity, shadowQuality, performanceMode } = useSettingsStore();
 
+  // Table + camera adapt to the active player count (spectators excluded upstream).
+  const tableGroupScale = getTableGroupScale(numPlayers);
+
   return (
     <>
-      <CameraSetup isLandingPage={isLandingPage} />
+      <CameraSetup isLandingPage={isLandingPage} numPlayers={numPlayers} />
       <OrbitControls 
         makeDefault
         target={[0, 0.9, 0]}
@@ -569,7 +581,7 @@ function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironm
       />
 
       <Floor />
-      <GameTable />
+      <GameTable groupScale={tableGroupScale} />
       <HangingLamp isLandingPage={isLandingPage} />
       <RoomProps />
       {children}

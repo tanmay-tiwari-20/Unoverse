@@ -131,13 +131,16 @@ export const useSocket = () => {
       setError(null);
 
       const state = useGameStore.getState();
-      if (state.room && state.player) {
+      // Rejoin as either a player or a spectator — both identities carry a
+      // name+secret pair the backend uses to rebind the new socket id.
+      const identity = state.player ?? state.spectator;
+      if (state.room && identity) {
         addToast('Reconnected to game server! Resyncing...', 'info');
         // CRITICAL: Rejoin the room so the backend updates our socket.id in room.players!
-        // Send our stored secret so the backend recognises us as the same player
-        // and lets us reclaim our seat instead of rejecting the name.
-        const secret = state.player.secret || loadSecret(state.room.code, state.player.name);
-        socketInstance.emit('join-room', { code: state.room.code, name: state.player.name, secret });
+        // Send our stored secret so the backend recognises us as the same participant
+        // and lets us reclaim our seat/slot instead of rejecting the name.
+        const secret = identity.secret || loadSecret(state.room.code, identity.name);
+        socketInstance.emit('join-room', { code: state.room.code, name: identity.name, secret });
       }
     });
 
@@ -162,19 +165,29 @@ export const useSocket = () => {
     });
 
     socketInstance.off('joined-successfully');
-    socketInstance.on('joined-successfully', ({ room, player, isSpectator }) => {
+    socketInstance.on('joined-successfully', ({ room, player, isSpectator, spectator }) => {
       logger.debug('[Socket] Joined room successfully:', room?.code, player, 'isSpectator:', isSpectator);
-      // Persist our private secret so a reload/reconnect can reclaim this seat.
+      // Persist our private secret so a reload/reconnect can reclaim this seat —
+      // or, for spectators, this spectator slot (their identity is also
+      // name+secret; without it a reload would be rejected as a name collision).
       if (room && player?.secret) {
         saveSecret(room.code, player.name, player.secret);
+      } else if (room && spectator?.secret) {
+        saveSecret(room.code, spectator.name, spectator.secret);
       }
       setRoom(room);
       if (room?.houseRules) useGameStore.getState().setHouseRules(room.houseRules);
       setPlayer(player);
+      useGameStore.getState().setSpectator(isSpectator ? (spectator ?? null) : null);
       setIsSpectator(!!isSpectator);
       setError(null);
       setIsProcessing(false);
-      addToast(isSpectator ? 'Seated as Spectator' : `Joined as ${player?.name}`, 'success');
+      addToast(
+        isSpectator
+          ? 'All player slots are filled — you joined as a spectator.'
+          : `Joined as ${player?.name}`,
+        'success'
+      );
     });
 
     socketInstance.off('lobby-updated');
@@ -391,6 +404,8 @@ export const useSocket = () => {
       socket.emit('leave-room');
       setRoom(null);
       setPlayer(null);
+      useGameStore.getState().setSpectator(null);
+      setIsSpectator(false);
       setError(null);
     }
   };

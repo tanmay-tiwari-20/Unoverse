@@ -3,6 +3,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import { useGameStore } from '../../store/useGameStore';
+import { getLayoutSeatCount } from '../../utils/capacity';
 
 import { PlayerHandHUD } from './PlayerHandHUD';
 
@@ -33,9 +34,10 @@ export const TableScene: React.FC = () => {
 
   const isMyTurn = currentPlayerId === player?.id && room?.status === 'playing' && !isProcessing;
 
-  // Calculate local player index for POV camera positioning
+  // Calculate local player index for POV camera positioning. Seat count comes
+  // from the shared helper so every layer (table, seats, cards, overlays) agrees.
   const playersList = room?.players || [];
-  const numPlayers = Math.max(playersList.length, 2);
+  const numPlayers = getLayoutSeatCount(room);
   const localIndex = room ? playersList.findIndex(p => p.id === player?.id) : -1;
   const safeLocalIndex = localIndex >= 0 ? localIndex : 0;
 

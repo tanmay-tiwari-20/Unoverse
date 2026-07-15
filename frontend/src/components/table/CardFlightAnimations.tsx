@@ -3,6 +3,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
+import { getHandRingRadii } from '../../utils/tableLayout';
+import { getLayoutSeatCount } from '../../utils/capacity';
 import { AnimatedCard } from './AnimatedCard';
 import { CardItem } from '../../lib/cards/cardEngine';
 
@@ -49,7 +51,7 @@ export const CardFlightAnimations: React.FC = () => {
   const initializedRef = useRef(false);
 
   const playersList = room?.players || [];
-  const numPlayers = Math.max(playersList.length, 2);
+  const numPlayers = getLayoutSeatCount(room);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
 
@@ -57,8 +59,9 @@ export const CardFlightAnimations: React.FC = () => {
   const getPlayerWorldPos = (playerIndex: number): [number, number, number] => {
     const relativeIndex = (playerIndex - safeLocalIndex + numPlayers) % numPlayers;
     const baseAngle = (Math.PI * 2 / numPlayers) * relativeIndex;
-    const rX = 1.15;
-    const rZ = 0.75;
+    // Ring radii scale with the active player count, matching WebGLCards so card
+    // flights land exactly on the player's hand at the resized table edge.
+    const { rX, rZ } = getHandRingRadii(numPlayers);
     return [
       Math.sin(baseAngle) * rX,
       1.1,
