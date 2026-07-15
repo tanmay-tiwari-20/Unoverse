@@ -29,12 +29,12 @@
 
 ### 🎮 Gameplay
 - **Full UNO rules engine** — server-authoritative, cheat-proof
-- **2–10 player** rooms with real-time state sync
+- **2–10 player** rooms with host-configurable seat capacity
 - **20+ configurable house rules** (Jump-In, Seven-O, Stacking, and more)
 - **UNO call system** — manual or auto-declare modes
 - **Wild Draw Four challenges** with bluff detection
 - **Turn timer** with auto-resolve on timeout
-- **Spectator mode** — watch live games without a seat
+- **Live spectator mode** — full rooms overflow to spectators who watch the game in real time
 
 </td>
 <td width="50%">
@@ -42,10 +42,11 @@
 ### 🌐 Multiplayer & Social
 - **Instant room creation** with shareable 6-character codes
 - **Invitation links** — one click to join via URL
+- **Live room roster** — players vs spectators with capacity (e.g. `4/6`) at a glance
 - **Real-time text chat** with grouped messages and avatars
 - **Emoji reactions** visible to the whole table
 - **WebRTC voice chat** — talk hands-free, peer-to-peer
-- **Reconnection support** — 60s grace window with session secrets
+- **Reconnection support** — 60s grace window with session secrets, for players *and* spectators
 
 </td>
 </tr>
@@ -54,6 +55,7 @@
 
 ### 🎨 3D Experience
 - **Interactive 3D table** powered by React Three Fiber
+- **Dynamic table sizing** — table, seating, and camera adapt to the active player count
 - **Cinematic card animations** — draws, plays, and shuffles
 - **Dynamic 3D action effects** for Skips, Reverses, and Draw cards
 - **Animated player seats** and glowing turn indicators
@@ -224,6 +226,31 @@ The host can customize gameplay before starting. All rules are **server-enforced
 
 </details>
 
+<details>
+<summary><b>🪑 Table & System</b></summary>
+
+| Rule | Description |
+|:-----|:------------|
+| **Max Players** | Active player seats (2–10, default 6) — extra joiners become spectators |
+| **Turn Timer** | Per-turn countdown with configurable seconds |
+| **Auto Reshuffle** | Recycle the discard pile when the draw pile runs out |
+| **Spectator Mode** | Allow watchers once the table is full (off = full room rejects joins) |
+| **Rejoin Support** | Disconnected players/spectators reclaim their spot within 60s |
+| **Target Score** | Points required to win the match (100–1000) |
+
+</details>
+
+---
+
+## 👀 Players & Spectators
+
+Every room has a fixed number of **active player seats** (the *Max Players* house rule). Seats are enforced server-side — once they're full, anyone else who joins becomes a **spectator**:
+
+- The landing page warns you **before** you enter a full room, so you always know you'll be watching, not playing.
+- Spectators receive the live game state in real time (piles, turns, card counts — all hands stay face-down) and can **chat and react**, but never appear at the table, hold cards, or affect turn order.
+- The in-room roster shows **`Players n/max`** and the spectator list, with clear role labels for everyone.
+- When the playing room is full, the lobby displays it and explains that new participants will join as spectators.
+
 ---
 
 ## 📁 Project Structure
@@ -260,6 +287,7 @@ unoverse/
 │   │   │   └── ui/             # Settings, help modals, HUD elements
 │   │   ├── hooks/              # useSocket, useVoiceChat, useViewport
 │   │   ├── store/              # Zustand game state store
+│   │   ├── utils/              # Seating, capacity & dynamic table layout math
 │   │   └── types/              # Shared TypeScript types
 │   └── package.json
 │
