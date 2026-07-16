@@ -38,7 +38,10 @@ const ACCENT: Record<string, { headerBg: string; icon: string }> = {
  */
 export const HouseRulesModal: React.FC = () => {
   const { isHouseRulesOpen, setIsHouseRulesOpen } = useSettingsStore();
-  const { houseRules, player, gameStatus, addToast } = useGameStore();
+  const houseRules = useGameStore((state) => state.houseRules);
+  const player = useGameStore((state) => state.player);
+  const gameStatus = useGameStore((state) => state.gameStatus);
+  const addToast = useGameStore((state) => state.addToast);
   const { updateHouseRules } = useSocket();
   const modalRef = useRef<HTMLDivElement>(null);
 

@@ -52,14 +52,12 @@ const itemVariants = {
 };
 
 export const ReactionsHandler: React.FC = () => {
-  const { 
-    room, 
-    player, 
-    reactions, 
-    removeReaction 
-  } = useGameStore();
+  const room = useGameStore((s) => s.room);
+  const player = useGameStore((s) => s.player);
+  const reactions = useGameStore((s) => s.reactions);
+  const removeReaction = useGameStore((s) => s.removeReaction);
 
-  const { socket } = useSocket();
+  const { sendReaction } = useSocket();
   const [isOpen, setIsOpen] = useState(false);
   const [interactionMode, setInteractionMode] = useState<'none' | 'click' | 'drag'>('none');
   const [activeDragIndex, setActiveDragIndex] = useState<number | null>(null);
@@ -106,12 +104,10 @@ export const ReactionsHandler: React.FC = () => {
 
   // Emit reaction socket event
   const sendEmoji = (emoji: string) => {
-    if (socket) {
-      socket.emit('send-reaction', { emoji });
-      setIsOpen(false);
-      setInteractionMode('none');
-      setActiveDragIndex(null);
-    }
+    sendReaction(emoji);
+    setIsOpen(false);
+    setInteractionMode('none');
+    setActiveDragIndex(null);
   };
 
   const getButtonCenter = () => {

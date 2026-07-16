@@ -9,7 +9,9 @@ import { getLayoutSeatCount } from '../../utils/capacity';
 import { Mic, MicOff } from 'lucide-react';
 
 export const PlayerNameplates: React.FC = () => {
-  const { room, player, currentPlayerId } = useGameStore();
+  const room = useGameStore((state) => state.room);
+  const player = useGameStore((state) => state.player);
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
   const { peerStatuses, isMicEnabled } = useVoiceStore();
 
   if (!room) return null;

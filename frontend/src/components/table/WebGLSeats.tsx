@@ -97,7 +97,9 @@ const HumanSilhouette: React.FC<HumanSilhouetteProps> = ({ angle, rX, rZ, isActi
 };
 
 export const WebGLSeats: React.FC = () => {
-  const { room, player, currentPlayerId } = useGameStore();
+  const room = useGameStore((state) => state.room);
+  const player = useGameStore((state) => state.player);
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
   
   if (!room) return null;
 

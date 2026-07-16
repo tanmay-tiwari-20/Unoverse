@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import compression from 'compression';
 import { roomManager } from './rooms/roomManager';
 import { createRoomStore } from './rooms/roomStore';
 import {
@@ -323,6 +324,7 @@ const corsOrigin: string | string[] = corsEnv === '*'
 app.use(cors({
   origin: corsOrigin,
 }));
+app.use(compression());
 app.use(express.json());
 
 // --- Simple in-memory rate limiter -------------------------------------------

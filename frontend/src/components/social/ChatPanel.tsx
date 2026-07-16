@@ -15,8 +15,12 @@ import { useViewport } from "../../hooks/useViewport";
 import { Avatar } from "../table/Avatar";
 
 export const ChatPanel: React.FC = () => {
-  const { chatMessages, isChatOpen, setChatOpen, player, room, isSpectator } =
-    useGameStore();
+  const chatMessages = useGameStore((state) => state.chatMessages);
+  const isChatOpen = useGameStore((state) => state.isChatOpen);
+  const setChatOpen = useGameStore((state) => state.setChatOpen);
+  const player = useGameStore((state) => state.player);
+  const room = useGameStore((state) => state.room);
+  const isSpectator = useGameStore((state) => state.isSpectator);
   const { sendChat } = useSocket();
   const { isMobile, isTablet } = useViewport();
   const isCompact = isMobile || isTablet;

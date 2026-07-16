@@ -10,7 +10,16 @@ import { useViewport } from '../../hooks/useViewport';
 import { useSocket } from '../../hooks/useSocket';
 
 export const PlayerHandHUD: React.FC = () => {
-  const { room, player, currentPlayerId, playerCards, isProcessing, gameStatus, discardPile, wildColor, pendingDrawType, houseRules } = useGameStore();
+  const room = useGameStore((state) => state.room);
+  const player = useGameStore((state) => state.player);
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
+  const playerCards = useGameStore((state) => state.playerCards);
+  const isProcessing = useGameStore((state) => state.isProcessing);
+  const gameStatus = useGameStore((state) => state.gameStatus);
+  const discardPile = useGameStore((state) => state.discardPile);
+  const wildColor = useGameStore((state) => state.wildColor);
+  const pendingDrawType = useGameStore((state) => state.pendingDrawType);
+  const houseRules = useGameStore((state) => state.houseRules);
   const { playCard, jumpIn } = useSocket();
   const { width, isMobile, isTablet, isTouch } = useViewport();
 

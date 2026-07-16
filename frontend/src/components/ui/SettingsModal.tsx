@@ -34,7 +34,7 @@ export const SettingsModal: React.FC = () => {
     cameraSensitivity, setCameraSensitivity
   } = useSettingsStore();
 
-  const { addToast } = useGameStore();
+  const addToast = useGameStore((state) => state.addToast);
   const { leaveRoom } = useSocket();
   const router = useRouter();
   

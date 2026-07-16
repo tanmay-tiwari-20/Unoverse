@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, Copy, Check, Share2, LogIn, Eye as EyeIcon } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useSocket } from "../hooks/useSocket";
 
 const LandingScene = dynamic(
   () =>
@@ -16,6 +17,10 @@ const LandingScene = dynamic(
 
 export default function LandingPage() {
   const router = useRouter();
+  
+  // Pre-warm the socket connection on landing mount
+  useSocket();
+  const requestInProgress = useRef(false);
 
   // State variables
   const [displayName, setDisplayName] = useState("");
@@ -96,6 +101,7 @@ export default function LandingPage() {
 
   const handleCreateRoom = async (e: React.MouseEvent) => {
     e.preventDefault();
+    if (requestInProgress.current) return;
     if (!displayName.trim()) {
       setError("Please enter a display name first.");
       return;
@@ -103,6 +109,7 @@ export default function LandingPage() {
 
     setError(null);
     setLoading(true);
+    requestInProgress.current = true;
 
     try {
       const response = await fetch(`${backendUrl}/api/rooms`, {
@@ -119,19 +126,22 @@ export default function LandingPage() {
       const data = await response.json();
       const code = data.code;
 
-      // Show the invite interface instead of jumping straight into the lobby,
-      // so the host can copy/share the invitation before starting.
-      setCreatedCode(code);
-      setLoading(false);
+      // Navigate immediately to the lobby page
+      router.push(
+        `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
+      );
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Something went wrong. Is the server running?");
       setLoading(false);
+    } finally {
+      requestInProgress.current = false;
     }
   };
 
   const handleJoinRoom = async (e: React.MouseEvent) => {
     e.preventDefault();
+    if (requestInProgress.current) return;
     if (!displayName.trim()) {
       setError("Please enter a display name first.");
       return;
@@ -143,6 +153,7 @@ export default function LandingPage() {
 
     setError(null);
     setLoading(true);
+    requestInProgress.current = true;
 
     try {
       const response = await fetch(`${backendUrl}/api/rooms/join`, {
@@ -185,6 +196,8 @@ export default function LandingPage() {
         err.message || "Something went wrong. Please check your room code.",
       );
       setLoading(false);
+    } finally {
+      requestInProgress.current = false;
     }
   };
 

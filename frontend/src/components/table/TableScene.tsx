@@ -30,7 +30,11 @@ const ActionEffects3D = dynamic(
 );
 
 export const TableScene: React.FC = () => {
-  const { room, player, currentPlayerId, isProcessing, isSpectator } = useGameStore();
+  const room = useGameStore((state) => state.room);
+  const player = useGameStore((state) => state.player);
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
+  const isProcessing = useGameStore((state) => state.isProcessing);
+  const isSpectator = useGameStore((state) => state.isSpectator);
 
   const isMyTurn = currentPlayerId === player?.id && room?.status === 'playing' && !isProcessing;
 

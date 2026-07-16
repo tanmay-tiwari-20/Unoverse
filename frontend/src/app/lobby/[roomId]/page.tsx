@@ -275,47 +275,45 @@ export default function LobbyPage() {
     challengeWildFour
   } = useSocket();
 
-  const { 
-    room, 
-    player, 
-    error,
-    setError,
-    connectionStatus,
-    playerCards,
-    discardPile,
-    currentPlayerId,
-    currentPlayerSeat,
-    direction,
-    wildColor,
-    gameStatus,
-    colorChooserId,
-    winnerId,
-    winnerName,
-    unoCalled,
-    drawStack,
-    pendingDrawType,
-    drawnCardId,
-    swapChooserId,
-    challengeableById,
-    houseRules,
-    match,
-    clearAllCards,
-    isProcessing,
-    setIsProcessing,
-    isSpectator,
-    toasts,
-    addToast,
-    removeToast,
-    tableTheme,
-    setTableTheme,
-    isMuted,
-    toggleMute,
-    gameStoppedNotice,
-    setGameStoppedNotice,
-    isChatOpen,
-    setChatOpen,
-    unreadChatCount
-  } = useGameStore();
+  const room = useGameStore((state) => state.room);
+  const player = useGameStore((state) => state.player);
+  const error = useGameStore((state) => state.error);
+  const setError = useGameStore((state) => state.setError);
+  const connectionStatus = useGameStore((state) => state.connectionStatus);
+  const playerCards = useGameStore((state) => state.playerCards);
+  const discardPile = useGameStore((state) => state.discardPile);
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
+  const currentPlayerSeat = useGameStore((state) => state.currentPlayerSeat);
+  const direction = useGameStore((state) => state.direction);
+  const wildColor = useGameStore((state) => state.wildColor);
+  const gameStatus = useGameStore((state) => state.gameStatus);
+  const colorChooserId = useGameStore((state) => state.colorChooserId);
+  const winnerId = useGameStore((state) => state.winnerId);
+  const winnerName = useGameStore((state) => state.winnerName);
+  const unoCalled = useGameStore((state) => state.unoCalled);
+  const drawStack = useGameStore((state) => state.drawStack);
+  const pendingDrawType = useGameStore((state) => state.pendingDrawType);
+  const drawnCardId = useGameStore((state) => state.drawnCardId);
+  const swapChooserId = useGameStore((state) => state.swapChooserId);
+  const challengeableById = useGameStore((state) => state.challengeableById);
+  const houseRules = useGameStore((state) => state.houseRules);
+  const match = useGameStore((state) => state.match);
+  const clearAllCards = useGameStore((state) => state.clearAllCards);
+  const isProcessing = useGameStore((state) => state.isProcessing);
+  const setIsProcessing = useGameStore((state) => state.setIsProcessing);
+  const isSpectator = useGameStore((state) => state.isSpectator);
+  const toasts = useGameStore((state) => state.toasts);
+  const addToast = useGameStore((state) => state.addToast);
+  const removeToast = useGameStore((state) => state.removeToast);
+  const tableTheme = useGameStore((state) => state.tableTheme);
+  const setTableTheme = useGameStore((state) => state.setTableTheme);
+  const isMuted = useGameStore((state) => state.isMuted);
+  const toggleMute = useGameStore((state) => state.toggleMute);
+  const gameStoppedNotice = useGameStore((state) => state.gameStoppedNotice);
+  const setGameStoppedNotice = useGameStore((state) => state.setGameStoppedNotice);
+  const isChatOpen = useGameStore((state) => state.isChatOpen);
+  const setChatOpen = useGameStore((state) => state.setChatOpen);
+  const unreadChatCount = useGameStore((state) => state.unreadChatCount);
 
   const { toggleMic } = useVoiceChat();
   const { isMicEnabled, isSpeakerEnabled, setSpeakerEnabled } = useVoiceStore();
@@ -365,12 +363,13 @@ export default function LobbyPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Copy room code to clipboard
+  // Copy invitation link to clipboard
   const handleCopyCode = () => {
     if (!roomId) return;
-    navigator.clipboard.writeText(roomId.toUpperCase());
+    const inviteLink = `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
+    navigator.clipboard.writeText(inviteLink);
     setCopied(true);
-    addToast('Lobby code copied to clipboard!', 'success');
+    addToast('Invitation link copied to clipboard!', 'success');
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -624,18 +623,26 @@ export default function LobbyPage() {
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 <button
                   onClick={handleCopyCode}
-                  className="group chip-arcade flex items-center gap-1.5 sm:gap-2.5 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-4 sm:py-2 cursor-pointer"
-                  title="Copy Room Code"
-                  aria-label={copied ? `Room code ${room.code} copied to clipboard` : `Room code ${room.code}. Copy to clipboard`}
+                  className={`group chip-arcade flex items-center gap-1.5 sm:gap-2 bg-gradient-to-b ${
+                    copied 
+                      ? 'from-lime-400 to-green-600' 
+                      : 'from-neutral-800 to-black hover:border-yellow-400'
+                  } px-2.5 py-1.5 sm:px-3.5 sm:py-2 cursor-pointer transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]`}
+                  title="Copy Invitation Link"
+                  aria-label={copied ? "Invitation link copied to clipboard" : `Room code ${room.code}. Copy invitation link`}
                 >
-                  <span className="font-arcade text-[10px] sm:text-xs text-yellow-300 uppercase tracking-widest">
-                    Lobby
-                  </span>
-                  <span className="font-arcade text-sm sm:text-base text-white tracking-wider">
-                    {room.code}
-                  </span>
-                  <div className="text-white/80 group-hover:text-white transition-colors ml-0.5 sm:ml-1">
-                    {copied ? <Check size={14} className="text-lime-300" /> : <Copy size={14} />}
+                  {copied ? (
+                    <span className="font-arcade text-[10px] sm:text-xs text-white uppercase tracking-wider">
+                      Link Copied!
+                    </span>
+                  ) : (
+                    <span className="font-arcade text-[10px] sm:text-xs text-white tracking-wider whitespace-nowrap">
+                      <span className="text-yellow-300 uppercase tracking-widest mr-1 opacity-90">Invite</span>
+                      {room.code}
+                    </span>
+                  )}
+                  <div className={`transition-colors ml-0.5 sm:ml-1 ${copied ? 'text-white' : 'text-white/80 group-hover:text-yellow-300'}`}>
+                    {copied ? <Check size={13} className="stroke-[3]" /> : <Copy size={13} />}
                   </div>
                 </button>
 
@@ -787,13 +794,13 @@ export default function LobbyPage() {
                             setIsProcessing(true);
                             startGame();
                           }}
-                          className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-2.5 px-7 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                          className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-2.5 px-7 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5 cursor-pointer"
                         >
                           <Play size={15} className="fill-white" /> Start Game
                         </button>
                         <button
                           onClick={() => setIsHouseRulesOpen(true)}
-                          className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2.5 px-5 text-sm uppercase inline-flex items-center gap-1.5"
+                          className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2.5 px-5 text-sm uppercase inline-flex items-center gap-1.5 cursor-pointer"
                           title="Configure House Rules"
                         >
                           <ScrollText size={15} /> House Rules

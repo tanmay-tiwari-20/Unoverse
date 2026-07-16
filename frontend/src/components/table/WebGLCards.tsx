@@ -62,7 +62,17 @@ const LAST_ACTION_VERB: Record<string, string> = {
 };
 
 export const WebGLCards: React.FC = () => {
-  const { room, player, currentPlayerId, playerCards, discardPile, drawPileCount, gameStatus, isProcessing, wildColor, drawnCardId, lastAction } = useGameStore();
+  const room = useGameStore((state) => state.room);
+  const player = useGameStore((state) => state.player);
+  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
+  const playerCards = useGameStore((state) => state.playerCards);
+  const discardPile = useGameStore((state) => state.discardPile);
+  const drawPileCount = useGameStore((state) => state.drawPileCount);
+  const gameStatus = useGameStore((state) => state.gameStatus);
+  const isProcessing = useGameStore((state) => state.isProcessing);
+  const wildColor = useGameStore((state) => state.wildColor);
+  const drawnCardId = useGameStore((state) => state.drawnCardId);
+  const lastAction = useGameStore((state) => state.lastAction);
   const showLastPlayedBy = useSettingsStore((s) => s.showLastPlayedBy);
   const { playCard, drawCard } = useSocket();
 
