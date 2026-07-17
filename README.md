@@ -4,7 +4,7 @@
 
 # UNOVERSE
 
-### **Real-time 3D Multiplayer UNO — Right in Your Browser**
+### **Real-Time 3D Multiplayer UNO — Right in Your Browser**
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
@@ -15,7 +15,7 @@
 
 **Create a room. Share the code. Play UNO with anyone, anywhere.**
 
-[Getting Started](#-getting-started) · [Features](#-features) · [Architecture](#-architecture) · [House Rules](#-house-rules) · [Deployment](#-deployment)
+[✨ Features](#-features) • [🏗️ Architecture](#-architecture) • [🚀 Getting Started](#-getting-started) • [🃏 House Rules](#-house-rules) • [📁 Project Structure](#-project-structure) • [🚢 Deployment](#-deployment)
 
 </div>
 
@@ -23,62 +23,43 @@
 
 ## ✨ Features
 
-<table>
-<tr>
-<td width="50%">
-
-### 🎮 Gameplay
-- **Full UNO rules engine** — server-authoritative, cheat-proof
-- **2–10 player** rooms with host-configurable seat capacity
-- **20+ configurable house rules** (Jump-In, Seven-O, Stacking, and more)
-- **UNO call system** — manual or auto-declare modes
-- **Wild Draw Four challenges** with bluff detection
-- **Turn timer** with auto-resolve on timeout
-- **Live spectator mode** — full rooms overflow to spectators who watch the game in real time
-
-</td>
-<td width="50%">
+### 🎮 Gameplay Engine
+* **Server-Authoritative Validation**: Fully cheat-proof game logic checked and validated on the backend.
+* **Flexible Room Capacity**: Support rooms of **2–10 active players** with host-configurable seat limits.
+* **20+ Configurable House Rules**: Customize rules like *Jump-In*, *Seven Swap*, *Zero Rotate*, *Stacking*, and many more.
+* **UNO Declaration System**: Choose between `manual` (button press) or `auto` declaration modes.
+* **Bluff Challenges**: Intercept Wild Draw Four cards with real-time bluff validation and challenge penalties.
+* **Turn Deadline Timers**: Turn timers automatically resolve or draw/pass when a player times out.
+* **Seamless Spectator Mode**: Full tables overflow into spectator seats, enabling real-time watching.
 
 ### 🌐 Multiplayer & Social
-- **Instant room creation** with shareable 6-character codes
-- **Invitation links** — one click to join via URL
-- **Live room roster** — players vs spectators with capacity (e.g. `4/6`) at a glance
-- **Real-time text chat** with grouped messages and avatars
-- **Emoji reactions** visible to the whole table
-- **WebRTC voice chat** — talk hands-free, peer-to-peer
-- **Reconnection support** — 60s grace window with session secrets, for players *and* spectators
+* **Instant Room Creation**: Launch a room instantly and obtain a shareable 6-character room code.
+* **Invite & Sharing Modal**: Invite friends using the interactive lobby panel to copy invite links or share directly via the native Web Share API.
+* **Real-Time Presence**: Track players vs spectators in the lobby roster with live seat counts (e.g. `4/6`).
+* **Interactive Text Chat**: Real-time room chat with user avatars, grouped messages, and automatic scrolling.
+* **Table-Wide Emoji Reactions**: Send animated emoji bubbles visible to the entire table in real-time.
+* **WebRTC Voice Chat**: Talk hands-free via peer-to-peer audio. Powered by built-in fallback TURN servers for traversing corporate firewalls and strict NATs.
+* **Graceful Reconnection**: Players and spectators get a 60-second grace window to reconnect via session secrets without losing their seats or hand state.
 
-</td>
-</tr>
-<tr>
-<td width="50%">
+### 🎨 Immersive 3D Experience
+* **Interactive 3D Table**: Fully responsive 3D table environment powered by React Three Fiber.
+* **Adaptive Camera & Seating**: Table structure, camera views, and seat positioning dynamically scale based on active player count.
+* **Cinematic Card Physics**: Beautiful animations for drawing cards, playing cards, and deck shuffling.
+* **Dynamic 3D Action Effects**: Visually rich effects for Skips, Reverses, and card draw actions.
+* **Glow Turn Indicators**: Glowing table seats and active deck rings point to whose turn it is.
+* **Arcade Aesthetic**: Immersive arcade-style environment with neon glows and table themes.
 
-### 🎨 3D Experience
-- **Interactive 3D table** powered by React Three Fiber
-- **Dynamic table sizing** — table, seating, and camera adapt to the active player count
-- **Cinematic card animations** — draws, plays, and shuffles
-- **Dynamic 3D action effects** for Skips, Reverses, and Draw cards
-- **Animated player seats** and glowing turn indicators
-- **Immersive room environment** with arcade-style aesthetics
-
-</td>
-<td width="50%">
-
-### ⚡ Technical
-- **Server-authoritative** — all game logic validated server-side
-- **Per-player state sanitization** — you only see your own hand
-- **Zod validation** on every socket event
-- **Redis-backed** persistence & pub/sub for production scaling
-- **Docker Compose** for one-command local deployment
-- **Comprehensive test suite** with Vitest
-
-</td>
-</tr>
-</table>
+### ⚡ Performance & Technical Stack
+* **State Selector Optimization**: Selective Zustand subscriptions ensure components only re-render when their specific slices of state change.
+* **Stable Event Listeners**: Core WebRTC and Socket.IO hooks bind listeners once per socket lifecycle to eliminate binding overhead.
+* **Express Response Compression**: Gzip/deflate compression middleware (`compression`) minimizes backend API response payloads.
+* **Landing Page Optimization**: Connection pre-warming on land and submission throttling/debounce to prevent double room creations.
+* **Zod Schemas**: Strict schema validation on every Socket.IO payload.
+* **Dockerized Setup**: Multi-container Docker Compose setup configured with Redis persistence out-of-the-box.
 
 ---
 
-## 🏗 Architecture
+## 🏗️ Architecture
 
 ```
                     ┌─────────────────────────────────────────────┐
@@ -95,7 +76,7 @@
                     ┌──────▼──────────────▼────────┐       │
                     │        Backend Server        │       │
                     │                              │       │
-                    │   Express 4 ── Socket.IO 4   │   P2P via STUN
+                    │   Express 4 ── Socket.IO 4   │   P2P via TURN
                     │        │                     │       │
                     │   UNO Rules Engine           │       │
                     │   ├── actions.ts (moves)     │       │
@@ -113,15 +94,15 @@
                     └──────────────────┘
 ```
 
-### Tech Stack
+### Tech Stack Details
 
 | Layer | Technologies |
-|:------|:-------------|
+| :--- | :--- |
 | **Frontend** | Next.js 16 (App Router), React 19, React Three Fiber, drei, Tailwind CSS v4, Zustand, Framer Motion, Lucide Icons |
-| **Backend** | Node.js 20+, Express 4, Socket.IO 4, TypeScript 5, Zod 4 |
-| **Realtime** | Socket.IO (game state + chat) • WebRTC (peer-to-peer voice, STUN) |
-| **Data** | Redis 7 (persistence + Socket.IO adapter) • In-memory (dev) |
-| **DevOps** | Docker Compose • Vercel (frontend) • Railway / Render (backend) |
+| **Backend** | Node.js 20+, Express 4, Socket.IO 4, TypeScript 5, Zod 4, compression |
+| **Realtime** | Socket.IO (game state + chat) • WebRTC (peer-to-peer voice, fallback TURN) |
+| **Data** | Redis 7 (persistence + Socket.IO adapter) • In-memory (development fallback) |
+| **DevOps** | Docker Compose • Vercel (frontend) • Railway / Render / Fly.io (backend) |
 
 ---
 
@@ -129,42 +110,44 @@
 
 ### Prerequisites
 
-- **Node.js 20+** (uses `process.loadEnvFile`)
-- **npm** (included with Node)
-- Redis *(optional — only needed for production persistence)*
+* **Node.js 20+** (uses native `process.loadEnvFile`)
+* **npm** (comes bundled with Node)
+* **Redis** *(optional — only required for production horizontal scale & state persistence)*
 
-### 1. Clone & Install
+### 1️⃣ Clone & Install
 
 ```bash
 git clone https://github.com/tanmay-tiwari-20/unoverse.git
 cd unoverse
 ```
 
-### 2. Start the Backend
+### 2️⃣ Start the Backend Server
 
 ```bash
 cd backend
 npm install
-cp .env.example .env          # adjust PORT / CORS_ORIGIN if needed
-npm run dev                   # http://localhost:3001
+cp .env.example .env          # Adjust PORT / CORS_ORIGIN if needed
+npm run dev                   # Starts on http://localhost:3001
 ```
 
-### 3. Start the Frontend
+### 3️⃣ Start the Frontend App
 
 ```bash
-cd frontend
+cd ../frontend
 npm install
-cp .env.example .env.local     # set NEXT_PUBLIC_BACKEND_URL
-npm run dev                    # http://localhost:3000
+cp .env.example .env.local     # Set NEXT_PUBLIC_BACKEND_URL
+npm run dev                    # Starts on http://localhost:3000
 ```
 
-### 4. Play!
+### 4️⃣ Let's Play!
 
-Open [http://localhost:3000](http://localhost:3000), enter your name, and **Create** a room.
-Share the 6-character code (or the invite link) with friends to **Join**.
+1. Open [http://localhost:3000](http://localhost:3000) in your browser.
+2. Enter your display name and click **Create Room**.
+3. Share the 6-character code (or click **Invite** to copy/share the invitation link) with your friends.
+4. Have your friends input their name, the lobby code, and click **Join Room**.
 
 > [!TIP]
-> You can also use Docker Compose for a production-like setup with Redis:
+> You can launch the full-stack app (including Redis persistence) locally in a single command using Docker Compose:
 > ```bash
 > docker compose up --build
 > ```
@@ -173,70 +156,70 @@ Share the 6-character code (or the invite link) with friends to **Join**.
 
 ## 🃏 House Rules
 
-The host can customize gameplay before starting. All rules are **server-enforced**.
+Hosts can customize gameplay in the lobby. All configurations are validated and enforced server-side.
 
 <details>
-<summary><b>🔀 Play & Flow</b></summary>
+<summary><b>🔀 Play & Flow Rules</b></summary>
 
 | Rule | Description |
-|:-----|:------------|
-| **Jump-In** | Play an identical card out of turn to "jump in" |
-| **Seven Swap** | Playing a 7 swaps your hand with a chosen opponent |
-| **Zero Rotate** | Playing a 0 rotates all hands one seat forward |
-| **Draw Then Play** | After drawing, optionally play the drawn card |
-| **Force Play Drawn** | The drawn card *must* be played if it's playable |
-| **Draw Until Playable** | Keep drawing until a playable card appears |
-| **Must Play If Playable** | Cannot draw while holding a playable card |
+| :--- | :--- |
+| **Jump-In** | Play an identical card out of turn to "jump in" and steal the turn. |
+| **Seven Swap** | Playing a 7 card swaps your hand with an opponent of your choice. |
+| **Zero Rotate** | Playing a 0 card rotates all player hands one seat forward in play direction. |
+| **Draw Then Play** | After drawing a card from the deck, you can optionally play it immediately. |
+| **Force Play Drawn** | The drawn card *must* be played if it is legal to do so. |
+| **Draw Until Playable** | Keep drawing cards until you find one that can be played. |
+| **Must Play If Playable** | You are blocked from drawing a card if you already hold a playable card. |
 
 </details>
 
 <details>
-<summary><b>📚 Stacking</b></summary>
+<summary><b>📚 Card Stacking Rules</b></summary>
 
 | Rule | Description |
-|:-----|:------------|
-| **Stacking** | Chain +2 / +4 cards instead of resolving immediately |
-| **Stack +2 on +4** | Allow a +2 to be stacked onto a +4 chain |
-| **Stack to Eat** | Breaking a chain draws the *full* accumulated total |
+| :--- | :--- |
+| **Stacking** | Chain +2 / Wild +4 cards together instead of resolving them immediately. |
+| **Stack +2 on +4** | Allow players to stack a +2 card onto a Wild +4 chain. |
+| **Stack to Eat** | Breaking a card stack chain forces you to draw the *entire* accumulated total. |
 
 </details>
 
 <details>
-<summary><b>🛡 Challenges & UNO</b></summary>
+<summary><b>🛡️ Challenges & UNO Declarations</b></summary>
 
 | Rule | Description |
-|:-----|:------------|
-| **Challenge Wild +4** | Targeted player may challenge a +4 |
-| **Bluffing +4** | +4 is illegal if you held a matching color card |
-| **Must Say UNO** | Declare UNO on your second-to-last card or get penalized |
-| **UNO Call Mode** | `manual` (press button) or `auto` (server handles it) |
-| **Allow Late UNO** | Declaring UNO late (before next player acts) still counts |
+| :--- | :--- |
+| **Challenge Wild +4** | Targeted players can challenge a Wild +4 play if they suspect bluffing. |
+| **Bluffing +4** | A Wild +4 play is illegal if you held another matching color card in your hand. |
+| **Must Say UNO** | Declare UNO when down to your second-to-last card or face drawing penalties. |
+| **UNO Call Mode** | Configured as `manual` (button click) or `auto` (handled automatically by the server). |
+| **Allow Late UNO** | Declaring UNO late (before the next player takes action) still counts. |
 
 </details>
 
 <details>
-<summary><b>🏆 Winning Restrictions</b></summary>
+<summary><b>🏆 Match & Finish Rules</b></summary>
 
 | Rule | Description |
-|:-----|:------------|
-| **Win with Wild** | Allow Wild / Wild +4 as your last card |
-| **Win with Draw Card** | Allow +2 / +4 as your last card |
-| **Win with Action Card** | Allow Skip / Reverse as your last card |
-| **Number Card Finish Only** | *Only* number cards can be your final play |
+| :--- | :--- |
+| **Win with Wild** | Allow regular Wild or Wild +4 cards to be your final winning play. |
+| **Win with Draw Card** | Allow +2 or Wild +4 cards to be your final winning play. |
+| **Win with Action Card** | Allow Skip or Reverse cards to be your final winning play. |
+| **Number Card Finish Only** | *Only* number cards can be used to win a round. |
 
 </details>
 
 <details>
-<summary><b>🪑 Table & System</b></summary>
+<summary><b>🪑 Seating & Infrastructure</b></summary>
 
 | Rule | Description |
-|:-----|:------------|
-| **Max Players** | Active player seats (2–10, default 6) — extra joiners become spectators |
-| **Turn Timer** | Per-turn countdown with configurable seconds |
-| **Auto Reshuffle** | Recycle the discard pile when the draw pile runs out |
-| **Spectator Mode** | Allow watchers once the table is full (off = full room rejects joins) |
-| **Rejoin Support** | Disconnected players/spectators reclaim their spot within 60s |
-| **Target Score** | Points required to win the match (100–1000) |
+| :--- | :--- |
+| **Max Players** | Configures active player seats (2–10, default 6). Extra joiners join as spectators. |
+| **Turn Timer** | Per-turn countdown duration in seconds. |
+| **Auto Reshuffle** | Recycle the discard pile to rebuild the draw deck when it runs out. |
+| **Spectator Mode** | Allow watchers when the table is full (off = full room rejects joins). |
+| **Rejoin Support** | Disconnected players/spectators reclaim their seats within a 60-second window. |
+| **Target Score** | Cumulative point threshold required to win the match (100–1000). |
 
 </details>
 
@@ -244,56 +227,56 @@ The host can customize gameplay before starting. All rules are **server-enforced
 
 ## 👀 Players & Spectators
 
-Every room has a fixed number of **active player seats** (the *Max Players* house rule). Seats are enforced server-side — once they're full, anyone else who joins becomes a **spectator**:
+Every room has a fixed number of **active player seats** (governed by the *Max Players* house rule). Seating limits are strictly enforced server-side.
 
-- The landing page warns you **before** you enter a full room, so you always know you'll be watching, not playing.
-- Spectators receive the live game state in real time (piles, turns, card counts — all hands stay face-down) and can **chat and react**, but never appear at the table, hold cards, or affect turn order.
-- The in-room roster shows **`Players n/max`** and the spectator list, with clear role labels for everyone.
-- When the playing room is full, the lobby displays it and explains that new participants will join as spectators.
+* The landing page warns you **before** entering a room if it is full, informing you that you will be joining as a spectator.
+* Spectators get a real-time view of the game table (piles, turn flow, card counts, and actions — all other player hands remain face-down).
+* Spectators can **chat and react** with emojis but do not sit at the table, hold cards, or affect play order.
+* The room roster clearly separates players and spectators, showing current seat status (e.g. `Players: 5/6`).
 
 ---
 
 ## 📁 Project Structure
 
-```
+```bash
 unoverse/
-├── backend/                    # Express + Socket.IO server
-│   ├── src/
-│   │   ├── index.ts            # Server entry — Express, Socket.IO, event handlers
-│   │   ├── game/
-│   │   │   ├── actions.ts      # Move execution (play, draw, UNO call, challenge)
-│   │   │   ├── rules.ts        # Move validation & legality checks
-│   │   │   ├── houseRules.ts   # 20+ configurable rules with dependency graph
-│   │   │   ├── deck.ts         # Card deck creation & shuffling
-│   │   │   ├── gameState.ts    # Game state initialization
-│   │   │   ├── scoring.ts      # End-of-round point calculation
-│   │   │   └── turnManager.ts  # Turn rotation & skip logic
-│   │   ├── rooms/              # Room lifecycle management
-│   │   ├── validation/         # Zod schemas for socket events
-│   │   └── test/               # Vitest test suites
-│   ├── Dockerfile
-│   └── package.json
+├── 📂 backend/                    # Express + Socket.IO server
+│   ├── 📂 src/
+│   │   ├── 📄 index.ts            # Server entry — socket events & connection state
+│   │   ├── 📂 game/
+│   │   │   ├── 📄 actions.ts      # Move executions (play, draw, UNO call, challenge)
+│   │   │   ├── 📄 rules.ts        # Move validation & rules legality
+│   │   │   ├── 📄 houseRules.ts   # 20+ house rules & dependencies
+│   │   │   ├── 📄 deck.ts         # Card deck generation & shuffling
+│   │   │   ├── 📄 gameState.ts    # Game state model initialization
+│   │   │   ├── 📄 scoring.ts      # End-of-round point calculations
+│   │   │   └── 📄 turnManager.ts  # Turn rotations & skipping logic
+│   │   ├── 📂 rooms/              # Room state & lifecycle management
+│   │   ├── 📂 validation/         # Zod payload validation schemas
+│   │   └── 📂 test/               # Vitest rules and mechanics test suites
+│   ├── 📄 Dockerfile
+│   └── 📄 package.json
 │
-├── frontend/                   # Next.js app
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx        # Landing page (create / join room)
-│   │   │   └── lobby/          # Pre-game lobby with settings
-│   │   ├── components/
-│   │   │   ├── table/          # 3D table, cards, seats, effects
-│   │   │   ├── cards/          # Card rendering & hand HUD
-│   │   │   ├── social/         # Chat panel, emoji reactions
-│   │   │   ├── landing/        # 3D landing scene
-│   │   │   └── ui/             # Settings, help modals, HUD elements
-│   │   ├── hooks/              # useSocket, useVoiceChat, useViewport
-│   │   ├── store/              # Zustand game state store
-│   │   ├── utils/              # Seating, capacity & dynamic table layout math
-│   │   └── types/              # Shared TypeScript types
-│   └── package.json
+├── 📂 frontend/                   # Next.js frontend application
+│   ├── 📂 src/
+│   │   ├── 📂 app/
+│   │   │   ├── 📄 page.tsx        # Landing page (create / join room)
+│   │   │   └── 📂 lobby/          # Pre-game lobby & settings config
+│   │   ├── 📂 components/
+│   │   │   ├── 📂 table/          # 3D R3F table, cards, seats, and meshes
+│   │   │   ├── 📂 cards/          # HUD card indicators & hand layouts
+│   │   │   ├── 📂 social/         # Text chat panels & reactions
+│   │   │   ├── 📂 landing/        # 3D landing page scene
+│   │   │   └── 📂 ui/             # Settings, rules, and alert overlays
+│   │   ├── 📂 hooks/              # Socket connections, WebRTC, and viewports
+│   │   ├── 📂 store/              # Zustand game and audio state stores
+│   │   ├── 📂 utils/              # R3F geometry math & seating calculations
+│   │   └── 📂 types/              # Unified TypeScript definitions
+│   └── 📄 package.json
 │
-├── docker-compose.yml          # Full-stack local deployment
-├── DEPLOY.md                   # Production deployment guide
-└── README.md
+├── 📄 docker-compose.yml          # Multi-container local orchestration
+├── 📄 DEPLOY.md                   # Production deployment guide
+└── 📄 README.md
 ```
 
 ---
@@ -303,18 +286,21 @@ unoverse/
 ### Backend (`backend/.env`)
 
 | Variable | Default | Description |
-|:---------|:--------|:------------|
-| `PORT` | `3001` | HTTP + Socket.IO listen port |
-| `CORS_ORIGIN` | `*` | Allowed browser origins (comma-separated). Lock down in production. |
-| `STORE` | `memory` | Storage backend: `memory`, `file`, or `redis` |
-| `REDIS_URL` | — | Redis connection string (required when `STORE=redis`) |
-| `TURN_TIMEOUT_MS` | `45000` | Turn auto-resolve deadline (ms) |
+| :--- | :--- | :--- |
+| `PORT` | `3001` | HTTP and Socket.IO server listen port. |
+| `CORS_ORIGIN` | `*` | Allowed client origins (comma-separated). Set strictly in production. |
+| `STORE` | `memory` | Storage adapter: `memory`, `file`, or `redis`. |
+| `REDIS_URL` | — | Redis connection string (required when `STORE=redis`). |
+| `TURN_TIMEOUT_MS` | `45000` | Turn auto-resolve timeout duration (milliseconds). |
 
 ### Frontend (`frontend/.env.local`)
 
 | Variable | Default | Description |
-|:---------|:--------|:------------|
-| `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001` | Backend URL reachable from the browser |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001` | Express + Socket.IO server base URL. |
+| `NEXT_PUBLIC_TURN_URL` | — | WebRTC TURN relay server URLs (comma-separated, optional fallback). |
+| `NEXT_PUBLIC_TURN_USERNAME` | — | WebRTC TURN server username credential (optional). |
+| `NEXT_PUBLIC_TURN_CREDENTIAL` | — | WebRTC TURN server password credential (optional). |
 
 ---
 
@@ -325,10 +311,10 @@ unoverse/
 cd backend
 npm test
 
-# Watch mode during development
+# Run tests in watch mode
 npm run test:watch
 
-# Run a standalone game simulation (exercises the full rules engine)
+# Run a standalone CLI game simulation (exercises full rules engine)
 npm run sim
 ```
 
@@ -338,29 +324,29 @@ npm run sim
 
 <table>
 <tr>
-<th>Backend</th>
-<th>Frontend</th>
+<th>Backend (`/backend`)</th>
+<th>Frontend (`/frontend`)</th>
 </tr>
 <tr>
 <td>
 
 | Command | Description |
-|:--------|:------------|
-| `npm run dev` | Hot-reloading dev server |
-| `npm run build` | Compile TypeScript → `dist/` |
-| `npm start` | Run production build |
-| `npm test` | Run tests (Vitest) |
-| `npm run sim` | Run game simulation |
+| :--- | :--- |
+| `npm run dev` | Hot-reloading ts-node dev server |
+| `npm run build` | Compiles TypeScript → `dist/` |
+| `npm start` | Runs compiled production code |
+| `npm test` | Runs backend rules unit tests |
+| `npm run sim` | Simulates a game locally |
 
 </td>
 <td>
 
 | Command | Description |
-|:--------|:------------|
-| `npm run dev` | Next.js dev server |
-| `npm run build` | Production build |
-| `npm start` | Serve production build |
-| `npm run lint` | ESLint check |
+| :--- | :--- |
+| `npm run dev` | Next.js local dev server |
+| `npm run build` | Production Next.js build |
+| `npm start` | Serves local production build |
+| `npm run lint` | Runs ESLint verification check |
 
 </td>
 </tr>
@@ -370,24 +356,17 @@ npm run sim
 
 ## 🚢 Deployment
 
-See the full **[Deployment Guide →](DEPLOY.md)** for production instructions.
+For complete, step-by-step production deployment instructions, see the **[Deployment Guide →](DEPLOY.md)**.
 
-| Component | Deploy to | Notes |
-|:----------|:----------|:------|
-| **Frontend** | Vercel / Netlify | Static + SSR — any modern host works |
-| **Backend** | Railway / Render / Fly.io | **Must** support persistent WebSockets (not serverless) |
-| **Redis** | Managed Redis add-on | Required for production persistence & horizontal scaling |
+| Component | Target Hosting | Recommendation Notes |
+| :--- | :--- | :--- |
+| **Frontend** | Vercel / Netlify / Cloudflare | Standard Next.js hosting. Supports SSR/ISR. |
+| **Backend** | Render / Railway / Fly.io / VPS | **Must** support persistent WebSockets (Serverless/Lambdas not supported). |
+| **Redis Database** | Upstash / Redis Labs / Managed | Required for cross-instance sync, persistence, and scale. |
 
 > [!IMPORTANT]
-> The backend holds live game state and maintains WebSocket connections.
-> It **cannot** run on serverless platforms (Vercel Functions, Lambda, etc.).
-
----
-
-## ⚠️ Known Limitations
-
-- **Voice chat is STUN-only** — no TURN relay server, so voice may fail behind strict/symmetric NATs.
-- **Reconnection** is supported within a 60-second grace window, protected by per-session secrets.
+> The backend server manages live state and maintains active WebSocket streams.
+> It **cannot** run on serverless functions (e.g. standard Vercel serverless functions, AWS Lambda).
 
 ---
 
