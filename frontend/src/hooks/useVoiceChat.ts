@@ -3,375 +3,546 @@ import { useGameStore } from '../store/useGameStore';
 import { useVoiceStore } from '../store/useVoiceStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getIceServers } from '../lib/voice/iceServers';
+import { logger } from '../utils/logger';
+
+/**
+ * Mesh WebRTC voice chat signaled over the game's Socket.IO connection.
+ *
+ * Invariants the whole design rests on:
+ *
+ * 1. OFFERER RULE — for any pair of peers, the one with the lexicographically
+ *    LOWER socket id builds the connection and sends the offer. Both sides can
+ *    derive this independently from the room roster, so exactly one side ever
+ *    offers: no glare, no duplicate connections.
+ *
+ * 2. FRESH-PC OFFERS — an offer is only ever produced by a freshly-built
+ *    RTCPeerConnection (initial connect or failure recovery). The receiving
+ *    side therefore always tears down whatever it had for that peer and
+ *    answers with a fresh connection too. This sidesteps every cross-PC
+ *    renegotiation edge case (refresh, reconnect, ICE failure).
+ *
+ * 3. NO RENEGOTIATION FOR MIC TOGGLES — the audio m-line is negotiated up
+ *    front with a track-less sendrecv transceiver. Enabling/disabling the mic
+ *    is replaceTrack() only, which never requires a new offer/answer.
+ *
+ * 4. ROSTER-DRIVEN LIFECYCLE — the room roster (players + spectators) is the
+ *    single source of truth. Ids that appear get a connection; ids that vanish
+ *    get cleaned up. A periodic health check plus a 'request-offer' nudge from
+ *    the answerer side makes the mesh self-healing even if a signal is lost.
+ */
+
+const DISCONNECT_RECOVERY_MS = 10_000; // 'disconnected' often self-heals; wait before rebuilding
+const OFFER_GRACE_MS = 5_000; // ignore re-offer requests for connections this young
+const REQUEST_DEBOUNCE_MS = 8_000; // min gap between 'request-offer' nudges per peer
+const HEALTH_CHECK_MS = 10_000;
+
+/** Wire format relayed verbatim by the backend's 'webrtc-signal' event. */
+type SignalData =
+  | { type: 'offer'; offer: RTCSessionDescriptionInit }
+  | { type: 'answer'; answer: RTCSessionDescriptionInit }
+  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit }
+  | { type: 'request-offer' };
+
+interface SignalPayload {
+  sourceId: string;
+  signalData: SignalData;
+}
+
+interface PeerEntry {
+  pc: RTCPeerConnection;
+  sender: RTCRtpSender | null;
+  pending: RTCIceCandidateInit[];
+  makingOffer: boolean;
+  createdAt: number;
+  audioEl: HTMLAudioElement | null;
+  vad: {
+    source: MediaStreamAudioSourceNode;
+    analyser: AnalyserNode;
+    interval: ReturnType<typeof setInterval>;
+  } | null;
+  disconnectTimer: ReturnType<typeof setTimeout> | null;
+}
 
 export const useVoiceChat = () => {
-  const { socket, room, player } = useGameStore();
-  const { isMicEnabled, isSpeakerEnabled, setMicEnabled, updatePeerStatus, removePeerStatus, resetVoiceState } = useVoiceStore();
-  const { voiceVolume, masterVolume, micVolume } = useSettingsStore();
+  const socket = useGameStore((state) => state.socket);
+  const room = useGameStore((state) => state.room);
 
+  const peersRef = useRef<Record<string, PeerEntry>>({});
   const localStreamRef = useRef<MediaStream | null>(null);
+  const rawMicStreamRef = useRef<MediaStream | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const outgoingGainNodeRef = useRef<GainNode | null>(null);
-  const peerConnectionsRef = useRef<{ [playerId: string]: RTCPeerConnection }>({});
-  // The audio sender for each peer. We create one sendrecv transceiver up front
-  // (track-less) so the audio m-line is negotiated in the very first offer/answer.
-  // Enabling/disabling the mic then just swaps the track via replaceTrack(), which
-  // needs NO renegotiation — the previous code relied on addTrack() after connect,
-  // which requires renegotiation that was never performed, so audio never flowed.
-  const audioSendersRef = useRef<{ [playerId: string]: RTCRtpSender }>({});
-  // ICE candidates that arrive before the remote description is set must be queued,
-  // otherwise addIceCandidate() throws and the candidate is lost (flaky connects).
-  const pendingCandidatesRef = useRef<{ [playerId: string]: RTCIceCandidateInit[] }>({});
-  const audioElementsRef = useRef<{ [playerId: string]: HTMLAudioElement }>({});
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analysersRef = useRef<{ [playerId: string]: { analyser: AnalyserNode, dataArray: Uint8Array, interval: any } }>({});
+  const lastOfferRequestRef = useRef<Record<string, number>>({});
+  // Set by the main signaling effect so the roster/unmount effects can reach
+  // the current closure without re-running the whole signaling setup.
+  const rosterSyncRef = useRef<(() => void) | null>(null);
+  const teardownAllRef = useRef<(() => void) | null>(null);
 
-  // Initialize AudioContext on first user interaction or when needed
   const getAudioContext = () => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const Ctor = window.AudioContext
+        ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      audioContextRef.current = new Ctor!();
     }
     if (audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume();
+      audioContextRef.current.resume().catch(() => {});
     }
     return audioContextRef.current;
   };
 
-  const cleanupPeer = useCallback((playerId: string) => {
-    if (peerConnectionsRef.current[playerId]) {
-      peerConnectionsRef.current[playerId].close();
-      delete peerConnectionsRef.current[playerId];
-    }
-    delete audioSendersRef.current[playerId];
-    delete pendingCandidatesRef.current[playerId];
-    if (audioElementsRef.current[playerId]) {
-      audioElementsRef.current[playerId].pause();
-      audioElementsRef.current[playerId].srcObject = null;
-      delete audioElementsRef.current[playerId];
-    }
-    if (analysersRef.current[playerId]) {
-      clearInterval(analysersRef.current[playerId].interval);
-      delete analysersRef.current[playerId];
-    }
-    removePeerStatus(playerId);
-  }, [removePeerStatus]);
+  // Release the microphone hardware and stop feeding peers. Safe to call twice.
+  const disableMic = useCallback(() => {
+    Object.values(peersRef.current).forEach((entry) => {
+      entry.sender?.replaceTrack(null).catch((err) => logger.debug('[VOICE] replaceTrack(null) failed', err));
+    });
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    rawMicStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micSourceRef.current?.disconnect();
+    outgoingGainNodeRef.current?.disconnect();
+    localStreamRef.current = null;
+    rawMicStreamRef.current = null;
+    micSourceRef.current = null;
+    outgoingGainNodeRef.current = null;
+    useVoiceStore.getState().setMicEnabled(false);
+  }, []);
 
   const toggleMic = useCallback(async () => {
-    if (!isMicEnabled) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { 
-            echoCancellation: true, 
-            noiseSuppression: true, 
-            autoGainControl: true 
-          } 
-        });
+    const sock = useGameStore.getState().socket;
 
-        // Setup outgoing gain node
-        const ctx = getAudioContext();
-        const source = ctx.createMediaStreamSource(stream);
-        const destination = ctx.createMediaStreamDestination();
-        const gainNode = ctx.createGain();
-        gainNode.gain.value = micVolume / 100;
-        source.connect(gainNode);
-        gainNode.connect(destination);
-        
-        outgoingGainNodeRef.current = gainNode;
-        const processedStream = destination.stream;
-        localStreamRef.current = processedStream;
+    if (useVoiceStore.getState().isMicEnabled) {
+      disableMic();
+      sock?.emit('voice-status', { isMuted: true });
+      return;
+    }
 
-        // Store original tracks so we can stop hardware access later
-        (processedStream as any).originalTracks = stream.getTracks();
-        
-        setMicEnabled(true);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      // getUserMedia only exists in secure contexts (https or localhost).
+      useGameStore.getState().addToast('Voice chat requires HTTPS (or localhost)', 'error');
+      return;
+    }
 
-        // Push the live mic track onto every peer's pre-created audio sender. This
-        // uses replaceTrack (no renegotiation required) since the sendrecv
-        // transceiver was already negotiated when the connection was built.
-        const micTrack = processedStream.getAudioTracks()[0] || null;
-        Object.values(audioSendersRef.current).forEach(sender => {
-          sender.replaceTrack(micTrack).catch(err => console.error('replaceTrack (enable) failed', err));
-        });
-
-        // Broadcast mic status change
-        socket?.emit('voice-status', { isMuted: false });
-
-      } catch (err) {
-        console.error('Failed to get microphone permissions', err);
-        const { addToast } = useGameStore.getState();
-        addToast('Microphone access denied', 'error');
-      }
-    } else {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        if ((localStreamRef.current as any).originalTracks) {
-          (localStreamRef.current as any).originalTracks.forEach((track: MediaStreamTrack) => track.stop());
-        }
-        localStreamRef.current = null;
-      }
-      if (outgoingGainNodeRef.current) {
-        outgoingGainNodeRef.current.disconnect();
-        outgoingGainNodeRef.current = null;
-      }
-      setMicEnabled(false);
-
-      // Stop sending audio by clearing the track on each sender (keeps the
-      // transceiver/connection alive so re-enabling is instant, no renegotiation).
-      Object.values(audioSendersRef.current).forEach(sender => {
-        sender.replaceTrack(null).catch(err => console.error('replaceTrack (disable) failed', err));
+    try {
+      const raw = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       });
 
-      // Broadcast mic status change
-      socket?.emit('voice-status', { isMuted: true });
-    }
-  }, [isMicEnabled, setMicEnabled, socket]);
-
-  const createPeerConnection = useCallback((targetId: string, initiator: boolean) => {
-    if (peerConnectionsRef.current[targetId]) {
-      console.warn(`PeerConnection for ${targetId} already exists. Removing old one.`);
-      cleanupPeer(targetId);
-    }
-
-    const pc = new RTCPeerConnection({
-      // STUN + optional TURN (from env). TURN is required for reliable connectivity
-      // across symmetric NATs / strict firewalls. See lib/voice/iceServers.ts.
-      iceServers: getIceServers(),
-    });
-    peerConnectionsRef.current[targetId] = pc;
-    pendingCandidatesRef.current[targetId] = [];
-
-    // Always negotiate a bidirectional audio channel up front, even if the mic is
-    // currently off. The sender starts track-less; toggleMic later swaps the live
-    // track in via replaceTrack() WITHOUT renegotiation. This is the core fix:
-    // adding a track after the connection is established would require a fresh
-    // offer/answer that the previous implementation never performed.
-    const micTrack = localStreamRef.current?.getAudioTracks()[0] || null;
-    const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
-    audioSendersRef.current[targetId] = transceiver.sender;
-    if (micTrack) {
-      transceiver.sender.replaceTrack(micTrack).catch(err => console.error('initial replaceTrack failed', err));
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket?.emit('webrtc-signal', {
-          targetId,
-          signalData: { type: 'ice-candidate', candidate: event.candidate }
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      const stream = event.streams[0];
-      if (!audioElementsRef.current[targetId]) {
-        const audioEl = new Audio();
-        audioEl.autoplay = true;
-        audioElementsRef.current[targetId] = audioEl;
-      }
-      audioElementsRef.current[targetId].srcObject = stream;
-      audioElementsRef.current[targetId].muted = !useVoiceStore.getState().isSpeakerEnabled;
-      
-      const vVol = useSettingsStore.getState().voiceVolume / 100;
-      const mVol = useSettingsStore.getState().masterVolume / 100;
-      audioElementsRef.current[targetId].volume = vVol * mVol;
-      
-      // Setup Voice Activity Detection for this remote stream
-      setupVAD(targetId, stream);
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        cleanupPeer(targetId);
-      }
-    };
-
-    // Safety net: if anything ever does trigger renegotiation (e.g. a future
-    // track change), the initiator re-offers instead of silently stalling.
-    pc.onnegotiationneeded = async () => {
-      if (!initiator) return; // only the designated initiator drives renegotiation
-      try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket?.emit('webrtc-signal', {
-          targetId,
-          signalData: { type: 'offer', offer: pc.localDescription }
-        });
-      } catch (err) {
-        console.error('onnegotiationneeded offer failed', err);
-      }
-    };
-
-    // Note: we do NOT manually createOffer here. Adding the transceiver above
-    // triggers onnegotiationneeded on the initiator, which sends exactly one
-    // initial offer. Driving it from both places would cause offer glare.
-
-    return pc;
-  }, [socket, cleanupPeer]);
-
-  const setupVAD = (playerId: string, stream: MediaStream) => {
-    try {
+      // Route the mic through a gain node so mic volume is adjustable live.
       const ctx = getAudioContext();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.4;
-      source.connect(analyser);
+      const source = ctx.createMediaStreamSource(raw);
+      const gain = ctx.createGain();
+      gain.gain.value = useSettingsStore.getState().micVolume / 100;
+      const destination = ctx.createMediaStreamDestination();
+      source.connect(gain);
+      gain.connect(destination);
 
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      
-      const interval = setInterval(() => {
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / dataArray.length;
-        
-        // Threshold for speaking
-        const isSpeaking = average > 10;
-        
-        const currentStatus = useVoiceStore.getState().peerStatuses[playerId];
-        if (!currentStatus || currentStatus.isSpeaking !== isSpeaking) {
-          updatePeerStatus(playerId, { isSpeaking });
-        }
-      }, 100);
+      rawMicStreamRef.current = raw;
+      micSourceRef.current = source;
+      outgoingGainNodeRef.current = gain;
+      localStreamRef.current = destination.stream;
+      useVoiceStore.getState().setMicEnabled(true);
 
-      analysersRef.current[playerId] = { analyser, dataArray, interval };
-    } catch (e) {
-      console.error("VAD setup failed", e);
+      const micTrack = destination.stream.getAudioTracks()[0] ?? null;
+      Object.values(peersRef.current).forEach((entry) => {
+        entry.sender?.replaceTrack(micTrack).catch((err) => logger.debug('[VOICE] replaceTrack(mic) failed', err));
+      });
+
+      sock?.emit('voice-status', { isMuted: false });
+    } catch (err) {
+      logger.error('[VOICE] Failed to get microphone', err);
+      useGameStore.getState().addToast('Microphone access denied', 'error');
     }
-  };
+  }, [disableMic]);
 
-  // Handle speaker toggle and volumes
+  // ---------------------------------------------------------------------------
+  // Signaling + connection lifecycle. One effect owns the whole peer map so the
+  // mutually-recursive helpers (createPeer <-> recoverPeer) share one closure.
+  // Helpers only read live state (refs / getState), never captured props.
+  // ---------------------------------------------------------------------------
   useEffect(() => {
-    Object.values(audioElementsRef.current).forEach(audioEl => {
-      audioEl.muted = !isSpeakerEnabled;
-      audioEl.volume = (voiceVolume / 100) * (masterVolume / 100);
+    if (!socket) return;
+
+    const myId = () => socket.id ?? '';
+    const amOfferer = (peerId: string) => myId() !== '' && myId() < peerId;
+
+    const rosterIds = (): Set<string> => {
+      const ids = new Set<string>();
+      const r = useGameStore.getState().room;
+      const me = myId();
+      if (!r || !me) return ids;
+      r.players.forEach((p) => { if (p.id !== me) ids.add(p.id); });
+      r.spectators?.forEach((s) => { if (s.id !== me) ids.add(s.id); });
+      return ids;
+    };
+
+    const emitSignal = (targetId: string, signalData: SignalData) => {
+      socket.emit('webrtc-signal', { targetId, signalData });
+    };
+
+    const cleanupPeer = (peerId: string) => {
+      const entry = peersRef.current[peerId];
+      if (!entry) return;
+      delete peersRef.current[peerId];
+      if (entry.disconnectTimer) clearTimeout(entry.disconnectTimer);
+      if (entry.vad) {
+        clearInterval(entry.vad.interval);
+        try {
+          entry.vad.source.disconnect();
+          entry.vad.analyser.disconnect();
+        } catch { /* context may already be closed */ }
+      }
+      entry.pc.onicecandidate = null;
+      entry.pc.ontrack = null;
+      entry.pc.onconnectionstatechange = null;
+      entry.pc.onnegotiationneeded = null;
+      try { entry.pc.close(); } catch { /* already closed */ }
+      if (entry.audioEl) {
+        entry.audioEl.pause();
+        entry.audioEl.srcObject = null;
+        entry.audioEl = null;
+      }
+      useVoiceStore.getState().removePeerStatus(peerId);
+    };
+
+    const teardownAll = () => {
+      Object.keys(peersRef.current).forEach(cleanupPeer);
+    };
+
+    const setupVAD = (peerId: string, entry: PeerEntry, stream: MediaStream) => {
+      try {
+        const ctx = getAudioContext();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.4;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const interval = setInterval(() => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          const isSpeaking = sum / dataArray.length > 10;
+          const current = useVoiceStore.getState().peerStatuses[peerId];
+          if (!current || current.isSpeaking !== isSpeaking) {
+            useVoiceStore.getState().updatePeerStatus(peerId, { isSpeaking });
+          }
+        }, 100);
+
+        // Replace any previous VAD graph (ontrack can re-fire for a peer).
+        if (entry.vad) {
+          clearInterval(entry.vad.interval);
+          try { entry.vad.source.disconnect(); entry.vad.analyser.disconnect(); } catch { /* noop */ }
+        }
+        entry.vad = { source, analyser, interval };
+      } catch (e) {
+        logger.error('[VOICE] VAD setup failed', e);
+      }
+    };
+
+    const attachAudio = (peerId: string, entry: PeerEntry, stream: MediaStream) => {
+      if (!entry.audioEl) {
+        const el = new Audio();
+        el.autoplay = true;
+        (el as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
+        entry.audioEl = el;
+      }
+      entry.audioEl.srcObject = stream;
+      entry.audioEl.muted = !useVoiceStore.getState().isSpeakerEnabled;
+      const settings = useSettingsStore.getState();
+      entry.audioEl.volume = (settings.voiceVolume / 100) * (settings.masterVolume / 100);
+      // Autoplay can be blocked before the user interacts with the page; the
+      // gesture listener below retries every element on the next interaction.
+      entry.audioEl.play().catch(() => logger.debug('[VOICE] autoplay blocked; will retry on user gesture'));
+      setupVAD(peerId, entry, stream);
+    };
+
+    const requestOffer = (peerId: string, force = false) => {
+      const now = Date.now();
+      const last = lastOfferRequestRef.current[peerId] ?? 0;
+      if (!force && now - last < REQUEST_DEBOUNCE_MS) return;
+      lastOfferRequestRef.current[peerId] = now;
+      emitSignal(peerId, { type: 'request-offer' });
+    };
+
+    const createPeer = (peerId: string, offerer: boolean): PeerEntry => {
+      cleanupPeer(peerId);
+
+      const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+      const entry: PeerEntry = {
+        pc,
+        sender: null,
+        pending: [],
+        makingOffer: false,
+        createdAt: Date.now(),
+        audioEl: null,
+        vad: null,
+        disconnectTimer: null,
+      };
+      peersRef.current[peerId] = entry;
+
+      if (offerer) {
+        // Track-less sendrecv transceiver: the audio m-line is in the very first
+        // offer, and mic toggles later are replaceTrack() with no renegotiation.
+        const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
+        entry.sender = transceiver.sender;
+        const micTrack = localStreamRef.current?.getAudioTracks()[0];
+        if (micTrack) {
+          transceiver.sender.replaceTrack(micTrack).catch((err) => logger.debug('[VOICE] initial replaceTrack failed', err));
+        }
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          emitSignal(peerId, { type: 'ice-candidate', candidate: event.candidate.toJSON() });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        // A track-less offer carries no stream id, so streams[0] can be absent.
+        const stream = event.streams[0] ?? new MediaStream([event.track]);
+        attachAudio(peerId, entry, stream);
+      };
+
+      pc.onnegotiationneeded = async () => {
+        // Only the offerer drives negotiation, exactly once per connection.
+        if (!offerer || entry.makingOffer) return;
+        entry.makingOffer = true;
+        try {
+          await pc.setLocalDescription(await pc.createOffer());
+          emitSignal(peerId, { type: 'offer', offer: pc.localDescription! });
+        } catch (err) {
+          logger.error('[VOICE] offer failed', err);
+        } finally {
+          entry.makingOffer = false;
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        logger.debug(`[VOICE] ${peerId} connection: ${state}`);
+        if (state === 'connected') {
+          if (entry.disconnectTimer) {
+            clearTimeout(entry.disconnectTimer);
+            entry.disconnectTimer = null;
+          }
+          // Let the newly-connected peer know our current mute state — statuses
+          // are otherwise only broadcast on change, which newcomers would miss.
+          socket.emit('voice-status', { isMuted: !useVoiceStore.getState().isMicEnabled });
+        } else if (state === 'failed') {
+          recoverPeer(peerId);
+        } else if (state === 'disconnected') {
+          // 'disconnected' frequently self-heals — only rebuild if it persists.
+          entry.disconnectTimer ??= setTimeout(() => {
+            entry.disconnectTimer = null;
+            if (pc.connectionState === 'disconnected') recoverPeer(peerId);
+          }, DISCONNECT_RECOVERY_MS);
+        }
+      };
+
+      return entry;
+    };
+
+    const recoverPeer = (peerId: string) => {
+      cleanupPeer(peerId);
+      if (!socket.connected || !rosterIds().has(peerId)) return;
+      if (amOfferer(peerId)) {
+        createPeer(peerId, true);
+      } else {
+        // Answerer side can't offer; nudge the offerer to rebuild. `force`
+        // bypasses the debounce because this is a confirmed failure.
+        requestOffer(peerId, true);
+      }
+    };
+
+    const flushPending = async (entry: PeerEntry) => {
+      const queued = entry.pending;
+      entry.pending = [];
+      for (const candidate of queued) {
+        try {
+          await entry.pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          logger.debug('[VOICE] queued ICE candidate failed', err);
+        }
+      }
+    };
+
+    const handleSignal = async ({ sourceId, signalData }: SignalPayload) => {
+      if (!sourceId || !signalData?.type || sourceId === myId()) return;
+      if (!rosterIds().has(sourceId)) return; // ignore signals from outside the room
+
+      try {
+        if (signalData.type === 'offer') {
+          // Offers only ever come from a freshly-built connection on the other
+          // side (invariant #2), so always answer with a fresh one of our own.
+          const entry = createPeer(sourceId, false);
+          await entry.pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
+          // Reuse the transceiver the remote offer created — do NOT add our
+          // own, which would never be associated with the negotiated m-line
+          // and would leave our audio unsent (classic one-way-audio bug).
+          const transceiver =
+            entry.pc.getTransceivers().find((t) => t.receiver.track?.kind === 'audio') ??
+            entry.pc.getTransceivers()[0];
+          if (transceiver) {
+            transceiver.direction = 'sendrecv';
+            entry.sender = transceiver.sender;
+            const micTrack = localStreamRef.current?.getAudioTracks()[0];
+            if (micTrack) await transceiver.sender.replaceTrack(micTrack);
+          }
+          await flushPending(entry);
+          await entry.pc.setLocalDescription(await entry.pc.createAnswer());
+          emitSignal(sourceId, { type: 'answer', answer: entry.pc.localDescription! });
+        } else if (signalData.type === 'answer') {
+          const entry = peersRef.current[sourceId];
+          if (!entry || entry.pc.signalingState !== 'have-local-offer') return; // stale answer
+          await entry.pc.setRemoteDescription(new RTCSessionDescription(signalData.answer));
+          await flushPending(entry);
+        } else if (signalData.type === 'ice-candidate') {
+          const entry = peersRef.current[sourceId];
+          if (!entry) return;
+          if (entry.pc.remoteDescription) {
+            await entry.pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
+          } else {
+            // Candidates that outrun the SDP must be queued, not dropped.
+            entry.pending.push(signalData.candidate);
+          }
+        } else if (signalData.type === 'request-offer') {
+          // The answerer lost its side; rebuild ours and re-offer — unless the
+          // current connection is brand new (their request probably crossed our
+          // in-flight offer on the wire).
+          if (!amOfferer(sourceId)) return;
+          const entry = peersRef.current[sourceId];
+          if (entry && Date.now() - entry.createdAt < OFFER_GRACE_MS) return;
+          createPeer(sourceId, true);
+        }
+      } catch (err) {
+        logger.error('[VOICE] signal handling failed', err);
+      }
+    };
+
+    const rosterSync = () => {
+      const me = myId();
+      if (!me || !socket.connected) return;
+      const ids = rosterIds();
+
+      // Prune connections and statuses for peers no longer in the room.
+      Object.keys(peersRef.current).forEach((id) => {
+        if (!ids.has(id)) cleanupPeer(id);
+      });
+      Object.keys(useVoiceStore.getState().peerStatuses).forEach((id) => {
+        if (!ids.has(id)) useVoiceStore.getState().removePeerStatus(id);
+      });
+
+      // Build missing connections (offerer) or nudge the offerer (answerer —
+      // covers a lost offer; debounced so normal setup isn't disturbed).
+      ids.forEach((id) => {
+        if (!useVoiceStore.getState().peerStatuses[id]) {
+          useVoiceStore.getState().updatePeerStatus(id, { isMuted: true, isSpeaking: false });
+        }
+        if (peersRef.current[id]) return;
+        if (amOfferer(id)) {
+          createPeer(id, true);
+        } else {
+          requestOffer(id);
+        }
+      });
+    };
+
+    const onSignal = (payload: SignalPayload) => { void handleSignal(payload); };
+    const onVoiceStatus = ({ playerId, isMuted }: { playerId: string; isMuted: boolean }) => {
+      useVoiceStore.getState().updatePeerStatus(playerId, { isMuted });
+    };
+    // Peer connections are bound to our socket identity: after a reconnect our
+    // socket id changes and every peer rebuilds toward the new id, so tear the
+    // old mesh down immediately instead of waiting for ICE timeouts. The mic
+    // stays live so it re-attaches to the rebuilt connections.
+    const onDisconnect = () => teardownAll();
+    const onConnect = () => rosterSync();
+
+    socket.on('webrtc-signal', onSignal);
+    socket.on('voice-status-changed', onVoiceStatus);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect', onConnect);
+
+    rosterSyncRef.current = rosterSync;
+    teardownAllRef.current = teardownAll;
+    rosterSync();
+    const healthCheck = setInterval(rosterSync, HEALTH_CHECK_MS);
+
+    return () => {
+      clearInterval(healthCheck);
+      socket.off('webrtc-signal', onSignal);
+      socket.off('voice-status-changed', onVoiceStatus);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect', onConnect);
+      rosterSyncRef.current = null;
+      teardownAllRef.current = null;
+      teardownAll();
+    };
+  }, [socket]);
+
+  // Re-sync the mesh whenever the roster changes (joins, leaves, reconnects,
+  // spectators). Leaving the room entirely releases the microphone too.
+  useEffect(() => {
+    if (room) {
+      rosterSyncRef.current?.();
+    } else {
+      teardownAllRef.current?.();
+      if (useVoiceStore.getState().isMicEnabled) disableMic();
+    }
+  }, [room, disableMic]);
+
+  // Autoplay/AudioContext unlock: browsers may block playback until the user
+  // interacts with the page. Retry everything on any gesture.
+  useEffect(() => {
+    const unlock = () => {
+      audioContextRef.current?.resume().catch(() => {});
+      Object.values(peersRef.current).forEach((entry) => {
+        entry.audioEl?.play().catch(() => {});
+      });
+    };
+    document.addEventListener('pointerdown', unlock);
+    document.addEventListener('keydown', unlock);
+    return () => {
+      document.removeEventListener('pointerdown', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  // Speaker toggle + incoming volume apply to every live audio element.
+  const isSpeakerEnabled = useVoiceStore((state) => state.isSpeakerEnabled);
+  const voiceVolume = useSettingsStore((state) => state.voiceVolume);
+  const masterVolume = useSettingsStore((state) => state.masterVolume);
+  useEffect(() => {
+    Object.values(peersRef.current).forEach((entry) => {
+      if (!entry.audioEl) return;
+      entry.audioEl.muted = !isSpeakerEnabled;
+      entry.audioEl.volume = (voiceVolume / 100) * (masterVolume / 100);
     });
   }, [isSpeakerEnabled, voiceVolume, masterVolume]);
 
-  // Handle outgoing mic volume
+  // Outgoing mic volume.
+  const micVolume = useSettingsStore((state) => state.micVolume);
   useEffect(() => {
     if (outgoingGainNodeRef.current) {
       outgoingGainNodeRef.current.gain.value = micVolume / 100;
     }
   }, [micVolume]);
 
-  // Handle incoming signaling
-  useEffect(() => {
-    if (!socket) return;
-
-    const flushPendingCandidates = async (peerId: string, pc: RTCPeerConnection) => {
-      const queued = pendingCandidatesRef.current[peerId];
-      if (!queued || queued.length === 0) return;
-      for (const cand of queued) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(cand));
-        } catch (err) {
-          console.error('Failed to apply queued ICE candidate', err);
-        }
-      }
-      pendingCandidatesRef.current[peerId] = [];
-    };
-
-    const handleSignal = async ({ sourceId, signalData }: { sourceId: string; signalData: any }) => {
-      let pc = peerConnectionsRef.current[sourceId];
-      
-      if (!pc && signalData.type === 'offer') {
-        pc = createPeerConnection(sourceId, false);
-      }
-
-      if (!pc) return;
-
-      try {
-        if (signalData.type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
-          await flushPendingCandidates(sourceId, pc);
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket.emit('webrtc-signal', {
-            targetId: sourceId,
-            signalData: { type: 'answer', answer: pc.localDescription }
-          });
-        } else if (signalData.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(signalData.answer));
-          await flushPendingCandidates(sourceId, pc);
-        } else if (signalData.type === 'ice-candidate') {
-          // Buffer candidates that arrive before the remote description exists;
-          // applying them too early throws and drops the candidate.
-          if (pc.remoteDescription && pc.remoteDescription.type) {
-            await pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
-          } else {
-            (pendingCandidatesRef.current[sourceId] ||= []).push(signalData.candidate);
-          }
-        }
-      } catch (err) {
-        console.error("Error handling signal data", err);
-      }
-    };
-
-    const handleVoiceStatus = ({ playerId, isMuted }: { playerId: string; isMuted: boolean }) => {
-      updatePeerStatus(playerId, { isMuted });
-    };
-
-    const handlePlayerJoined = (newPlayer: any) => {
-      if (newPlayer && newPlayer.id) {
-        // Initiator: the person already in the room initiates connection to the newcomer
-        if (player && newPlayer.id !== player.id) {
-          createPeerConnection(newPlayer.id, true);
-        }
-      }
-    };
-
-    const handlePlayerLeft = (leftPlayer: any) => {
-      if (leftPlayer && leftPlayer.id) {
-        cleanupPeer(leftPlayer.id);
-      }
-    };
-
-    socket.on('webrtc-signal', handleSignal);
-    socket.on('voice-status-changed', handleVoiceStatus);
-    socket.on('player-joined', handlePlayerJoined);
-    socket.on('player-left', handlePlayerLeft);
-
-    return () => {
-      socket.off('webrtc-signal', handleSignal);
-      socket.off('voice-status-changed', handleVoiceStatus);
-      socket.off('player-joined', handlePlayerJoined);
-      socket.off('player-left', handlePlayerLeft);
-    };
-  }, [socket, player, createPeerConnection, cleanupPeer, updatePeerStatus]);
-
-  // Connect to existing players on initial join
-  useEffect(() => {
-    if (room && player) {
-      room.players.forEach(p => {
-        if (p.id !== player.id && !peerConnectionsRef.current[p.id]) {
-          // When joining, we are the newcomer, let the others initiate.
-          // But just in case, we can ensure the state is clear.
-          updatePeerStatus(p.id, { isMuted: true, isSpeaking: false });
-        }
-      });
-    }
-  }, [room, player, updatePeerStatus]);
-
-  // Clean up entirely on unmount
+  // Full teardown on unmount (leaving the lobby page / switching rooms).
   useEffect(() => {
     return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        if ((localStreamRef.current as any).originalTracks) {
-          (localStreamRef.current as any).originalTracks.forEach((track: MediaStreamTrack) => track.stop());
-        }
-      }
-      if (outgoingGainNodeRef.current) {
-        outgoingGainNodeRef.current.disconnect();
-      }
-      Object.keys(peerConnectionsRef.current).forEach(cleanupPeer);
-      resetVoiceState();
+      teardownAllRef.current?.();
+      disableMic();
+      audioContextRef.current?.close().catch(() => {});
+      audioContextRef.current = null;
+      useVoiceStore.getState().resetVoiceState();
     };
-  }, [cleanupPeer, resetVoiceState]);
+  }, [disableMic]);
 
-  return {
-    toggleMic
-  };
+  return { toggleMic };
 };

@@ -627,8 +627,16 @@ io.on('connection', (socket) => {
     io.to(currentRoomCode).emit('chat-message', message);
   }));
 
-  // WebRTC Signaling
+  // WebRTC Signaling. Signals are only relayed between members (players or
+  // spectators) of the SAME room — an arbitrary socket must not be able to
+  // push SDP/ICE at players elsewhere on the server.
   socket.on('webrtc-signal', guard(webrtcSignalSchema, ({ targetId, signalData }) => {
+    if (!currentRoomCode) return;
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room) return;
+    const isMember = (id: string) =>
+      room.players.some(p => p.id === id) || !!room.spectators?.some(s => s.id === id);
+    if (!isMember(socket.id) || !isMember(targetId)) return;
     // Relay the signal to the specific target socket
     io.to(targetId).emit('webrtc-signal', { sourceId: socket.id, signalData });
   }));
