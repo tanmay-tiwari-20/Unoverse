@@ -33,12 +33,15 @@ export default function LandingPage() {
   const [copied, setCopied] = useState(false);
 
   // Set when the target room's player slots are all full: the user is informed
-  // BEFORE entering that they will join as a spectator, and must confirm.
+  // BEFORE entering that they will join as a spectator, and must confirm. (A room
+  // whose spectator slots are ALSO full is rejected outright by the join
+  // pre-check with a "completely full" error instead.)
   const [spectatorPrompt, setSpectatorPrompt] = useState<{
     code: string;
     playerCount: number;
     maxPlayers: number;
     spectatorCount: number;
+    maxSpectators: number;
   } | null>(null);
 
   const backendUrl =
@@ -182,6 +185,7 @@ export default function LandingPage() {
           playerCount: data.playerCount ?? data.maxPlayers ?? 0,
           maxPlayers: data.maxPlayers ?? 0,
           spectatorCount: data.spectatorCount ?? 0,
+          maxSpectators: data.maxSpectators ?? 0,
         });
         setLoading(false);
         return;
@@ -416,11 +420,8 @@ export default function LandingPage() {
                 <p id="spectator-prompt-desc" className="font-rounded font-semibold text-white/85 text-xs mt-2 leading-relaxed">
                   All {spectatorPrompt.maxPlayers} player slots in room{" "}
                   <span className="font-arcade text-white">{spectatorPrompt.code}</span>{" "}
-                  are filled ({spectatorPrompt.playerCount}/{spectatorPrompt.maxPlayers} players
-                  {spectatorPrompt.spectatorCount > 0 && (
-                    <>, {spectatorPrompt.spectatorCount} spectating</>
-                  )}
-                  ).
+                  are filled ({spectatorPrompt.playerCount}/{spectatorPrompt.maxPlayers} players,
+                  spectators {spectatorPrompt.spectatorCount}/{spectatorPrompt.maxSpectators}).
                   <br />
                   You will join as a <span className="text-cyan-300 font-bold">spectator</span> —
                   you can watch the game, chat and react, but you won't get a seat or cards.

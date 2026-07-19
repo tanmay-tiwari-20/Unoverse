@@ -3,16 +3,16 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
-import { useVoiceStore } from '../../store/useVoiceStore';
+import { useVoiceStore, localMuteKey } from '../../store/useVoiceStore';
 import { getSeatCoords } from '../../utils/seating';
 import { getLayoutSeatCount } from '../../utils/capacity';
-import { Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff, VolumeX } from 'lucide-react';
 
 export const PlayerNameplates: React.FC = () => {
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
   const currentPlayerId = useGameStore((state) => state.currentPlayerId);
-  const { peerStatuses, isMicEnabled } = useVoiceStore();
+  const { peerStatuses, locallyMutedPeers } = useVoiceStore();
 
   if (!room) return null;
 
@@ -38,7 +38,10 @@ export const PlayerNameplates: React.FC = () => {
 
           const voiceStatus = peerStatuses[occupant.id];
           const isMuted = voiceStatus?.isMuted ?? true; // assume muted until signal
-          const isSpeaking = voiceStatus?.isSpeaking ?? false;
+          // Personally muted by the local user — their audio element is silenced,
+          // so don't show a speaking glow for someone this client can't hear.
+          const isMutedByMe = !!locallyMutedPeers[localMuteKey(occupant.name)];
+          const isSpeaking = (voiceStatus?.isSpeaking ?? false) && !isMutedByMe;
 
           return (
             <motion.div
@@ -66,7 +69,9 @@ export const PlayerNameplates: React.FC = () => {
 
               {/* Mic Status Indicator */}
               <div className="flex items-center justify-center shrink-0">
-                {isSpeaking ? (
+                {isMutedByMe ? (
+                  <VolumeX size={14} className="text-rose-400" aria-label="Muted by you" />
+                ) : isSpeaking ? (
                   <Mic size={14} className="text-green-400" />
                 ) : isMuted ? (
                   <MicOff size={14} className="text-red-500" />

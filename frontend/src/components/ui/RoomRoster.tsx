@@ -4,20 +4,24 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, Eye, Crown, ChevronDown, CircleDot } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
+import { PeerMuteButton } from './PeerMuteButton';
 import {
   getMaxPlayers,
   getActivePlayerCount,
   getSpectatorCount,
+  getMaxSpectators,
   isRoomFull,
+  areSpectatorsFull,
+  isRoomCompletelyFull,
 } from '../../utils/capacity';
 
 /**
  * Room roster HUD — the always-visible source of truth for who is PLAYING vs
- * WATCHING. Shows "Players n/max" (+ spectator count) as a compact chip; expands
- * into a full participant list with active players and spectators clearly
- * separated and labeled. All data comes from the authoritative room state
- * (room.players / room.spectators / houseRules.maxPlayers) — never from
- * client-side guesses.
+ * WATCHING. Shows "Players n/max" (+ "Spectators n/max") as a compact chip;
+ * expands into a full participant list with active players and spectators
+ * clearly separated and labeled, each with a personal voice-mute toggle. All
+ * data comes from the authoritative room state (room.players / room.spectators
+ * / houseRules) — never from client-side guesses.
  */
 export const RoomRoster: React.FC = () => {
   // Narrow selectors: this HUD is always mounted, so it must not re-render on
@@ -36,8 +40,12 @@ export const RoomRoster: React.FC = () => {
   const maxPlayers = getMaxPlayers(room, houseRules);
   const playerCount = getActivePlayerCount(room);
   const spectatorCount = getSpectatorCount(room);
+  const maxSpectators = getMaxSpectators(room, houseRules);
   const isFull = isRoomFull(room, houseRules);
+  const spectatorsFull = areSpectatorsFull(room, houseRules);
+  const completelyFull = isRoomCompletelyFull(room, houseRules);
   const spectators = room.spectators ?? [];
+  const spectatorsEnabled = (room.houseRules ?? houseRules)?.spectatorMode !== false;
 
   return (
     <div className="pointer-events-auto relative">
@@ -47,7 +55,7 @@ export const RoomRoster: React.FC = () => {
         aria-expanded={open}
         aria-controls="room-roster-panel"
         aria-label={`Room roster. ${playerCount} of ${maxPlayers} player slots filled${
-          spectatorCount > 0 ? `, ${spectatorCount} spectating` : ''
+          spectatorCount > 0 ? `, ${spectatorCount} of ${maxSpectators} spectator slots filled` : ''
         }. ${open ? 'Collapse' : 'Expand'} participant list`}
         className="group chip-arcade flex items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-neutral-800 to-black px-2.5 py-1.5 sm:px-3.5 sm:py-2 cursor-pointer"
         title="Show participants"
@@ -58,9 +66,9 @@ export const RoomRoster: React.FC = () => {
         </span>
         {spectatorCount > 0 && (
           <span className="flex items-center gap-1 border-l border-white/20 pl-1.5 sm:pl-2">
-            <Eye size={13} className="text-cyan-300" aria-hidden="true" />
-            <span className="font-arcade text-[10px] sm:text-xs text-cyan-200 tracking-wider">
-              {spectatorCount}
+            <Eye size={13} className={spectatorsFull ? 'text-amber-300' : 'text-cyan-300'} aria-hidden="true" />
+            <span className="font-arcade text-[10px] sm:text-xs text-cyan-200 tracking-wider whitespace-nowrap">
+              {spectatorCount}/{maxSpectators}
             </span>
           </span>
         )}
@@ -94,12 +102,17 @@ export const RoomRoster: React.FC = () => {
                   {playerCount} / {maxPlayers}
                 </span>
               </div>
-              {isFull && (
+              {completelyFull ? (
+                <p className="mt-1 font-rounded font-bold text-[10px] leading-snug text-rose-200 bg-rose-500/10 border border-rose-400/40 rounded-lg px-2 py-1">
+                  Room is completely full. All player seats and spectator slots are
+                  taken — no one else can join.
+                </p>
+              ) : isFull ? (
                 <p className="mt-1 font-rounded font-bold text-[10px] leading-snug text-amber-200 bg-amber-500/10 border border-amber-400/40 rounded-lg px-2 py-1">
                   Playing room is full. All player slots are filled — new participants
                   will join as spectators.
                 </p>
-              )}
+              ) : null}
             </div>
 
             {/* Active players */}
@@ -129,9 +142,7 @@ export const RoomRoster: React.FC = () => {
                     {p.isHost && (
                       <Crown size={12} className="text-yellow-300 shrink-0" aria-label="Host" />
                     )}
-                    <span className="font-rounded font-bold text-[8px] uppercase tracking-wider text-lime-300/90 bg-lime-500/10 border border-lime-400/30 rounded-full px-1.5 py-0.5 shrink-0">
-                      Player
-                    </span>
+                    <PeerMuteButton name={p.name} isLocal={isLocal} />
                   </li>
                 );
               })}
@@ -148,8 +159,12 @@ export const RoomRoster: React.FC = () => {
                 <span className="font-arcade text-[10px] uppercase tracking-widest text-cyan-300">
                   Spectators
                 </span>
-                <span className="font-arcade text-[11px] text-cyan-200 tabular-nums">
-                  {spectatorCount}
+                <span
+                  className={`font-arcade text-[11px] tabular-nums ${
+                    spectatorsFull ? 'text-amber-300' : 'text-cyan-200'
+                  }`}
+                >
+                  {spectatorsEnabled ? `${spectatorCount} / ${maxSpectators}` : 'Off'}
                 </span>
               </div>
               {spectatorCount > 0 ? (
@@ -170,16 +185,14 @@ export const RoomRoster: React.FC = () => {
                           {s.name}
                           {isLocalSpec && <span className="text-cyan-300"> (You)</span>}
                         </span>
-                        <span className="font-rounded font-bold text-[8px] uppercase tracking-wider text-cyan-300/90 bg-cyan-500/10 border border-cyan-400/30 rounded-full px-1.5 py-0.5 shrink-0">
-                          Spectator
-                        </span>
+                        <PeerMuteButton name={s.name} isLocal={isLocalSpec} />
                       </li>
                     );
                   })}
                 </ul>
               ) : (
                 <p className="mt-1 font-rounded text-[10px] text-slate-400 px-2">
-                  No one is spectating.
+                  {spectatorsEnabled ? 'No one is spectating.' : 'Spectating is disabled.'}
                 </p>
               )}
             </div>

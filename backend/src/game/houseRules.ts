@@ -97,6 +97,9 @@ export interface HouseRules {
   turnTimerSeconds: number;
   /** Allow late/extra joiners to watch as spectators once the table is full. */
   spectatorMode: boolean;
+  /** (child of spectatorMode) Maximum number of spectators who may watch at once.
+   *  Once player seats AND spectator slots are full, further joins are rejected. */
+  maxSpectators: number;
   /** Allow a disconnected player to rejoin and reclaim their seat within the grace period. */
   allowRejoin: boolean;
   /** Cumulative points required to win the match. */
@@ -151,6 +154,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   turnTimer: true,
   turnTimerSeconds: 45,
   spectatorMode: true,
+  maxSpectators: 20,
   allowRejoin: true,
   targetScore: 500,
   maxPlayers: 6,
@@ -165,6 +169,7 @@ export const RULE_BOUNDS = {
   turnTimerSeconds: { min: 10, max: 180 },
   targetScore: { min: 100, max: 1000 },
   maxPlayers: { min: 2, max: 10 },
+  maxSpectators: { min: 0, max: 50 },
 } as const;
 
 const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
@@ -197,6 +202,7 @@ export const RULE_DEPENDENCIES: RuleDependency[] = [
   { child: 'unoPenaltyCards', enabled: (r) => r.mustSayUno && r.unoCallMode === 'manual' },
   { child: 'forcePlayDrawnCard', enabled: (r) => r.drawThenPlay },
   { child: 'turnTimerSeconds', enabled: (r) => r.turnTimer },
+  { child: 'maxSpectators', enabled: (r) => r.spectatorMode },
 ];
 
 // ---------------------------------------------------------------------------
@@ -246,6 +252,7 @@ export function normalizeHouseRules(input?: Partial<HouseRules> | null): HouseRu
     turnTimer: asBool(src.turnTimer, d.turnTimer),
     turnTimerSeconds: clampInt(src.turnTimerSeconds, d.turnTimerSeconds, RULE_BOUNDS.turnTimerSeconds.min, RULE_BOUNDS.turnTimerSeconds.max),
     spectatorMode: asBool(src.spectatorMode, d.spectatorMode),
+    maxSpectators: clampInt(src.maxSpectators, d.maxSpectators, RULE_BOUNDS.maxSpectators.min, RULE_BOUNDS.maxSpectators.max),
     allowRejoin: asBool(src.allowRejoin, d.allowRejoin),
     targetScore: clampInt(src.targetScore, d.targetScore, RULE_BOUNDS.targetScore.min, RULE_BOUNDS.targetScore.max),
     maxPlayers: clampInt(src.maxPlayers, d.maxPlayers, RULE_BOUNDS.maxPlayers.min, RULE_BOUNDS.maxPlayers.max),

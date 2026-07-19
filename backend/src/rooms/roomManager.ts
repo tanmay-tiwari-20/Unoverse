@@ -232,18 +232,28 @@ class RoomManager {
    * Capacity summary for a room — the SAME numbers the join gate enforces, so
    * the REST pre-check and any UI read from one place and can never drift from
    * the authoritative decision in joinRoom. Only active players count toward
-   * capacity; spectators never consume a slot.
+   * player capacity; spectators have their own host-configurable limit.
    */
   public getCapacityInfo(room: Room): {
     maxPlayers: number;
     playerCount: number;
     spectatorCount: number;
+    maxSpectators: number;
     isFull: boolean;
+    spectatorsFull: boolean;
   } {
     const maxPlayers = room.houseRules?.maxPlayers ?? DEFAULT_HOUSE_RULES.maxPlayers;
+    const maxSpectators = room.houseRules?.maxSpectators ?? DEFAULT_HOUSE_RULES.maxSpectators;
     const playerCount = room.players.length;
     const spectatorCount = room.spectators?.length ?? 0;
-    return { maxPlayers, playerCount, spectatorCount, isFull: playerCount >= maxPlayers };
+    return {
+      maxPlayers,
+      playerCount,
+      spectatorCount,
+      maxSpectators,
+      isFull: playerCount >= maxPlayers,
+      spectatorsFull: spectatorCount >= maxSpectators,
+    };
   }
 
   // Start disconnect grace period for player or spectator (60 seconds)
@@ -428,6 +438,12 @@ class RoomManager {
       // Reconnection or duplicate checks for spectators
       let spectator = room.spectators.find((s) => s.id === playerSocketId);
       if (!spectator) {
+        // Spectator capacity is a house rule too (Max Spectators). When every player
+        // seat AND every spectator slot is taken, the room is completely full. Only
+        // NEW spectators are gated — a socket already seated above never re-counts.
+        if (this.getCapacityInfo(room).spectatorsFull) {
+          throw new Error('This room is completely full — all player seats and spectator slots are taken.');
+        }
         spectator = { id: playerSocketId, name: playerName, secret: randomUUID() };
         room.spectators.push(spectator);
       }

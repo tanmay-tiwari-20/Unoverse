@@ -106,6 +106,7 @@ export const houseRulesSchema = z
     turnTimer: z.boolean(),
     turnTimerSeconds: z.number().int().min(0).max(600),
     spectatorMode: z.boolean(),
+    maxSpectators: z.number().int().min(0).max(50),
     allowRejoin: z.boolean(),
     targetScore: z.number().int().min(0).max(100000),
     maxPlayers: z.number().int().min(2).max(10),

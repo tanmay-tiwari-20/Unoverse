@@ -39,11 +39,44 @@ export const getActivePlayerCount = (room: Room | null): number =>
 export const getSpectatorCount = (room: Room | null): number =>
   room?.spectators?.length ?? 0;
 
+/**
+ * The maximum number of spectators the room supports (host-configurable house
+ * rule). Same fallback chain as getMaxPlayers so old room payloads resolve.
+ */
+export const getMaxSpectators = (
+  room: Room | null,
+  houseRules?: HouseRules | null
+): number => {
+  const raw =
+    room?.houseRules?.maxSpectators ??
+    houseRules?.maxSpectators ??
+    DEFAULT_HOUSE_RULES.maxSpectators;
+  return Math.max(0, raw);
+};
+
 /** True once every active-player slot is occupied. */
 export const isRoomFull = (
   room: Room | null,
   houseRules?: HouseRules | null
 ): boolean => getActivePlayerCount(room) >= getMaxPlayers(room, houseRules);
+
+/** True once every spectator slot is occupied. */
+export const areSpectatorsFull = (
+  room: Room | null,
+  houseRules?: HouseRules | null
+): boolean => getSpectatorCount(room) >= getMaxSpectators(room, houseRules);
+
+/** True when the room can accept nobody else: player seats AND spectator slots
+ *  are both exhausted (or spectating is disabled while the table is full). */
+export const isRoomCompletelyFull = (
+  room: Room | null,
+  houseRules?: HouseRules | null
+): boolean => {
+  if (!isRoomFull(room, houseRules)) return false;
+  const rules = room?.houseRules ?? houseRules;
+  if (rules?.spectatorMode === false) return true;
+  return areSpectatorsFull(room, houseRules);
+};
 
 /**
  * The seat-count the table layout should be drawn for. Only active players are

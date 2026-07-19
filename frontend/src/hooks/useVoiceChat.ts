@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useGameStore } from '../store/useGameStore';
-import { useVoiceStore } from '../store/useVoiceStore';
+import { useVoiceStore, localMuteKey } from '../store/useVoiceStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getIceServers } from '../lib/voice/iceServers';
 import { logger } from '../utils/logger';
@@ -48,6 +48,17 @@ interface SignalPayload {
   signalData: SignalData;
 }
 
+// Resolve a peer's stable name key from the live roster (players + spectators).
+// Personal mutes are keyed by name, not socket id, so they survive reconnects.
+const peerNameKey = (peerId: string): string | null => {
+  const r = useGameStore.getState().room;
+  if (!r) return null;
+  const name =
+    r.players.find((p) => p.id === peerId)?.name ??
+    r.spectators?.find((s) => s.id === peerId)?.name;
+  return name ? localMuteKey(name) : null;
+};
+
 interface PeerEntry {
   pc: RTCPeerConnection;
   sender: RTCRtpSender | null;
@@ -90,6 +101,19 @@ export const useVoiceChat = () => {
     }
     return audioContextRef.current;
   };
+
+  // Apply the speaker toggle + this client's personal mute + volume to ONE peer's
+  // audio element. Strictly output-side: it never touches the RTCPeerConnection,
+  // its transceivers or tracks, so toggling a mute can never disturb the mesh.
+  const applyAudioOutput = useCallback((peerId: string, entry: { audioEl: HTMLAudioElement | null }) => {
+    if (!entry.audioEl) return;
+    const { isSpeakerEnabled, locallyMutedPeers } = useVoiceStore.getState();
+    const key = peerNameKey(peerId);
+    const personallyMuted = !!(key && locallyMutedPeers[key]);
+    entry.audioEl.muted = !isSpeakerEnabled || personallyMuted;
+    const settings = useSettingsStore.getState();
+    entry.audioEl.volume = (settings.voiceVolume / 100) * (settings.masterVolume / 100);
+  }, []);
 
   // Release the microphone hardware and stop feeding peers. Safe to call twice.
   const disableMic = useCallback(() => {
@@ -252,9 +276,7 @@ export const useVoiceChat = () => {
         entry.audioEl = el;
       }
       entry.audioEl.srcObject = stream;
-      entry.audioEl.muted = !useVoiceStore.getState().isSpeakerEnabled;
-      const settings = useSettingsStore.getState();
-      entry.audioEl.volume = (settings.voiceVolume / 100) * (settings.masterVolume / 100);
+      applyAudioOutput(peerId, entry);
       // Autoplay can be blocked before the user interacts with the page; the
       // gesture listener below retries every element on the next interaction.
       entry.audioEl.play().catch(() => logger.debug('[VOICE] autoplay blocked; will retry on user gesture'));
@@ -437,6 +459,21 @@ export const useVoiceChat = () => {
         if (!ids.has(id)) useVoiceStore.getState().removePeerStatus(id);
       });
 
+      // Prune personal mutes for participants who left the room entirely (name
+      // no longer in the roster). A peer merely reconnecting keeps their roster
+      // entry, so their mute survives; a genuinely new joiner reusing the name
+      // later starts unmuted.
+      const r = useGameStore.getState().room;
+      if (r) {
+        const nameKeys = new Set<string>([
+          ...r.players.map((p) => localMuteKey(p.name)),
+          ...(r.spectators ?? []).map((s) => localMuteKey(s.name)),
+        ]);
+        Object.keys(useVoiceStore.getState().locallyMutedPeers).forEach((key) => {
+          if (!nameKeys.has(key)) useVoiceStore.getState().setPeerLocalMute(key, false);
+        });
+      }
+
       // Build missing connections (offerer) or nudge the offerer (answerer —
       // covers a lost offer; debounced so normal setup isn't disturbed).
       ids.forEach((id) => {
@@ -450,6 +487,10 @@ export const useVoiceChat = () => {
           requestOffer(id);
         }
       });
+
+      // Re-assert output state (speaker + personal mutes) on every sync so a
+      // reconnecting peer whose socket id changed picks their mute back up.
+      Object.entries(peersRef.current).forEach(([id, entry]) => applyAudioOutput(id, entry));
     };
 
     const onSignal = (payload: SignalPayload) => { void handleSignal(payload); };
@@ -483,7 +524,7 @@ export const useVoiceChat = () => {
       teardownAllRef.current = null;
       teardownAll();
     };
-  }, [socket]);
+  }, [socket, applyAudioOutput]);
 
   // Re-sync the mesh whenever the roster changes (joins, leaves, reconnects,
   // spectators). Leaving the room entirely releases the microphone too.
@@ -513,17 +554,18 @@ export const useVoiceChat = () => {
     };
   }, []);
 
-  // Speaker toggle + incoming volume apply to every live audio element.
+  // Speaker toggle, incoming volume and personal per-peer mutes apply to every
+  // live audio element. Output-side only — WebRTC connections are untouched, so
+  // muting someone never renegotiates or drops the mesh.
   const isSpeakerEnabled = useVoiceStore((state) => state.isSpeakerEnabled);
+  const locallyMutedPeers = useVoiceStore((state) => state.locallyMutedPeers);
   const voiceVolume = useSettingsStore((state) => state.voiceVolume);
   const masterVolume = useSettingsStore((state) => state.masterVolume);
   useEffect(() => {
-    Object.values(peersRef.current).forEach((entry) => {
-      if (!entry.audioEl) return;
-      entry.audioEl.muted = !isSpeakerEnabled;
-      entry.audioEl.volume = (voiceVolume / 100) * (masterVolume / 100);
+    Object.entries(peersRef.current).forEach(([peerId, entry]) => {
+      applyAudioOutput(peerId, entry);
     });
-  }, [isSpeakerEnabled, voiceVolume, masterVolume]);
+  }, [isSpeakerEnabled, locallyMutedPeers, voiceVolume, masterVolume, applyAudioOutput]);
 
   // Outgoing mic volume.
   const micVolume = useSettingsStore((state) => state.micVolume);

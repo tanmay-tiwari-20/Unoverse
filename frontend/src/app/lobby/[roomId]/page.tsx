@@ -8,7 +8,13 @@ import { useGameStore } from '../../../store/useGameStore';
 import { ReactionsHandler } from '../../../components/social/ReactionsHandler';
 import { ChatPanel } from '../../../components/social/ChatPanel';
 import { getSeatCoords } from '../../../utils/seating';
-import { getMaxPlayers, getSpectatorCount, isRoomFull } from '../../../utils/capacity';
+import {
+  getMaxPlayers,
+  getSpectatorCount,
+  getMaxSpectators,
+  isRoomFull,
+  isRoomCompletelyFull,
+} from '../../../utils/capacity';
 import { TurnGlowIndicator } from '../../../components/table/TurnGlowIndicator';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -414,7 +420,9 @@ export default function LobbyPage() {
   // derived through the shared helpers so every surface shows the same numbers.
   const maxPlayers = getMaxPlayers(room, houseRules);
   const spectatorCount = getSpectatorCount(room);
+  const maxSpectators = getMaxSpectators(room, houseRules);
   const roomIsFull = isRoomFull(room, houseRules);
+  const roomCompletelyFull = isRoomCompletelyFull(room, houseRules);
   
   const localSeatNumber = player?.seatNumber || 1;
   const myHand = playerCards[localSeatNumber] || [];
@@ -791,16 +799,21 @@ export default function LobbyPage() {
                   <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-white px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
                     Players: {totalPlayers} / {maxPlayers}
                     {spectatorCount > 0 && (
-                      <span className="text-cyan-300">· Spectators: {spectatorCount}</span>
+                      <span className="text-cyan-300">· Spectators: {spectatorCount} / {maxSpectators}</span>
                     )}
                   </span>
 
-                  {/* Full-room notice — extra joiners become spectators */}
-                  {roomIsFull && (
+                  {/* Full-room notice — extra joiners become spectators; once the
+                      spectator slots also run out, the room accepts no one else */}
+                  {roomCompletelyFull ? (
+                    <span className="font-rounded font-bold text-[10px] bg-rose-500/15 border-2 border-rose-400/50 text-rose-200 px-3 py-1 rounded-full shadow-md text-center">
+                      Room is completely full — all player seats and spectator slots are taken. No one else can join.
+                    </span>
+                  ) : roomIsFull ? (
                     <span className="font-rounded font-bold text-[10px] bg-amber-500/15 border-2 border-amber-400/50 text-amber-200 px-3 py-1 rounded-full shadow-md text-center">
                       Playing room is full — all player slots are filled. New participants will join as spectators.
                     </span>
-                  )}
+                  ) : null}
 
                   {/* Local spectator explanation while waiting in the lobby */}
                   {isSpectator && (

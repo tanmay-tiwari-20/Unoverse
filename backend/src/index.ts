@@ -407,7 +407,8 @@ app.post('/api/rooms/join', (req, res) => {
 
   // Capacity numbers come from the SAME roomManager helper the join gate uses,
   // so this pre-check can never drift from the authoritative decision.
-  const { maxPlayers, playerCount, spectatorCount, isFull } = roomManager.getCapacityInfo(room);
+  const { maxPlayers, playerCount, spectatorCount, maxSpectators, isFull, spectatorsFull } =
+    roomManager.getCapacityInfo(room);
 
   let isSpectator = false;
   if (reconnectingAsSpectator && !reconnectingAsPlayer) {
@@ -423,6 +424,13 @@ app.post('/api/rooms/join', (req, res) => {
     return;
   }
 
+  // Both player seats AND spectator slots are taken — the room is completely
+  // full. Mirror the socket-layer rejection so the user is told before entering.
+  if (isSpectator && !reconnectingAsSpectator && spectatorsFull) {
+    res.status(403).json({ error: 'This room is completely full — all player seats and spectator slots are taken.' });
+    return;
+  }
+
   logger.debug(`[REST] Validated join request for name "${name}" to room ${code} (isSpectator: ${isSpectator})`);
   res.status(200).json({
     success: true,
@@ -431,6 +439,7 @@ app.post('/api/rooms/join', (req, res) => {
     playerCount,
     maxPlayers,
     spectatorCount,
+    maxSpectators,
   });
 });
 
