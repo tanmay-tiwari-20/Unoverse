@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Copy, Check, Share2, LogIn, Eye as EyeIcon } from "lucide-react";
+import { AlertCircle, Copy, Check, Share2, LogIn, Eye as EyeIcon, Zap } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useSocket } from "../hooks/useSocket";
 
@@ -132,6 +132,46 @@ export default function LandingPage() {
       // Navigate immediately to the lobby page
       router.push(
         `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
+      );
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Something went wrong. Is the server running?");
+      setLoading(false);
+    } finally {
+      requestInProgress.current = false;
+    }
+  };
+
+  // Quick Play: ask the server for the best public room (or a fresh one) and
+  // jump straight into its lobby — no room code required.
+  const handleQuickPlay = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (requestInProgress.current) return;
+    if (!displayName.trim()) {
+      setError("Please enter a display name first.");
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+    requestInProgress.current = true;
+
+    try {
+      const response = await fetch(`${backendUrl}/api/rooms/quickplay`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: displayName.trim() }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Quick Play failed.");
+      }
+
+      router.push(
+        `/lobby/${data.code}?name=${encodeURIComponent(displayName.trim())}`,
       );
     } catch (err: any) {
       console.error(err);
@@ -285,6 +325,16 @@ export default function LandingPage() {
                   data-form-type="other"
                   className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-[0.3em] font-arcade uppercase text-xl focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all"
                 />
+
+                {/* Quick Play — instant public matchmaking, no code needed */}
+                <button
+                  type="button"
+                  onClick={handleQuickPlay}
+                  disabled={loading}
+                  className="btn-arcade w-full bg-gradient-to-b from-amber-400 to-orange-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
+                >
+                  <Zap size={16} className="fill-white" /> Quick Play
+                </button>
 
                 {/* Actions */}
                 <div className="flex gap-3">

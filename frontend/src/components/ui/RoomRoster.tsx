@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Eye, Crown, ChevronDown, CircleDot } from 'lucide-react';
+import { Users, Eye, Crown, ChevronDown, CircleDot, Bot } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { PeerMuteButton } from './PeerMuteButton';
 import {
@@ -136,13 +136,17 @@ export const RoomRoster: React.FC = () => {
                       {p.name}
                       {isLocal && <span className="text-blue-300"> (You)</span>}
                     </span>
+                    {p.isBot && (
+                      <Bot size={12} className="text-cyan-300 shrink-0" aria-label="Bot player" />
+                    )}
                     {isTurn && (
                       <CircleDot size={12} className="text-lime-300 animate-pulse shrink-0" aria-label="Taking their turn" />
                     )}
                     {p.isHost && (
                       <Crown size={12} className="text-yellow-300 shrink-0" aria-label="Host" />
                     )}
-                    <PeerMuteButton name={p.name} isLocal={isLocal} />
+                    {/* Bots have no voice connection — nothing to mute */}
+                    {!p.isBot && <PeerMuteButton name={p.name} isLocal={isLocal} />}
                   </li>
                 );
               })}

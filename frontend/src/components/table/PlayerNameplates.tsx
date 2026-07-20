@@ -6,7 +6,7 @@ import { useGameStore } from '../../store/useGameStore';
 import { useVoiceStore, localMuteKey } from '../../store/useVoiceStore';
 import { getSeatCoords } from '../../utils/seating';
 import { getLayoutSeatCount } from '../../utils/capacity';
-import { Mic, MicOff, VolumeX } from 'lucide-react';
+import { Mic, MicOff, VolumeX, Bot } from 'lucide-react';
 
 export const PlayerNameplates: React.FC = () => {
   const room = useGameStore((state) => state.room);
@@ -67,9 +67,11 @@ export const PlayerNameplates: React.FC = () => {
                 {occupant.name}
               </span>
 
-              {/* Mic Status Indicator */}
+              {/* Mic Status Indicator (bots never join voice — show a bot badge) */}
               <div className="flex items-center justify-center shrink-0">
-                {isMutedByMe ? (
+                {occupant.isBot ? (
+                  <Bot size={14} className="text-cyan-300" aria-label="Bot player" />
+                ) : isMutedByMe ? (
                   <VolumeX size={14} className="text-rose-400" aria-label="Muted by you" />
                 ) : isSpeaking ? (
                   <Mic size={14} className="text-green-400" />

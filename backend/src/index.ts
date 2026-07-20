@@ -15,7 +15,8 @@ import {
   swapTargetAction,
   challengeWildFourAction,
 } from './game/actions';
-import { CardColor } from './game/deck';
+import { autoResolveTimedOutTurn } from './game/autoPlay';
+import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
 import type { ZodType } from 'zod';
 import {
@@ -30,6 +31,9 @@ import {
   updateHouseRulesSchema,
   jumpInSchema,
   swapTargetSchema,
+  addBotsSchema,
+  removeBotSchema,
+  startGameSchema,
 } from './validation/socketSchemas';
 
 // Load environment variables from backend/.env if present (optional in dev).
@@ -69,20 +73,6 @@ function clearTurnTimer(code: string) {
   turnSignatures.delete(code);
 }
 
-// Pick a sensible color for an AFK player's pending Wild: their most-held color.
-function pickAutoColor(hands: Record<string, { color: string }[]>, playerId: string): CardColor {
-  const counts: Record<string, number> = { red: 0, blue: 0, green: 0, yellow: 0 };
-  for (const card of hands[playerId] || []) {
-    if (card.color in counts) counts[card.color]++;
-  }
-  let best: CardColor = 'red';
-  let bestN = -1;
-  (['red', 'blue', 'green', 'yellow'] as CardColor[]).forEach((c) => {
-    if (counts[c] > bestN) { best = c; bestN = counts[c]; }
-  });
-  return best;
-}
-
 // Arm (or refresh) the timer for the room's current turn. Called from
 // broadcastGameState after every state change so the deadline rides along in
 // the payload. No-op if the turn signature is unchanged.
@@ -114,8 +104,10 @@ function armTurnTimer(code: string) {
   turnTimers.set(code, setTimeout(() => handleTurnTimeout(code, signature), durationMs));
 }
 
-// Fired when a turn's deadline expires. Auto-draws (playing) or auto-picks a
-// color (awaiting_color_selection) for the stalled player, then re-broadcasts.
+// Fired when a turn's deadline expires. Auto-resolves the stalled player's turn
+// through the shared auto-play helper (draw / auto color / auto swap), then
+// re-broadcasts. The same helper backs the bot AI's fallbacks, so timeout
+// behavior and bot behavior can never drift apart.
 function handleTurnTimeout(code: string, signature: string) {
   const room = roomManager.getRoom(code);
   if (!room || !room.game) { clearTurnTimer(code); return; }
@@ -125,54 +117,13 @@ function handleTurnTimeout(code: string, signature: string) {
   if (turnSignatureOf(game) !== signature) return;
 
   try {
-    if (game.status === 'awaiting_color_selection' && game.colorChooserId) {
-      const color = pickAutoColor(game.hands, game.colorChooserId);
-      logger.info(`[TURN_TIMEOUT] Auto-choosing '${color}' for ${game.colorChooserId} in room ${code}`);
-      room.game = chooseColorAction(game, room.players, game.colorChooserId, color);
-    } else if (game.status === 'awaiting_swap_target' && game.swapChooserId) {
-      // Auto-pick the opponent holding the most cards (best swap for the chooser).
-      const chooser = game.swapChooserId;
-      const target = room.players
-        .filter((p) => p.id !== chooser && (game.hands[p.id]?.length || 0) >= 0)
-        .sort((a, b) => (game.hands[b.id]?.length || 0) - (game.hands[a.id]?.length || 0))[0];
-      if (target) {
-        logger.info(`[TURN_TIMEOUT] Auto-swapping ${chooser} with ${target.id} in room ${code}`);
-        room.game = swapTargetAction(game, room.players, chooser, target.id);
-      }
-    } else if (game.status === 'playing') {
-      const activePlayerId = game.currentPlayerId;
-      if (game.drawnCardId) {
-        // Already drew a playable card and is sitting on the decision — pass for them.
-        logger.info(`[TURN_TIMEOUT] Auto-passing drawn-card decision for ${activePlayerId} in room ${code}`);
-        room.game = passTurnAction(game, room.players, activePlayerId);
-      } else {
-        logger.info(`[TURN_TIMEOUT] Auto-drawing for ${activePlayerId} in room ${code}`);
-        room.game = drawCardAction(game, room.players, activePlayerId);
-        // If the forced draw produced a playable card, don't make the table wait
-        // another full timeout — immediately pass on the AFK player's behalf.
-        if (room.game.drawnCardId) {
-          room.game = passTurnAction(room.game, room.players, activePlayerId);
-        }
-      }
-    } else {
-      return;
-    }
+    logger.info(`[TURN_TIMEOUT] Auto-resolving '${game.status}' for room ${code}`);
+    const resolved = autoResolveTimedOutTurn(game, room.players);
+    if (!resolved) return;
+    room.game = resolved;
 
     // An auto-resolved turn can also end the round (e.g. forced play of a last card).
-    if (room.game && room.game.status === 'ended') {
-      clearTurnTimer(code);
-      const finalized = roomManager.finalizeRound(code);
-      broadcastGameState(code);
-      const winner = room.players.find((p) => p.id === room.game!.winnerId);
-      io.to(code).emit('game-ended', {
-        winnerId: room.game.winnerId,
-        winnerName: winner ? winner.name : null,
-        roundResult: finalized?.result ?? null,
-        matchWon: finalized?.matchWon ?? false,
-        match: room.match ?? null,
-      });
-      return;
-    }
+    if (handlePossibleGameEnd(code)) return;
 
     broadcastGameState(code);
   } catch (err: any) {
@@ -185,7 +136,6 @@ function handleTurnTimeout(code: string, signature: string) {
 function broadcastGameState(code: string) {
   const room = roomManager.getRoom(code);
   if (!room || !room.game) return;
-
   const game = room.game;
 
   // Safety: validate currentPlayerId references an actual player in the room
@@ -285,6 +235,10 @@ function broadcastGameState(code: string) {
   // so this single hook covers durability for active games. Coalesced + async
   // inside the manager, so it never blocks the broadcast.
   roomManager.markDirty(code);
+
+  // Let the bot runner react to the new state (schedule the next bot action if
+  // the game is now waiting on a bot).
+  botRunner.onStateChanged(code);
 }
 
 /**
@@ -309,6 +263,46 @@ function handlePossibleGameEnd(code: string): boolean {
   logger.debug(`[Socket] Round in room ${code} ended. Winner: ${winner?.name ?? 'Unknown'}`);
   return true;
 }
+
+// ---- Bot runner ---------------------------------------------------------------
+// Drives every bot's turns server-side. After each broadcast it checks whether
+// the game is waiting on a bot and schedules that bot's next action; the action
+// flows back through onGameChanged -> broadcast -> onStateChanged, chaining
+// consecutive bot turns. Function declarations above are hoisted, so wiring the
+// runner here (before io exists at runtime start) is safe.
+const botRunner = new BotRunner({
+  getRoom: (code) => roomManager.getRoom(code),
+  onGameChanged: (code) => {
+    const room = roomManager.getRoom(code);
+    const action = room?.game?.lastAction;
+
+    // Mirror the announcement events the socket handlers emit for humans, so
+    // clients render identical toasts/cues regardless of who acted.
+    if (room && action) {
+      const actor = room.players.find((p) => p.id === action.playerId);
+      if (action.type === 'challenge') {
+        const accused = room.players.find((p) => p.id === action.targetId);
+        io.to(code).emit('wild-four-challenge', {
+          challengerName: actor?.name ?? 'A player',
+          accusedName: accused?.name ?? 'A player',
+          success: !!action.challengeSuccess,
+        });
+      }
+      if ((action.type === 'play' || action.type === 'jump_in') && action.unoPenalty) {
+        io.to(code).emit('uno-penalty', {
+          playerId: action.playerId,
+          playerName: actor?.name ?? 'A player',
+        });
+      }
+    }
+
+    if (handlePossibleGameEnd(code)) return;
+    broadcastGameState(code);
+  },
+  onUnoCalled: (code, botId, botName) => {
+    logger.debug(`[BOT_UNO] ${botName} called UNO in room ${code}`);
+  },
+});
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -373,12 +367,36 @@ app.get('/health', (_req, res) => {
 // Create Room API
 app.post('/api/rooms', createRoomLimiter, (req, res) => {
   try {
-    const room = roomManager.createRoom();
-    logger.debug(`[REST] Created room: ${room.code}`);
-    res.status(201).json({ code: room.code });
+    // Optional visibility: 'public' rooms are discoverable by Quick Play.
+    // Anything else (including absence — every existing client) stays private.
+    const visibility = req.body?.visibility === 'public' ? 'public' : 'private';
+    const room = roomManager.createRoom(visibility);
+    logger.debug(`[REST] Created room: ${room.code} (${visibility})`);
+    res.status(201).json({ code: room.code, visibility });
   } catch (error: any) {
     logger.error('[REST] Error creating room:', error);
     res.status(500).json({ error: error.message || 'Failed to create room' });
+  }
+});
+
+// Quick Play matchmaking: find the best public room waiting for players, or
+// create a fresh public room when none qualifies. The client then joins the
+// returned room through the normal lobby flow — matchmaking only selects.
+app.post('/api/rooms/quickplay', createRoomLimiter, (req, res) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const matched = roomManager.findQuickPlayRoom(name || undefined);
+    if (matched) {
+      logger.debug(`[QUICKPLAY] Matched "${name}" into public room ${matched.code}`);
+      res.status(200).json({ code: matched.code, created: false });
+      return;
+    }
+    const room = roomManager.createRoom('public');
+    logger.debug(`[QUICKPLAY] No public room available — created ${room.code} for "${name}"`);
+    res.status(201).json({ code: room.code, created: true });
+  } catch (error: any) {
+    logger.error('[REST] Quick Play error:', error);
+    res.status(500).json({ error: error.message || 'Quick Play failed' });
   }
 });
 
@@ -414,7 +432,10 @@ app.post('/api/rooms/join', (req, res) => {
   if (reconnectingAsSpectator && !reconnectingAsPlayer) {
     isSpectator = true;
   } else if (!reconnectingAsPlayer) {
-    isSpectator = isFull;
+    // A full lobby that still contains bots will hand a bot's seat to this
+    // human on join (see joinRoom), so don't predict spectator in that case.
+    const botSeatAvailable = room.status === 'lobby' && room.players.some((p) => p.isBot);
+    isSpectator = isFull && !botSeatAvailable;
   }
 
   // If the table is full and spectating is disabled, this join would be rejected
@@ -673,12 +694,13 @@ io.on('connection', (socket) => {
     }
   }));
 
-  // Trigger game start (host only)
-  socket.on('start-game', () => {
+  // Trigger game start (host only). Payload optional & backward compatible:
+  // { fillWithBots: true } tops the table up with bots before dealing.
+  socket.on('start-game', guard(startGameSchema, (payload) => {
     if (!currentRoomCode) return;
 
     try {
-      const room = roomManager.startGame(currentRoomCode, socket.id);
+      const room = roomManager.startGame(currentRoomCode, socket.id, !!payload?.fillWithBots);
       logger.debug(`[Socket] Room ${currentRoomCode} game started by host ${socket.id}`);
 
       io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
@@ -690,7 +712,32 @@ io.on('connection', (socket) => {
       logger.error(`[Socket] Start game error for room ${currentRoomCode}:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to start game' });
     }
-  });
+  }));
+
+  // Add bot players to the lobby (host only). The lobby broadcast carries the
+  // new roster; bots have no socket, so nothing else needs to connect.
+  socket.on('add-bots', guard(addBotsSchema, ({ count }) => {
+    if (!currentRoomCode) return;
+    try {
+      const room = roomManager.addBots(currentRoomCode, socket.id, count);
+      logger.debug(`[Socket] Host ${socket.id} added ${count} bot(s) to room ${currentRoomCode}`);
+      io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
+    } catch (error: any) {
+      socket.emit('error', { message: error.message || 'Failed to add bots' });
+    }
+  }));
+
+  // Remove a bot from the lobby (host only).
+  socket.on('remove-bot', guard(removeBotSchema, ({ botId }) => {
+    if (!currentRoomCode) return;
+    try {
+      const room = roomManager.removeBot(currentRoomCode, socket.id, botId);
+      logger.debug(`[Socket] Host ${socket.id} removed bot ${botId} from room ${currentRoomCode}`);
+      io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
+    } catch (error: any) {
+      socket.emit('error', { message: error.message || 'Failed to remove bot' });
+    }
+  }));
 
   // Play card event
   socket.on('play-card', guard(playCardSchema, ({ cardId }) => {
@@ -955,12 +1002,17 @@ io.on('connection', (socket) => {
         if (gameStopped) {
           logger.debug(`[Socket] Game stopped in room ${tempRoomCode} (not enough players).`);
           clearTurnTimer(tempRoomCode);
+          botRunner.clearRoom(tempRoomCode);
           io.to(tempRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
         io.to(tempRoomCode).emit('lobby-updated', roomManager.publicRoom(updatedRoom));
         if (updatedRoom.status === 'playing') {
           broadcastGameState(tempRoomCode);
         }
+      } else {
+        // Room destroyed — cancel any pending bot actions and turn timers.
+        clearTurnTimer(tempRoomCode);
+        botRunner.clearRoom(tempRoomCode);
       }
     });
 
@@ -993,6 +1045,7 @@ io.on('connection', (socket) => {
         if (gameStopped) {
           logger.debug(`[Socket] Game stopped in room ${currentRoomCode} (not enough players).`);
           clearTurnTimer(currentRoomCode);
+          botRunner.clearRoom(currentRoomCode);
           io.to(currentRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
         // Broadcast the updated lobby to remaining players
@@ -1000,6 +1053,10 @@ io.on('connection', (socket) => {
         if (updatedRoom.status === 'playing') {
           broadcastGameState(currentRoomCode);
         }
+      } else {
+        // Room destroyed — cancel any pending bot actions and turn timers.
+        clearTurnTimer(currentRoomCode);
+        botRunner.clearRoom(currentRoomCode);
       }
     }
 
@@ -1022,6 +1079,14 @@ async function start() {
 
   // Enable cross-instance broadcasts if Redis is configured (no-op otherwise).
   await attachRedisAdapter();
+
+  // Periodic room hygiene: delete rooms with no human members (e.g. a Quick Play
+  // room whose creator never connected, or a bots-only shell). Keeps the public
+  // room pool clean so matchmaking never lands players in dead rooms.
+  setInterval(() => {
+    const removed = roomManager.sweepAbandonedRooms();
+    if (removed > 0) logger.debug(`[SWEEP] Removed ${removed} abandoned room(s).`);
+  }, 60_000).unref();
 
   server.listen(port, () => {
     logger.info(`===============================================`);

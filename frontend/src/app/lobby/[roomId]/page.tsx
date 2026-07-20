@@ -49,7 +49,10 @@ import {
   MessageCircle,
   Eye,
   Share2,
-  Users
+  Users,
+  Bot,
+  Plus,
+  Minus
 } from 'lucide-react';
 import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
 import { summarizeActiveRules } from '../../../lib/houseRules';
@@ -274,6 +277,8 @@ export default function LobbyPage() {
     joinRoom,
     leaveRoom,
     startGame,
+    addBots,
+    removeBot,
     playCard,
     chooseColor,
     callUno,
@@ -415,6 +420,8 @@ export default function LobbyPage() {
 
   const isHost = player?.isHost || false;
   const totalPlayers = room?.players.length || 0;
+  const humanPlayers = room?.players.filter((p) => !p.isBot) ?? [];
+  const botPlayers = room?.players.filter((p) => p.isBot) ?? [];
   const canStart = totalPlayers >= 2;
   // Active-player capacity comes from the authoritative room config (house rules),
   // derived through the shared helpers so every surface shows the same numbers.
@@ -843,9 +850,53 @@ export default function LobbyPage() {
                           <ScrollText size={15} /> House Rules
                         </button>
                       </div>
+
+                      {/* Bot seat controls — add/remove AI opponents before the
+                          game starts. Bots fill player seats only; a joining
+                          human automatically takes a bot's place. */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-white px-2.5 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
+                          <Bot size={12} className="text-cyan-300" /> Bots: {botPlayers.length}
+                        </span>
+                        <button
+                          disabled={isProcessing || roomIsFull}
+                          onClick={() => addBots(1)}
+                          className="chip-arcade w-7 h-7 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-cyan-500 to-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Add a bot opponent"
+                          aria-label="Add a bot opponent"
+                        >
+                          <Plus size={13} />
+                        </button>
+                        <button
+                          disabled={isProcessing || botPlayers.length === 0}
+                          onClick={() => {
+                            const lastBot = botPlayers[botPlayers.length - 1];
+                            if (lastBot) removeBot(lastBot.id);
+                          }}
+                          className="chip-arcade w-7 h-7 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-600 to-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Remove a bot"
+                          aria-label="Remove a bot"
+                        >
+                          <Minus size={13} />
+                        </button>
+                        {humanPlayers.length < 2 && !roomIsFull && (
+                          <button
+                            disabled={isProcessing || isSpectator}
+                            onClick={() => {
+                              setIsProcessing(true);
+                              startGame({ fillWithBots: true });
+                            }}
+                            className="btn-arcade bg-gradient-to-b from-cyan-400 to-blue-600 text-white py-1.5 px-4 text-[11px] uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5 cursor-pointer"
+                            title="Fill every empty seat with bots and start"
+                          >
+                            <Bot size={13} /> Fill & Play vs Bots
+                          </button>
+                        )}
+                      </div>
+
                       {!canStart && (
                         <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3 py-1 rounded-full shadow-md">
-                          Waiting for players to sit ({totalPlayers}/2 minimum)
+                          Waiting for players — invite a friend or add bots to start
                         </span>
                       )}
                     </div>

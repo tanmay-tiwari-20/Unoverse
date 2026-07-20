@@ -336,10 +336,24 @@ export const useSocket = () => {
     }
   };
 
-  const startGame = () => {
+  const startGame = (options?: { fillWithBots?: boolean }) => {
     const currentSocket = useGameStore.getState().socket;
     if (currentSocket) {
-      currentSocket.emit('start-game');
+      currentSocket.emit('start-game', options ?? {});
+    }
+  };
+
+  const addBots = (count: number) => {
+    const currentSocket = useGameStore.getState().socket;
+    if (currentSocket) {
+      currentSocket.emit('add-bots', { count });
+    }
+  };
+
+  const removeBot = (botId: string) => {
+    const currentSocket = useGameStore.getState().socket;
+    if (currentSocket) {
+      currentSocket.emit('remove-bot', { botId });
     }
   };
 
@@ -450,6 +464,8 @@ export const useSocket = () => {
     joinRoom,
     leaveRoom,
     startGame,
+    addBots,
+    removeBot,
     playCard,
     drawCard,
     passTurn,

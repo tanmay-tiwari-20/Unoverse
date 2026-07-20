@@ -6,14 +6,23 @@ import { calculateRoundPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
 import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../game/houseRules';
 import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
+import { pickBotName } from '../bots/botNames';
 
 export interface Player {
-  id: string; // Socket ID
+  id: string; // Socket ID (or a synthetic `bot:` id for server-side bots)
   name: string;
   seatNumber: number; // 1 to maxPlayers (house rule; default 6)
   isHost: boolean;
   secret: string; // Private per-session token. Never broadcast to other clients.
+  // Server-side bot flag. Bots occupy player seats and play through the same
+  // rules engine as humans, but have no socket, never host, never spectate,
+  // never join voice chat and never chat.
+  isBot?: boolean;
 }
+
+/** Room discoverability. Public rooms are matched by Quick Play; private rooms
+ *  (the default, preserving existing behavior) require an invite link/code. */
+export type RoomVisibility = 'public' | 'private';
 
 export interface Spectator {
   id: string; // Socket ID
@@ -52,6 +61,12 @@ export interface Room {
   // Host-configured house rules for this lobby. Editable only while status is
   // 'lobby'; snapshotted into the game state (locked) when a round starts.
   houseRules: HouseRules;
+  // Discoverability for Quick Play matchmaking. Optional for backward
+  // compatibility with persisted rooms — absent means 'private'.
+  visibility?: RoomVisibility;
+  // Epoch ms of room creation; used by matchmaking to prefer older waiting rooms
+  // and by cleanup to expire abandoned public rooms.
+  createdAt?: number;
 }
 
 class RoomManager {
@@ -172,7 +187,7 @@ class RoomManager {
   }
 
   // Create a new room in memory (pre-socket binding)
-  public createRoom(): Room {
+  public createRoom(visibility: RoomVisibility = 'private'): Room {
     const code = this.generateRoomCode();
     const newRoom: Room = {
       code,
@@ -180,9 +195,11 @@ class RoomManager {
       players: [],
       status: 'lobby',
       houseRules: { ...DEFAULT_HOUSE_RULES },
+      visibility,
+      createdAt: Date.now(),
     };
     this.rooms.set(code, newRoom);
-    logger.debug(`[ROOM_CREATED] Code: ${code}`);
+    logger.debug(`[ROOM_CREATED] Code: ${code} (${visibility})`);
     this.markDirty(code);
     return newRoom;
   }
@@ -226,6 +243,157 @@ class RoomManager {
     return !room.players.some(
       (p) => p.name.toLowerCase() === name.toLowerCase()
     );
+  }
+
+  // ---- Bots -----------------------------------------------------------------
+
+  /** Seated human players (bots excluded). */
+  public humanPlayers(room: Room): Player[] {
+    return room.players.filter((p) => !p.isBot);
+  }
+
+  /**
+   * Add server-side bot players to a lobby (host only, lobby only). Bots occupy
+   * regular player seats (never spectator slots), get a unique bot name from the
+   * predefined pool and a synthetic non-socket id. `count` is clamped to the
+   * free seats; pass Infinity (or any large number) to fill the table.
+   */
+  public addBots(code: string, hostSocketId: string, count: number): Room {
+    const room = this.rooms.get(code.toUpperCase());
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.hostId !== hostSocketId) {
+      throw new Error('Only the host can add bots');
+    }
+    if (room.status !== 'lobby') {
+      throw new Error('Bots can only be added before the game starts');
+    }
+
+    const { maxPlayers } = this.getCapacityInfo(room);
+    const freeSeats = maxPlayers - room.players.length;
+    const toAdd = Math.min(Math.max(0, Math.floor(count)), freeSeats);
+    if (toAdd <= 0) {
+      throw new Error('No free seats available for bots');
+    }
+
+    for (let i = 0; i < toAdd; i++) {
+      const occupiedSeats = new Set(room.players.map((p) => p.seatNumber));
+      let seatNumber = 1;
+      for (let s = 1; s <= maxPlayers; s++) {
+        if (!occupiedSeats.has(s)) { seatNumber = s; break; }
+      }
+
+      const takenNames = [
+        ...room.players.map((p) => p.name),
+        ...(room.spectators?.map((s) => s.name) ?? []),
+      ];
+      const bot: Player = {
+        id: `bot:${randomUUID()}`,
+        name: pickBotName(takenNames),
+        seatNumber,
+        isHost: false,
+        secret: randomUUID(),
+        isBot: true,
+      };
+      room.players.push(bot);
+      logger.debug(`[BOT_ADDED] ${bot.name} (${bot.id}) seated at ${seatNumber} in room ${room.code}`);
+    }
+
+    room.players.sort((a, b) => a.seatNumber - b.seatNumber);
+    this.markDirty(room.code);
+    return room;
+  }
+
+  /** Remove a specific bot from a lobby (host only, lobby only). */
+  public removeBot(code: string, hostSocketId: string, botId: string): Room {
+    const room = this.rooms.get(code.toUpperCase());
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.hostId !== hostSocketId) {
+      throw new Error('Only the host can remove bots');
+    }
+    if (room.status !== 'lobby') {
+      throw new Error('Bots can only be removed before the game starts');
+    }
+    const idx = room.players.findIndex((p) => p.id === botId && p.isBot);
+    if (idx === -1) {
+      throw new Error('Bot not found in this room');
+    }
+    const [bot] = room.players.splice(idx, 1);
+    logger.debug(`[BOT_REMOVED] ${bot.name} (${bot.id}) removed from room ${room.code}`);
+    this.markDirty(room.code);
+    return room;
+  }
+
+  // ---- Quick Play matchmaking -----------------------------------------------
+
+  /**
+   * Find the best public room for a Quick Play request. Preference order:
+   *   - lobby rooms (game not started) with at least one human waiting
+   *   - a free seat, or a bot seat that can be handed to the human
+   *   - most humans already waiting first (fill tables faster), then oldest
+   * Rooms where `playerName` is already taken are skipped so the join can't be
+   * rejected as a name collision. Returns null when no room qualifies (the
+   * caller creates a fresh public room).
+   */
+  public findQuickPlayRoom(playerName?: string): Room | null {
+    const candidates: Room[] = [];
+    for (const room of this.rooms.values()) {
+      if (room.visibility !== 'public') continue;
+      if (room.status !== 'lobby') continue;
+
+      const humans = this.humanPlayers(room);
+      // Spectator-only / abandoned shells are never matchmaking targets.
+      if (humans.length === 0) continue;
+
+      const { maxPlayers } = this.getCapacityInfo(room);
+      if (humans.length >= maxPlayers) continue; // full of humans
+
+      const hasFreeSeat = room.players.length < maxPlayers;
+      const hasReplaceableBot = room.players.some((p) => p.isBot);
+      if (!hasFreeSeat && !hasReplaceableBot) continue;
+
+      if (
+        playerName &&
+        (room.players.some((p) => p.name.toLowerCase() === playerName.toLowerCase()) ||
+          room.spectators?.some((s) => s.name.toLowerCase() === playerName.toLowerCase()))
+      ) {
+        continue;
+      }
+
+      candidates.push(room);
+    }
+
+    candidates.sort((a, b) => {
+      const humansDiff = this.humanPlayers(b).length - this.humanPlayers(a).length;
+      if (humansDiff !== 0) return humansDiff;
+      return (a.createdAt ?? 0) - (b.createdAt ?? 0);
+    });
+    return candidates[0] ?? null;
+  }
+
+  /**
+   * Delete rooms that were created but never (or no longer) have any human
+   * member — e.g. a REST-created room whose creator never connected. Run
+   * periodically; returns the number of rooms removed.
+   */
+  public sweepAbandonedRooms(maxAgeMs: number = 10 * 60_000): number {
+    const now = Date.now();
+    let removed = 0;
+    for (const [code, room] of this.rooms.entries()) {
+      const hasHumans = this.humanPlayers(room).length > 0;
+      const hasSpectators = (room.spectators?.length ?? 0) > 0;
+      if (hasHumans || hasSpectators) continue;
+      const age = now - (room.createdAt ?? now);
+      if (age < maxAgeMs) continue;
+      logger.debug(`[ROOM_SWEPT] Abandoned room ${code} removed (age ${Math.round(age / 1000)}s).`);
+      this.rooms.delete(code);
+      this.markRemoved(code);
+      removed++;
+    }
+    return removed;
   }
 
   /**
@@ -425,7 +593,19 @@ class RoomManager {
     // This gate is authoritative: because Node runs handlers on a single thread, two
     // sockets can never pass this check "simultaneously" — the array push below is
     // committed before the next join is processed, so capacity can't be exceeded.
-    const shouldSpectate = this.getCapacityInfo(room).isFull;
+    let shouldSpectate = this.getCapacityInfo(room).isFull;
+
+    // Bot displacement: while the game hasn't started, a full table that still
+    // contains bots always makes room for a real player — one bot leaves and the
+    // human takes its seat. The configured player limit is never exceeded.
+    if (shouldSpectate && room.status === 'lobby') {
+      const botIndex = room.players.findIndex((p) => p.isBot);
+      if (botIndex !== -1) {
+        const [displaced] = room.players.splice(botIndex, 1);
+        logger.debug(`[BOT_DISPLACED] ${displaced.name} gave up seat ${displaced.seatNumber} for ${playerName} in room ${room.code}`);
+        shouldSpectate = false;
+      }
+    }
 
     if (shouldSpectate) {
       // Spectator mode can be disabled via house rules — reject instead of seating.
@@ -507,6 +687,19 @@ class RoomManager {
 
         logger.debug(`[ROOM_LEAVE] Player: ${leftPlayer.name}, Socket: ${playerSocketId}, Room: ${code}`);
 
+        // Bots never play on without a human at the table: once the last human
+        // player leaves, every bot leaves with them (the room below is then
+        // either handed to spectators or deleted outright).
+        if (this.humanPlayers(room).length === 0 && room.players.length > 0) {
+          logger.debug(`[BOTS_CLEARED] Last human left room ${code} — removing ${room.players.length} bot(s).`);
+          room.players = [];
+          if (room.game) {
+            room.game = undefined;
+            room.status = 'lobby';
+            gameStopped = true;
+          }
+        }
+
         // Clean up game state if a game is active
         if (room.game && room.players.length >= 2) {
           // Enough players remain — keep the game going.
@@ -542,17 +735,19 @@ class RoomManager {
           logger.debug(`[GAME_STOPPED] Room ${code} dropped below 2 players. Game reset to lobby.`);
         }
 
-        // If the player was the host and there are other players, elect a new host
-        if (leftPlayer.isHost && room.players.length > 0) {
-          room.players[0].isHost = true;
-          room.hostId = room.players[0].id;
+        // If the player was the host and there are other players, elect a new
+        // host. Only humans can host — bots have no socket to act through.
+        const nextHumanHost = this.humanPlayers(room)[0];
+        if (leftPlayer.isHost && nextHumanHost) {
+          nextHumanHost.isHost = true;
+          room.hostId = nextHumanHost.id;
         }
 
-        // The last remaining player always becomes the host (e.g. when a game is stopped).
-        if (room.players.length === 1 && !room.players[0].isHost) {
-          room.players[0].isHost = true;
-          room.hostId = room.players[0].id;
-          logger.debug(`[HOST_ASSIGNED] ${room.players[0].name} is now the host of room ${code}`);
+        // The last remaining human always becomes the host (e.g. when a game is stopped).
+        if (nextHumanHost && !room.players.some((p) => p.isHost)) {
+          nextHumanHost.isHost = true;
+          room.hostId = nextHumanHost.id;
+          logger.debug(`[HOST_ASSIGNED] ${nextHumanHost.name} is now the host of room ${code}`);
         }
 
         // If room is empty, delete it
@@ -625,7 +820,9 @@ class RoomManager {
 
   // Set room game status to playing. Starts either a brand-new match (first play,
   // or after a previous match was won) or the next round of the ongoing match.
-  public startGame(code: string, hostSocketId: string): Room {
+  // `fillWithBots` (host opt-in) tops the table up with bots before dealing, so a
+  // solo player can start immediately.
+  public startGame(code: string, hostSocketId: string, fillWithBots: boolean = false): Room {
     const room = this.rooms.get(code.toUpperCase());
     if (!room) {
       throw new Error('Room not found');
@@ -633,8 +830,18 @@ class RoomManager {
     if (room.hostId !== hostSocketId) {
       throw new Error('Only the host can start the game');
     }
+
+    if (fillWithBots && room.status === 'lobby') {
+      const { maxPlayers } = this.getCapacityInfo(room);
+      if (room.players.length < maxPlayers) {
+        this.addBots(code, hostSocketId, maxPlayers - room.players.length);
+      }
+    }
+
+    // A game needs at least 2 participants — human or bot. A solo host can meet
+    // this by adding bots (or passing fillWithBots).
     if (room.players.length < 2) {
-      throw new Error('At least 2 players are required to start the game');
+      throw new Error('At least 2 players are required — invite a friend or add bots');
     }
 
     // Lock in the current house rules for this game.

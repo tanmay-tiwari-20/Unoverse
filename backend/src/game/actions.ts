@@ -457,9 +457,16 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
     return state;
   }
 
-  // "Must play if playable": you may not draw while holding a playable card.
+  // "Must play if playable": you may not draw while holding a playable card. A
+  // card that matches but is a blocked last-card finisher does NOT count — the
+  // engine would reject playing it, so treating it as "playable" here would
+  // deadlock the turn (can't play, can't draw).
   if (rules.mustPlayIfPlayable) {
-    const hasPlayable = state.hands[playerId].some((c) => isValidMove(c, topCard, state.wildColor, null, rules));
+    const hand = state.hands[playerId];
+    const hasPlayable = hand.some((c) =>
+      isValidMove(c, topCard, state.wildColor, null, rules) &&
+      (hand.length > 1 || canFinishWithCard(rules, c.color, c.value))
+    );
     if (hasPlayable) {
       throw new Error('You must play a playable card — drawing is not allowed.');
     }

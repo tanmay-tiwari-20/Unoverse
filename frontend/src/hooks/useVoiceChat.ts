@@ -198,7 +198,9 @@ export const useVoiceChat = () => {
       const r = useGameStore.getState().room;
       const me = myId();
       if (!r || !me) return ids;
-      r.players.forEach((p) => { if (p.id !== me) ids.add(p.id); });
+      // Bots have no socket and never join voice — building a peer connection
+      // toward one would signal into the void forever.
+      r.players.forEach((p) => { if (p.id !== me && !p.isBot) ids.add(p.id); });
       r.spectators?.forEach((s) => { if (s.id !== me) ids.add(s.id); });
       return ids;
     };

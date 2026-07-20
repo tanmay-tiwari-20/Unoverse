@@ -125,6 +125,25 @@ export const swapTargetSchema = z.object({
   targetId: z.string().min(1).max(100),
 });
 
+/** Host adds bots to the lobby. Count is clamped server-side to the free seats;
+ *  the bound here just rejects absurd payloads. */
+export const addBotsSchema = z.object({
+  count: z.number().int().min(1).max(10),
+});
+
+export const removeBotSchema = z.object({
+  botId: z.string().min(1).max(100),
+});
+
+/** start-game payload. Optional & backward compatible: an old client emitting no
+ *  payload behaves exactly as before. fillWithBots tops the table up with bots. */
+export const startGameSchema = z
+  .object({
+    fillWithBots: z.boolean().optional(),
+  })
+  .optional()
+  .nullable();
+
 export type CreateRoomPayload = z.infer<typeof createRoomSchema>;
 export type JoinRoomPayload = z.infer<typeof joinRoomSchema>;
 export type SendReactionPayload = z.infer<typeof sendReactionSchema>;
@@ -137,3 +156,6 @@ export type HouseRulesPayload = z.infer<typeof houseRulesSchema>;
 export type UpdateHouseRulesPayload = z.infer<typeof updateHouseRulesSchema>;
 export type JumpInPayload = z.infer<typeof jumpInSchema>;
 export type SwapTargetPayload = z.infer<typeof swapTargetSchema>;
+export type AddBotsPayload = z.infer<typeof addBotsSchema>;
+export type RemoveBotPayload = z.infer<typeof removeBotSchema>;
+export type StartGamePayload = z.infer<typeof startGameSchema>;
