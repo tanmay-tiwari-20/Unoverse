@@ -1,7 +1,7 @@
 import { CardItem, CardColor, generateDeck, shuffleDeck } from './deck';
 import { UnoGameState } from './gameState';
 import { isValidMove, isValidJumpIn } from './rules';
-import { getNextPlayerIndex } from './turnManager';
+import { getNextPlayerIndex, getNextActivePlayerId } from './turnManager';
 import { Player } from '../rooms/roomManager';
 import { logger } from '../utils/logger';
 import {
@@ -76,43 +76,25 @@ const advanceTurn = (
     return;
   }
 
-  const currentIndex = players.findIndex(p => p.id === state.currentPlayerId);
-  if (currentIndex === -1) return;
+  const currentPlayer = players.find(p => p.id === state.currentPlayerId);
+  if (!currentPlayer) return;
 
-  let currentIdx = currentIndex;
-
-  // Advance by skipCount active player positions
-  for (let s = 0; s < skipCount; s++) {
-    let foundActive = false;
-    for (let step = 0; step < players.length; step++) {
-      currentIdx = getNextPlayerIndex(currentIdx, state.direction, players.length, 1);
-      const candidatePlayer = players[currentIdx];
-      if ((state.hands[candidatePlayer.id]?.length || 0) > 0) {
-        foundActive = true;
-        break;
-      }
-    }
-    if (!foundActive) {
-      state.status = 'ended';
-      return;
-    }
+  const nextId = getNextActivePlayerId(state, players, currentPlayer.seatNumber, skipCount);
+  if (!nextId) {
+    state.status = 'ended';
+    return;
   }
 
-  state.currentPlayerId = players[currentIdx].id;
+  state.currentPlayerId = nextId;
 };
 
 /** The player seated immediately after `playerId` in the current direction (with cards). */
 const nextActivePlayerId = (state: UnoGameState, players: Player[], playerId: string): string | null => {
-  const idx = players.findIndex(p => p.id === playerId);
-  if (idx === -1) return null;
-  let cur = idx;
-  for (let step = 0; step < players.length; step++) {
-    cur = getNextPlayerIndex(cur, state.direction, players.length, 1);
-    if ((state.hands[players[cur].id]?.length || 0) > 0 && players[cur].id !== playerId) {
-      return players[cur].id;
-    }
-  }
-  return null;
+  const from = players.find(p => p.id === playerId);
+  if (!from) return null;
+  const next = getNextActivePlayerId(state, players, from.seatNumber, 1);
+  // The seat ring wraps back to `playerId` only when no OTHER active player exists.
+  return next !== playerId ? next : null;
 };
 
 /**

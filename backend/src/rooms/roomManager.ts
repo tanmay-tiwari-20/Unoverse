@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
-import { getNextPlayerIndex } from '../game/turnManager';
+import { getNextActivePlayerId } from '../game/turnManager';
 import { calculateRoundPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
 import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../game/houseRules';
 import { logger } from '../utils/logger';
@@ -709,21 +709,51 @@ class RoomManager {
           delete game.hands[playerSocketId];
           delete game.unoCalled[playerSocketId];
 
-          // If the leaving player was the color chooser, reset to playing and advance turn
+          // If the leaving player owed the table a wild-color choice, that
+          // choice can never arrive — return the game to normal play (the turn
+          // handoff below decides who acts next).
           if (game.colorChooserId === playerSocketId) {
             game.colorChooserId = null;
             game.status = 'playing';
           }
 
-          // If it was the leaving player's turn, advance to the next valid player
+          // Same for a pending Seven-O swap-target choice.
+          if (game.swapChooserId === playerSocketId) {
+            game.swapChooserId = null;
+            game.status = 'playing';
+          }
+
+          // A Wild Draw Four played by the leaver can no longer be challenged —
+          // their hand (the evidence, and the target of any penalty) is gone.
+          // The accumulated draw stack itself still stands.
+          if (game.wildFourPlayerId === playerSocketId) {
+            game.wildFourPlayerId = null;
+            game.wildFourWasBluff = null;
+            game.challengeableById = null;
+          }
+
+          // If it was the leaving player's turn, hand it to the player who is
+          // genuinely next in turn order — anchored on the seat the leaver held
+          // and following the current play direction (so an active Reverse is
+          // honored), skipping seats that no longer hold cards. Never assigned
+          // by array position.
           if (game.currentPlayerId === playerSocketId) {
-            // Find next player from the remaining players array
-            // Use index 0 as fallback since the leaving player is already removed
-            const nextIdx = room.players.length > 0 ? 0 : -1;
-            if (nextIdx >= 0) {
-              game.currentPlayerId = room.players[nextIdx].id;
-              logger.debug(`[TURN_ADVANCED_ON_LEAVE] Next Player: ${room.players[nextIdx].name} (${room.players[nextIdx].id})`);
+            // The leaver's private draw-then-play decision leaves with them.
+            game.drawnCardId = null;
+            const nextId = getNextActivePlayerId(game, room.players, leftPlayer.seatNumber);
+            if (nextId) {
+              // The right to challenge a pending +4 follows the draw stack to
+              // the player who now faces it.
+              if (game.challengeableById === playerSocketId) {
+                game.challengeableById = nextId;
+              }
+              game.currentPlayerId = nextId;
+              const next = room.players.find((p) => p.id === nextId);
+              logger.debug(`[TURN_ADVANCED_ON_LEAVE] Next Player: ${next?.name} (${nextId})`);
             }
+          } else if (game.challengeableById === playerSocketId) {
+            // Defensive: a challenge window can't outlive its owner.
+            game.challengeableById = null;
           }
         } else if (room.game) {
           // Fewer than 2 players remain — stop the game, reset the table back to

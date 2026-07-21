@@ -3,7 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import compression from 'compression';
-import { roomManager } from './rooms/roomManager';
+import { roomManager, Room } from './rooms/roomManager';
 import { createRoomStore } from './rooms/roomStore';
 import {
   drawCardAction,
@@ -16,6 +16,7 @@ import {
   challengeWildFourAction,
 } from './game/actions';
 import { autoResolveTimedOutTurn } from './game/autoPlay';
+import { recoverActivePlayerId } from './game/turnManager';
 import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
 import type { ZodType } from 'zod';
@@ -132,26 +133,50 @@ function handleTurnTimeout(code: string, signature: string) {
   }
 }
 
+/**
+ * Server-authoritative stale-turn recovery. If the game's currentPlayerId no
+ * longer maps to any seated player (a state that should not occur now that
+ * leaveRoom hands the turn off properly, but may survive in old persisted
+ * rooms), reassign the turn following the real game order: anchored on the
+ * last player who acted and walking the current direction. The requesting
+ * client has NO influence on the outcome — recovery is derived purely from
+ * game state, so a stale turn can never be claimed by whichever socket
+ * happens to send an action first. Returns true when a repair was made.
+ */
+function recoverStaleTurn(room: Room): boolean {
+  const game = room.game;
+  if (!game || room.players.length === 0) return false;
+  if (game.status !== 'playing' && game.status !== 'awaiting_color_selection' && game.status !== 'awaiting_swap_target') return false;
+  if (room.players.some((p) => p.id === game.currentPlayerId)) return false;
+
+  const recoveredId = recoverActivePlayerId(game, room.players);
+  if (!recoveredId) return false;
+
+  const recovered = room.players.find((p) => p.id === recoveredId);
+  logger.debug(`[TURN_RECOVERY] currentPlayerId '${game.currentPlayerId}' is stale (no matching player). Handing turn to ${recovered?.name} (${recoveredId}) by turn order`);
+  game.currentPlayerId = recoveredId;
+  // Any pending decision belonged to the vanished player and can never
+  // resolve — return the table to normal play for the recovered player.
+  game.drawnCardId = null;
+  if (game.status === 'awaiting_color_selection') {
+    game.status = 'playing';
+    game.colorChooserId = null;
+  } else if (game.status === 'awaiting_swap_target') {
+    game.status = 'playing';
+    game.swapChooserId = null;
+  }
+  return true;
+}
+
 // Helper to sanitize and broadcast game state to each player individually
 function broadcastGameState(code: string) {
   const room = roomManager.getRoom(code);
   if (!room || !room.game) return;
   const game = room.game;
 
-  // Safety: validate currentPlayerId references an actual player in the room
-  if (game.status === 'playing' || game.status === 'awaiting_color_selection') {
-    const currentPlayerExists = room.players.some(p => p.id === game.currentPlayerId);
-    if (!currentPlayerExists && room.players.length > 0) {
-      const fallback = room.players[0];
-      logger.debug(`[TURN_RECOVERY] currentPlayerId '${game.currentPlayerId}' is stale (no matching player). Resetting to ${fallback.name} (${fallback.id})`);
-      game.currentPlayerId = fallback.id;
-      // Also reset color selection state if stale
-      if (game.status === 'awaiting_color_selection') {
-        game.status = 'playing';
-        game.colorChooserId = null;
-      }
-    }
-  }
+  // Safety net: never broadcast (or arm a timer for) a turn owned by a player
+  // who is no longer seated.
+  recoverStaleTurn(room);
 
   // Arm/refresh the turn timer before building the payload so the deadline is
   // included in this broadcast.
@@ -750,11 +775,12 @@ io.on('connection', (socket) => {
       const playerName = player ? player.name : 'Unknown';
       logger.debug(`[CARD_PLAYED] Player: ${playerName}, Card: ${cardId}`);
 
-      // Proactive stale-turn recovery: if currentPlayerId doesn't match any active player, fix it
-      const currentTurnValid = room.players.some(p => p.id === room.game!.currentPlayerId);
-      if (!currentTurnValid && player) {
-        logger.debug(`[TURN_RECOVERY] currentPlayerId '${room.game!.currentPlayerId}' is stale. Recovering to ${playerName} (${socket.id})`);
-        room.game!.currentPlayerId = socket.id;
+      // Proactive stale-turn recovery — server-ordered, never sender-based. If
+      // the repaired turn doesn't belong to this sender, playCardAction below
+      // rejects them with "It is not your turn"; broadcasting the repair keeps
+      // every client (and the turn timer) in sync even on that rejection path.
+      if (recoverStaleTurn(room)) {
+        broadcastGameState(currentRoomCode);
       }
 
       const oldPlayerId = room.game.currentPlayerId;
@@ -810,11 +836,10 @@ io.on('connection', (socket) => {
       const playerName = player ? player.name : 'Unknown';
       logger.debug(`[CARD_DRAWN] Player: ${playerName}`);
 
-      // Proactive stale-turn recovery
-      const currentTurnValid = room.players.some(p => p.id === room.game!.currentPlayerId);
-      if (!currentTurnValid && player) {
-        logger.debug(`[TURN_RECOVERY] currentPlayerId '${room.game!.currentPlayerId}' is stale. Recovering to ${playerName} (${socket.id})`);
-        room.game!.currentPlayerId = socket.id;
+      // Proactive stale-turn recovery — server-ordered, never sender-based
+      // (see the play-card handler for details).
+      if (recoverStaleTurn(room)) {
+        broadcastGameState(currentRoomCode);
       }
 
       const oldPlayerId = room.game.currentPlayerId;
