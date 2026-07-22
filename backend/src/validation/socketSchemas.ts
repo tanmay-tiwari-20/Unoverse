@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WEBRTC_MAX_SIGNAL_BYTES } from '../config/serverConfig';
 
 /**
  * Zod schemas for every socket event that carries a client-supplied payload.
@@ -45,11 +46,61 @@ export const sendChatSchema = z.object({
   text: z.string().trim().min(1).max(500),
 });
 
-export const webrtcSignalSchema = z.object({
-  targetId: z.string().min(1).max(100),
-  // SDP/ICE payloads are opaque to us — relayed verbatim. Just ensure it exists.
-  signalData: z.unknown(),
-});
+/**
+ * WebRTC signaling payload — STRICTLY validated (not an opaque blob).
+ *
+ * The server only relays these between two sockets in the same room, so an
+ * attacker previously could push arbitrary JSON of any size at another client.
+ * We now accept ONLY the four wire shapes the voice-chat mesh actually sends
+ * (offer / answer / ice-candidate / request-offer), reject unknown keys, and cap
+ * the total serialized size so no oversized blob is ever broadcast.
+ *
+ * SDP strings are provider-shaped and remain opaque — we bound their length but
+ * do not parse them — so valid offers/answers/ICE candidates pass unchanged.
+ */
+
+// RTCSessionDescriptionInit — { type, sdp? }. SDP length-bounded, content opaque.
+const sessionDescription = z
+  .object({
+    type: z.enum(['offer', 'answer', 'pranswer', 'rollback']),
+    sdp: z.string().max(WEBRTC_MAX_SIGNAL_BYTES).optional(),
+  })
+  .strict();
+
+// RTCIceCandidateInit — all fields optional per the spec (end-of-candidates is {}).
+const iceCandidate = z
+  .object({
+    candidate: z.string().max(4096).optional(),
+    sdpMid: z.string().max(256).nullish(),
+    sdpMLineIndex: z.number().int().min(0).max(1024).nullish(),
+    usernameFragment: z.string().max(256).nullish(),
+  })
+  .strict();
+
+const signalDataSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('offer'), offer: sessionDescription }).strict(),
+  z.object({ type: z.literal('answer'), answer: sessionDescription }).strict(),
+  z.object({ type: z.literal('ice-candidate'), candidate: iceCandidate }).strict(),
+  z.object({ type: z.literal('request-offer') }).strict(),
+]);
+
+export const webrtcSignalSchema = z
+  .object({
+    targetId: z.string().min(1).max(100),
+    signalData: signalDataSchema,
+  })
+  // Final backstop: reject any payload whose serialized size exceeds the byte
+  // cap, regardless of internal shape. Prevents oversized blobs being relayed.
+  .refine(
+    (p) => {
+      try {
+        return Buffer.byteLength(JSON.stringify(p.signalData), 'utf8') <= WEBRTC_MAX_SIGNAL_BYTES;
+      } catch {
+        return false;
+      }
+    },
+    { message: `signalData exceeds ${WEBRTC_MAX_SIGNAL_BYTES} bytes`, path: ['signalData'] }
+  );
 
 export const voiceStatusSchema = z.object({
   isMuted: z.boolean(),
@@ -105,6 +156,7 @@ export const houseRulesSchema = z
     autoReshuffle: z.boolean(),
     turnTimer: z.boolean(),
     turnTimerSeconds: z.number().int().min(0).max(600),
+    enableChat: z.boolean(),
     spectatorMode: z.boolean(),
     maxSpectators: z.number().int().min(0).max(50),
     allowRejoin: z.boolean(),

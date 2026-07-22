@@ -52,6 +52,10 @@ export interface HouseRules {
   autoReshuffle: boolean;
   turnTimer: boolean;
   turnTimerSeconds: number;
+  /** Enable the real-time text chat for the room. When off, the chat UI is
+   *  hidden/disabled and the server rejects chat messages. Reactions are
+   *  unaffected. */
+  enableChat: boolean;
   spectatorMode: boolean;
   /** (child of spectatorMode) Maximum number of spectators who may watch at once. */
   maxSpectators: number;
@@ -94,6 +98,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   autoReshuffle: true,
   turnTimer: true,
   turnTimerSeconds: 45,
+  enableChat: true,
   spectatorMode: true,
   maxSpectators: 20,
   allowRejoin: true,
@@ -176,6 +181,7 @@ export function normalizeHouseRules(input?: Partial<HouseRules> | null): HouseRu
     autoReshuffle: asBool(s.autoReshuffle, d.autoReshuffle),
     turnTimer: asBool(s.turnTimer, d.turnTimer),
     turnTimerSeconds: clampInt(s.turnTimerSeconds, d.turnTimerSeconds, RULE_BOUNDS.turnTimerSeconds.min, RULE_BOUNDS.turnTimerSeconds.max),
+    enableChat: asBool(s.enableChat, d.enableChat),
     spectatorMode: asBool(s.spectatorMode, d.spectatorMode),
     maxSpectators: clampInt(s.maxSpectators, d.maxSpectators, RULE_BOUNDS.maxSpectators.min, RULE_BOUNDS.maxSpectators.max),
     allowRejoin: asBool(s.allowRejoin, d.allowRejoin),
@@ -314,6 +320,7 @@ export const HOUSE_RULE_CATEGORIES: RuleCategoryDef[] = [
       { key: 'turnTimer', label: 'Turn Timer', description: 'Auto-resolve an AFK player after a countdown.', control: { type: 'toggle' } },
       { key: 'turnTimerSeconds', label: 'Seconds Per Turn', description: 'Length of the per-turn countdown.', control: { type: 'stepper', min: RULE_BOUNDS.turnTimerSeconds.min, max: RULE_BOUNDS.turnTimerSeconds.max, step: 5, unit: 's' }, dependsOn: 'turnTimer', indent: true },
       { key: 'autoReshuffle', label: 'Auto Reshuffle', description: 'Reshuffle the discard pile into the draw pile when it runs out.', control: { type: 'toggle' } },
+      { key: 'enableChat', label: 'Table Chat', description: 'Allow players and spectators to send text chat messages. Emoji reactions stay on regardless.', control: { type: 'toggle' } },
       { key: 'spectatorMode', label: 'Spectator Mode', description: 'Allow extra people to watch once the table is full.', control: { type: 'toggle' } },
       { key: 'maxSpectators', label: 'Max Spectators', description: 'How many spectators can watch at once. Joins are rejected once players and spectators are both full.', control: { type: 'stepper', min: RULE_BOUNDS.maxSpectators.min, max: RULE_BOUNDS.maxSpectators.max, step: 1, unit: 'specs' }, dependsOn: 'spectatorMode', indent: true },
       { key: 'allowRejoin', label: 'Rejoin Support', description: 'Let a disconnected player reclaim their seat within the grace period.', control: { type: 'toggle' } },
@@ -449,6 +456,8 @@ export function getActiveRuleExplanations(rules: HouseRules): ActiveRuleExplanat
 
   if (!rules.autoReshuffle)
     push('autoReshuffle', 'No Auto Reshuffle', 'The discard pile is not reshuffled back into the draw pile when it runs out.', 'modifier');
+  if (!rules.enableChat)
+    push('enableChat', 'Chat Disabled', 'Text chat is turned off for this room — you can still use emoji reactions.', 'modifier');
   if (!rules.spectatorMode)
     push('spectatorMode', 'No Spectators', 'Extra players cannot watch once the table is full.', 'modifier');
   if (!rules.allowRejoin)

@@ -19,6 +19,14 @@ import { autoResolveTimedOutTurn } from './game/autoPlay';
 import { recoverActivePlayerId } from './game/turnManager';
 import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
+import { socketRateLimiter } from './utils/rateLimiter';
+import { moderateChat, clearSenderHistory } from './utils/chatModeration';
+import {
+  resolveCorsOrigin,
+  CorsOriginResolver,
+  ROOM_SWEEP_CONFIG,
+  TURN_TIMER_RETRY_MS,
+} from './config/serverConfig';
 import type { ZodType } from 'zod';
 import {
   createRoomSchema,
@@ -120,7 +128,12 @@ function handleTurnTimeout(code: string, signature: string) {
   try {
     logger.info(`[TURN_TIMEOUT] Auto-resolving '${game.status}' for room ${code}`);
     const resolved = autoResolveTimedOutTurn(game, room.players);
-    if (!resolved) return;
+    if (!resolved) {
+      // The status wasn't a timed phase (shouldn't happen given the signature
+      // guard above). Re-arm rather than leaving the room without a live timer.
+      rearmTurnTimerAfterFailure(code);
+      return;
+    }
     room.game = resolved;
 
     // An auto-resolved turn can also end the round (e.g. forced play of a last card).
@@ -128,9 +141,58 @@ function handleTurnTimeout(code: string, signature: string) {
 
     broadcastGameState(code);
   } catch (err: any) {
-    logger.error(`[TURN_TIMEOUT] Failed to auto-resolve turn in room ${code}:`, err.message);
-    clearTurnTimer(code);
+    // A failed auto-resolution must NOT permanently disable the timer — that
+    // would let a single bad turn freeze the table forever. Retry shortly so
+    // every room always has a functioning turn timer.
+    logger.error(`[TURN_TIMEOUT] Failed to auto-resolve turn in room ${code} (will retry):`, err?.message);
+    rearmTurnTimerAfterFailure(code);
   }
+}
+
+/**
+ * Re-arm a room's turn timer after a failed or incomplete timeout resolution.
+ * Drops the stale signature so armTurnTimer builds a fresh clock, and schedules
+ * a short retry as a hard floor in case the next broadcast doesn't happen on its
+ * own. Guarantees a stalled turn is retried instead of abandoned.
+ */
+function rearmTurnTimerAfterFailure(code: string) {
+  const room = roomManager.getRoom(code);
+  if (!room || !room.game) { clearTurnTimer(code); return; }
+  // Forget the current signature so armTurnTimer re-schedules from scratch.
+  turnSignatures.delete(code);
+  const existing = turnTimers.get(code);
+  if (existing) clearTimeout(existing);
+  turnTimers.set(
+    code,
+    setTimeout(() => {
+      const r = roomManager.getRoom(code);
+      if (!r || !r.game) { clearTurnTimer(code); return; }
+      const sig = turnSignatureOf(r.game);
+      handleTurnTimeout(code, sig);
+    }, TURN_TIMER_RETRY_MS)
+  );
+}
+
+/**
+ * After startup rehydration, arm a fresh turn timer for every room whose game is
+ * mid-play. Persisted rooms restore game STATE but not live timer handles, so
+ * without this an in-progress game would carry a stale `turnDeadline` and never
+ * auto-resolve until a client acted — a disconnected active player could freeze
+ * the table indefinitely. armTurnTimer is idempotent and honors the turnTimer
+ * house rule + player count, so this safely covers every active room at once.
+ */
+function rearmTimersForActiveRooms() {
+  let armed = 0;
+  for (const code of roomManager.getAvailableRooms()) {
+    const room = roomManager.getRoom(code);
+    if (!room || !room.game) continue;
+    if (room.status !== 'playing') continue;
+    // Drop any stale persisted deadline; armTurnTimer computes a fresh one.
+    turnSignatures.delete(code);
+    armTurnTimer(code);
+    if (turnTimers.has(code)) armed++;
+  }
+  if (armed > 0) logger.info(`[TURN_TIMER] Re-armed turn timers for ${armed} active room(s) after rehydration.`);
 }
 
 /**
@@ -332,12 +394,18 @@ const botRunner = new BotRunner({
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Allowed CORS origins. Comma-separated env var; "*" (default) allows all.
-// In production set CORS_ORIGIN to your real frontend URL(s).
-const corsEnv = process.env.CORS_ORIGIN || '*';
-const corsOrigin: string | string[] = corsEnv === '*'
-  ? '*'
-  : corsEnv.split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
+// Resolve the CORS policy ONCE and share it between Express and Socket.IO so the
+// two can never drift. In production a missing/empty/"*" CORS_ORIGIN throws here,
+// which we surface and refuse to start (see below) rather than opening the server
+// to every origin. In development localhost is always allowed.
+let corsOrigin: CorsOriginResolver;
+try {
+  corsOrigin = resolveCorsOrigin();
+} catch (err: any) {
+  logger.error(`[CORS] ${err?.message}`);
+  // Fail fast: never boot a production server with an unsafe CORS policy.
+  process.exit(1);
+}
 
 // Middlewares
 app.use(cors({
@@ -567,8 +635,29 @@ io.on('connection', (socket) => {
     };
   }
 
+  /**
+   * Register a socket event listener WITH per-socket, per-event token-bucket rate
+   * limiting applied first. Every client event is registered through this so no
+   * single socket can degrade the server (or its room) by spamming an event.
+   * Independent limits per event type come from RATE_LIMITS; unlisted events fall
+   * back to a generous default (gameplay actions). When a chatty event
+   * (chat/reactions) is throttled the client gets a paced `error` notice;
+   * high-frequency signaling is dropped silently. The rate check runs BEFORE the
+   * (possibly expensive) schema parse in `guard`, so a flood is rejected cheaply.
+   */
+  function on(event: string, listener: (payload: unknown) => void): void {
+    socket.on(event, (payload: unknown) => {
+      const { allowed, notify } = socketRateLimiter.consume(socket.id, event);
+      if (!allowed) {
+        if (notify) socket.emit('error', { message: 'You are doing that too quickly — please slow down.' });
+        return;
+      }
+      listener(payload);
+    });
+  }
+
   // Create room event (alternative pathway)
-  socket.on('create-room', guard(createRoomSchema, ({ name }) => {
+  on('create-room', guard(createRoomSchema, ({ name }) => {
     try {
       const room = roomManager.createRoom();
       const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id);
@@ -589,7 +678,7 @@ io.on('connection', (socket) => {
   }));
 
   // Join room socket handler
-  socket.on('join-room', guard(joinRoomSchema, ({ code, name, secret }) => {
+  on('join-room', guard(joinRoomSchema, ({ code, name, secret }) => {
     if (currentRoomCode) {
       logger.debug(`[Socket] Duplicate join-room blocked for socket ${socket.id}. Already in room ${currentRoomCode}`);
       return;
@@ -635,7 +724,7 @@ io.on('connection', (socket) => {
   }));
 
   // Send reaction socket handler
-  socket.on('send-reaction', guard(sendReactionSchema, ({ emoji }) => {
+  on('send-reaction', guard(sendReactionSchema, ({ emoji }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room) return;
@@ -653,14 +742,27 @@ io.on('connection', (socket) => {
   // Real-time text chat. Mirrors the reaction flow: validate, resolve the sender's
   // identity from the room, then broadcast the server-stamped message to everyone
   // (including the sender, so all clients render from one authoritative payload).
-  socket.on('send-chat', guard(sendChatSchema, ({ text }) => {
+  on('send-chat', guard(sendChatSchema, ({ text }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room) return;
 
+    // Chat can be disabled per-room via house rules. Enforced server-side so a
+    // client that hasn't hidden its UI (or a crafted socket) still can't chat.
+    if (room.houseRules?.enableChat === false) return;
+
     const player = room.players.find(p => p.id === socket.id);
     const spectator = room.spectators?.find(s => s.id === socket.id);
     if (!player && !spectator) return; // only room members may chat
+
+    // Moderate: trim/collapse whitespace, enforce length, filter profanity, and
+    // drop empty or repeated-spam messages. Blocked words are asterisked, not
+    // rejected, so the message still goes through.
+    const moderated = moderateChat(socket.id, text);
+    if (!moderated.ok) {
+      logger.debug(`[CHAT] Dropped ${socket.id} message in ${currentRoomCode} (${moderated.reason})`);
+      return;
+    }
 
     const name = player ? player.name : spectator!.name;
     const seatNumber = player ? player.seatNumber : null;
@@ -674,18 +776,18 @@ io.on('connection', (socket) => {
       seatNumber,
       isSpectator,
       isHost,
-      text,
+      text: moderated.text,
       timestamp: Date.now(),
     };
 
-    logger.debug(`[CHAT] ${name} in room ${currentRoomCode}: ${text.slice(0, 60)}`);
+    logger.debug(`[CHAT] ${name} in room ${currentRoomCode}: ${message.text.slice(0, 60)}`);
     io.to(currentRoomCode).emit('chat-message', message);
   }));
 
   // WebRTC Signaling. Signals are only relayed between members (players or
   // spectators) of the SAME room — an arbitrary socket must not be able to
   // push SDP/ICE at players elsewhere on the server.
-  socket.on('webrtc-signal', guard(webrtcSignalSchema, ({ targetId, signalData }) => {
+  on('webrtc-signal', guard(webrtcSignalSchema, ({ targetId, signalData }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room) return;
@@ -697,7 +799,7 @@ io.on('connection', (socket) => {
   }));
 
   // Voice Status Updates (e.g. mic muted)
-  socket.on('voice-status', guard(voiceStatusSchema, ({ isMuted }) => {
+  on('voice-status', guard(voiceStatusSchema, ({ isMuted }) => {
     if (!currentRoomCode) return;
     // Broadcast to everyone else in the room
     socket.to(currentRoomCode).emit('voice-status-changed', { playerId: socket.id, isMuted });
@@ -706,7 +808,7 @@ io.on('connection', (socket) => {
 
   // Update house rules (host only, lobby only). The merged+normalized rules are
   // broadcast to everyone so all clients stay in sync in real time.
-  socket.on('update-house-rules', guard(updateHouseRulesSchema, ({ rules }) => {
+  on('update-house-rules', guard(updateHouseRulesSchema, ({ rules }) => {
     if (!currentRoomCode) return;
     try {
       const room = roomManager.updateHouseRules(currentRoomCode, socket.id, rules);
@@ -721,7 +823,7 @@ io.on('connection', (socket) => {
 
   // Trigger game start (host only). Payload optional & backward compatible:
   // { fillWithBots: true } tops the table up with bots before dealing.
-  socket.on('start-game', guard(startGameSchema, (payload) => {
+  on('start-game', guard(startGameSchema, (payload) => {
     if (!currentRoomCode) return;
 
     try {
@@ -741,7 +843,7 @@ io.on('connection', (socket) => {
 
   // Add bot players to the lobby (host only). The lobby broadcast carries the
   // new roster; bots have no socket, so nothing else needs to connect.
-  socket.on('add-bots', guard(addBotsSchema, ({ count }) => {
+  on('add-bots', guard(addBotsSchema, ({ count }) => {
     if (!currentRoomCode) return;
     try {
       const room = roomManager.addBots(currentRoomCode, socket.id, count);
@@ -753,7 +855,7 @@ io.on('connection', (socket) => {
   }));
 
   // Remove a bot from the lobby (host only).
-  socket.on('remove-bot', guard(removeBotSchema, ({ botId }) => {
+  on('remove-bot', guard(removeBotSchema, ({ botId }) => {
     if (!currentRoomCode) return;
     try {
       const room = roomManager.removeBot(currentRoomCode, socket.id, botId);
@@ -765,7 +867,7 @@ io.on('connection', (socket) => {
   }));
 
   // Play card event
-  socket.on('play-card', guard(playCardSchema, ({ cardId }) => {
+  on('play-card', guard(playCardSchema, ({ cardId }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -826,7 +928,7 @@ io.on('connection', (socket) => {
   }));
 
   // Draw card event
-  socket.on('draw-card', () => {
+  on('draw-card', () => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -860,7 +962,7 @@ io.on('connection', (socket) => {
   });
 
   // Pass-turn event — the player drew a playable card but chose not to play it.
-  socket.on('pass-turn', () => {
+  on('pass-turn', () => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -888,7 +990,7 @@ io.on('connection', (socket) => {
   });
 
   // Choose color event
-  socket.on('choose-color', guard(chooseColorSchema, ({ color }) => {
+  on('choose-color', guard(chooseColorSchema, ({ color }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -916,7 +1018,7 @@ io.on('connection', (socket) => {
   }));
 
   // Jump-In event — play an identical card out of turn (house rule).
-  socket.on('jump-in', guard(jumpInSchema, ({ cardId }) => {
+  on('jump-in', guard(jumpInSchema, ({ cardId }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -937,7 +1039,7 @@ io.on('connection', (socket) => {
   }));
 
   // Seven-O swap target selection (host of the play chooses whose hand to take).
-  socket.on('swap-target', guard(swapTargetSchema, ({ targetId }) => {
+  on('swap-target', guard(swapTargetSchema, ({ targetId }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -953,7 +1055,7 @@ io.on('connection', (socket) => {
   }));
 
   // Challenge a Wild Draw Four (house rule).
-  socket.on('challenge-wild-four', () => {
+  on('challenge-wild-four', () => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -977,7 +1079,7 @@ io.on('connection', (socket) => {
   });
 
   // Call UNO event
-  socket.on('call-uno', () => {
+  on('call-uno', () => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room || !room.game) return;
@@ -995,12 +1097,17 @@ io.on('connection', (socket) => {
   });
 
   // Manual leave-room event
-  socket.on('leave-room', () => {
+  on('leave-room', () => {
     handleLeave();
   });
 
   // Disconnect handler
   socket.on('disconnect', () => {
+    // Free per-socket bookkeeping regardless of room membership so these maps
+    // never grow unbounded across the server's lifetime.
+    socketRateLimiter.removeSocket(socket.id);
+    clearSenderHistory(socket.id);
+
     if (!currentRoomCode) return;
 
     const room = roomManager.getRoom(currentRoomCode);
@@ -1102,16 +1209,28 @@ async function start() {
     logger.error('[STORE] Hydration failed (starting with no restored rooms):', err?.message);
   }
 
+  // Re-arm turn timers for any game that was in progress when the server stopped.
+  // Rehydration restores room STATE but not the live setTimeout handles, so an
+  // active game would otherwise sit with a stale/absent deadline until a client
+  // happened to act. Arming here immediately after hydration means a game whose
+  // active player never reconnects still auto-resolves and can't stall forever.
+  rearmTimersForActiveRooms();
+
   // Enable cross-instance broadcasts if Redis is configured (no-op otherwise).
   await attachRedisAdapter();
 
-  // Periodic room hygiene: delete rooms with no human members (e.g. a Quick Play
-  // room whose creator never connected, or a bots-only shell). Keeps the public
-  // room pool clean so matchmaking never lands players in dead rooms.
+  // Idle-room garbage collection. A lifecycle-aware background sweeper periodically
+  // reclaims rooms with NO live members — empty/never-joined rooms, expired invite
+  // rooms, abandoned public rooms, and finished matches past their retention
+  // window — while never touching a room that still has an active player or
+  // spectator. Deleting a room also removes its persisted snapshot. All timings
+  // are env-configurable via ROOM_SWEEP_CONFIG.
   setInterval(() => {
-    const removed = roomManager.sweepAbandonedRooms();
-    if (removed > 0) logger.debug(`[SWEEP] Removed ${removed} abandoned room(s).`);
-  }, 60_000).unref();
+    roomManager.sweepIdleRooms({
+      emptyTtlMs: ROOM_SWEEP_CONFIG.emptyRoomTtlMs,
+      finishedTtlMs: ROOM_SWEEP_CONFIG.finishedRoomTtlMs,
+    });
+  }, ROOM_SWEEP_CONFIG.intervalMs).unref();
 
   server.listen(port, () => {
     logger.info(`===============================================`);

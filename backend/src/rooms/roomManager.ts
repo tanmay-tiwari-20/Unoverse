@@ -374,18 +374,28 @@ class RoomManager {
     return candidates[0] ?? null;
   }
 
+  /** A room has no live human presence when it holds neither a human player nor
+   *  a spectator. (Bots never count as presence — a bots-only shell is dead.) */
+  private hasNoMembers(room: Room): boolean {
+    return this.humanPlayers(room).length === 0 && (room.spectators?.length ?? 0) === 0;
+  }
+
+  /** True once this room's match has been won (finished). */
+  private isFinished(room: Room): boolean {
+    return !!room.match?.matchWinnerName;
+  }
+
   /**
    * Delete rooms that were created but never (or no longer) have any human
    * member — e.g. a REST-created room whose creator never connected. Run
-   * periodically; returns the number of rooms removed.
+   * periodically; returns the number of rooms removed. Retained for backward
+   * compatibility; `sweepIdleRooms` is the fuller lifecycle-aware sweeper.
    */
   public sweepAbandonedRooms(maxAgeMs: number = 10 * 60_000): number {
     const now = Date.now();
     let removed = 0;
     for (const [code, room] of this.rooms.entries()) {
-      const hasHumans = this.humanPlayers(room).length > 0;
-      const hasSpectators = (room.spectators?.length ?? 0) > 0;
-      if (hasHumans || hasSpectators) continue;
+      if (!this.hasNoMembers(room)) continue;
       const age = now - (room.createdAt ?? now);
       if (age < maxAgeMs) continue;
       logger.debug(`[ROOM_SWEPT] Abandoned room ${code} removed (age ${Math.round(age / 1000)}s).`);
@@ -394,6 +404,52 @@ class RoomManager {
       removed++;
     }
     return removed;
+  }
+
+  /**
+   * Lifecycle-aware idle-room garbage collector. Removes rooms that no longer
+   * serve anyone, on a per-category retention policy, and NEVER touches a room
+   * with an active human player or spectator (so an in-progress game is safe):
+   *
+   *   - member-less + finished match      -> removed after `finishedTtlMs`
+   *   - member-less (empty / never joined /
+   *     expired invite / abandoned public) -> removed after `emptyTtlMs`
+   *
+   * Deleting a room also removes its persisted snapshot (file/redis) via
+   * markRemoved -> store.remove. Returns a per-category tally for logging.
+   */
+  public sweepIdleRooms(opts: { emptyTtlMs: number; finishedTtlMs: number }): {
+    empty: number;
+    finished: number;
+    total: number;
+  } {
+    const now = Date.now();
+    let empty = 0;
+    let finished = 0;
+
+    for (const [code, room] of this.rooms.entries()) {
+      // Any live human presence (player or spectator) makes the room active —
+      // never reclaim it, regardless of game/match state.
+      if (!this.hasNoMembers(room)) continue;
+
+      const age = now - (room.createdAt ?? now);
+      const finishedRoom = this.isFinished(room);
+      const ttl = finishedRoom ? opts.finishedTtlMs : opts.emptyTtlMs;
+      if (age < ttl) continue;
+
+      const reason = finishedRoom ? 'finished' : 'idle/abandoned';
+      logger.debug(`[ROOM_GC] Removed ${reason} room ${code} (age ${Math.round(age / 1000)}s, no members).`);
+      this.rooms.delete(code);
+      this.markRemoved(code); // also deletes the persisted snapshot
+      if (finishedRoom) finished++;
+      else empty++;
+    }
+
+    const total = empty + finished;
+    if (total > 0) {
+      logger.info(`[ROOM_GC] Swept ${total} room(s): ${empty} idle/abandoned, ${finished} finished.`);
+    }
+    return { empty, finished, total };
   }
 
   /**

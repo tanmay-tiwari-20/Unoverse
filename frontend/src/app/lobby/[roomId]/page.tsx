@@ -328,6 +328,10 @@ export default function LobbyPage() {
   const setChatOpen = useGameStore((state) => state.setChatOpen);
   const unreadChatCount = useGameStore((state) => state.unreadChatCount);
 
+  // Table Chat is a host-configurable house rule. When disabled we hide the chat
+  // button + panel entirely (the server also rejects chat). Reactions stay on.
+  const chatEnabled = (room?.houseRules ?? houseRules)?.enableChat !== false;
+
   const { toggleMic } = useVoiceChat();
   const { isMicEnabled, isSpeakerEnabled, setSpeakerEnabled } = useVoiceStore();
   const { setIsSettingsOpen, setIsHouseRulesOpen } = useSettingsStore();
@@ -381,6 +385,12 @@ export default function LobbyPage() {
       router.replace('/');
     }
   }, [name, router]);
+
+  // If the host disables Table Chat while the panel is open, close it so the UI
+  // can't linger over a now-disabled feature.
+  useEffect(() => {
+    if (!chatEnabled && isChatOpen) setChatOpen(false);
+  }, [chatEnabled, isChatOpen, setChatOpen]);
 
   // Auto-redirect if room no longer exists
   useEffect(() => {
@@ -586,8 +596,9 @@ export default function LobbyPage() {
       {/* House Rules Configuration Modal */}
       <HouseRulesModal />
 
-      {/* Real-time Table Chat (desktop side panel / mobile bottom sheet) */}
-      <ChatPanel />
+      {/* Real-time Table Chat (desktop side panel / mobile bottom sheet).
+          Not mounted when the host has disabled Table Chat. */}
+      {chatEnabled && <ChatPanel />}
 
       {/* Help & Utility Modals */}
       <HelpModals />
@@ -739,35 +750,39 @@ export default function LobbyPage() {
               <Headphones size={16} />
             </button>
 
-            <button
-              onClick={() => setChatOpen(!isChatOpen)}
-              className={`chip-arcade relative w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
-                isChatOpen
-                  ? 'bg-gradient-to-b from-blue-400 to-blue-600'
-                  : 'bg-gradient-to-b from-neutral-700 to-neutral-900'
-              }`}
-              title="Table Chat"
-              aria-label={
-                isChatOpen
-                  ? 'Close table chat'
-                  : unreadChatCount > 0
-                    ? `Open table chat, ${unreadChatCount} unread ${unreadChatCount === 1 ? 'message' : 'messages'}`
-                    : 'Open table chat'
-              }
-              aria-expanded={isChatOpen}
-              aria-controls="table-chat-panel"
-            >
-              <MessageCircle size={16} />
-              {/* Unread indicator — only when the panel is closed */}
-              {!isChatOpen && unreadChatCount > 0 && (
-                <span
-                  className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-b from-rose-500 to-red-600 border-2 border-neutral-900 text-white text-[9px] font-black flex items-center justify-center shadow-md"
-                  aria-hidden="true"
-                >
-                  {unreadChatCount > 9 ? '9+' : unreadChatCount}
-                </span>
-              )}
-            </button>
+            {/* Chat toggle — hidden entirely when the host disables Table Chat.
+                Reactions and voice remain available. */}
+            {chatEnabled && (
+              <button
+                onClick={() => setChatOpen(!isChatOpen)}
+                className={`chip-arcade relative w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
+                  isChatOpen
+                    ? 'bg-gradient-to-b from-blue-400 to-blue-600'
+                    : 'bg-gradient-to-b from-neutral-700 to-neutral-900'
+                }`}
+                title="Table Chat"
+                aria-label={
+                  isChatOpen
+                    ? 'Close table chat'
+                    : unreadChatCount > 0
+                      ? `Open table chat, ${unreadChatCount} unread ${unreadChatCount === 1 ? 'message' : 'messages'}`
+                      : 'Open table chat'
+                }
+                aria-expanded={isChatOpen}
+                aria-controls="table-chat-panel"
+              >
+                <MessageCircle size={16} />
+                {/* Unread indicator — only when the panel is closed */}
+                {!isChatOpen && unreadChatCount > 0 && (
+                  <span
+                    className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-b from-rose-500 to-red-600 border-2 border-neutral-900 text-white text-[9px] font-black flex items-center justify-center shadow-md"
+                    aria-hidden="true"
+                  >
+                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             <button
               onClick={() => {

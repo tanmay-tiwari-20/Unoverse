@@ -288,10 +288,31 @@ unoverse/
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `PORT` | `3001` | HTTP and Socket.IO server listen port. |
-| `CORS_ORIGIN` | `*` | Allowed client origins (comma-separated). Set strictly in production. |
-| `STORE` | `memory` | Storage adapter: `memory`, `file`, or `redis`. |
+| `CORS_ORIGIN` | `*` (dev only) | Allowed client origins (comma-separated), shared by Express + Socket.IO. Dev also always allows localhost. **In production a missing/empty/`*` value makes the server refuse to start.** |
+| `STORE` | `file` | Storage adapter: `memory`, `file`, or `redis`. |
+| `DATA_DIR` | `./.data/rooms` | Directory for the file store (only when `STORE=file`). |
 | `REDIS_URL` | — | Redis connection string (required when `STORE=redis`). |
 | `TURN_TIMEOUT_MS` | `45000` | Turn auto-resolve timeout duration (milliseconds). |
+| `TURN_TIMER_RETRY_MS` | `5000` | Retry delay if a turn auto-resolution fails (timer re-arms instead of stalling). |
+| `LOG_LEVEL` | dev:`debug` / prod:`info` | Log verbosity: `debug`, `info`, `warn`, `error`, `silent`. |
+
+#### Security / Reliability (all optional — safe defaults)
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `RL_CHAT_CAPACITY` / `RL_CHAT_REFILL_PER_SEC` | `6` / `1.5` | Per-socket token bucket for `send-chat` (burst / refill-per-sec). |
+| `RL_REACTION_CAPACITY` / `RL_REACTION_REFILL_PER_SEC` | `10` / `3` | Per-socket token bucket for `send-reaction`. |
+| `RL_SIGNAL_CAPACITY` / `RL_SIGNAL_REFILL_PER_SEC` | `120` / `60` | Per-socket token bucket for `webrtc-signal`. |
+| `RL_DEFAULT_CAPACITY` / `RL_DEFAULT_REFILL_PER_SEC` | `30` / `15` | Fallback bucket for all other client events. |
+| `RL_NOTIFY_GAP_MS` | `2000` | Min gap between "slow down" notices to a throttled client. |
+| `WEBRTC_MAX_SIGNAL_BYTES` | `16384` | Max serialized size of a `webrtc-signal` payload; larger is rejected before relay. |
+| `CHAT_MAX_LENGTH` | `300` | Max characters kept per chat message (truncated, not rejected). |
+| `CHAT_DEDUPE_WINDOW` / `CHAT_REPEAT_LIMIT` | `5` / `3` | Sliding-window spam detection (drop after N identical messages). |
+| `CHAT_BLOCKED_WORDS` | — | Extra profanity words (comma-separated), merged with the built-in list. |
+| `CHAT_BLOCKED_WORDS_REPLACE` | `0` | Set `1` to replace the built-in blocklist instead of merging. |
+| `ROOM_SWEEP_INTERVAL_MS` | `60000` | How often the idle-room garbage collector runs. |
+| `ROOM_EMPTY_TTL_MS` | `600000` | Age after which a member-less room is deleted. |
+| `ROOM_FINISHED_TTL_MS` | `300000` | Age after which a member-less **finished** room is deleted. |
 
 ### Frontend (`frontend/.env.local`)
 

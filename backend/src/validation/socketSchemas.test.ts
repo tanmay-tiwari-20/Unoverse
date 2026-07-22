@@ -69,11 +69,63 @@ describe('sendReactionSchema', () => {
 });
 
 describe('webrtcSignalSchema', () => {
-  it('accepts a targetId with opaque signalData', () => {
-    expect(webrtcSignalSchema.safeParse({ targetId: 'sock123', signalData: { type: 'offer' } }).success).toBe(true);
+  it('accepts each valid signal shape (offer / answer / ice-candidate / request-offer)', () => {
+    expect(
+      webrtcSignalSchema.safeParse({
+        targetId: 'sock123',
+        signalData: { type: 'offer', offer: { type: 'offer', sdp: 'v=0...' } },
+      }).success
+    ).toBe(true);
+    expect(
+      webrtcSignalSchema.safeParse({
+        targetId: 'sock123',
+        signalData: { type: 'answer', answer: { type: 'answer', sdp: 'v=0...' } },
+      }).success
+    ).toBe(true);
+    expect(
+      webrtcSignalSchema.safeParse({
+        targetId: 'sock123',
+        signalData: { type: 'ice-candidate', candidate: { candidate: 'candidate:...', sdpMLineIndex: 0, sdpMid: '0' } },
+      }).success
+    ).toBe(true);
+    // End-of-candidates signalled with an empty candidate object.
+    expect(
+      webrtcSignalSchema.safeParse({
+        targetId: 'sock123',
+        signalData: { type: 'ice-candidate', candidate: {} },
+      }).success
+    ).toBe(true);
+    expect(
+      webrtcSignalSchema.safeParse({ targetId: 'sock123', signalData: { type: 'request-offer' } }).success
+    ).toBe(true);
   });
+
   it('rejects a missing targetId', () => {
-    expect(webrtcSignalSchema.safeParse({ signalData: {} }).success).toBe(false);
+    expect(webrtcSignalSchema.safeParse({ signalData: { type: 'request-offer' } }).success).toBe(false);
+  });
+
+  it('rejects an unknown signal type (arbitrary blob)', () => {
+    expect(webrtcSignalSchema.safeParse({ targetId: 'sock123', signalData: { type: 'evil', payload: 'x' } }).success).toBe(false);
+    expect(webrtcSignalSchema.safeParse({ targetId: 'sock123', signalData: { foo: 'bar' } }).success).toBe(false);
+  });
+
+  it('rejects unknown keys on a signal (strict)', () => {
+    expect(
+      webrtcSignalSchema.safeParse({
+        targetId: 'sock123',
+        signalData: { type: 'request-offer', extra: 'nope' },
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects an oversized signal payload', () => {
+    const huge = 'x'.repeat(20_000);
+    expect(
+      webrtcSignalSchema.safeParse({
+        targetId: 'sock123',
+        signalData: { type: 'offer', offer: { type: 'offer', sdp: huge } },
+      }).success
+    ).toBe(false);
   });
 });
 

@@ -171,3 +171,55 @@ describe('quick play matchmaking', () => {
     roomManager['rooms'].delete(fresh.code);
   });
 });
+
+describe('sweepIdleRooms (garbage collection lifecycle)', () => {
+  const TTL = { emptyTtlMs: 10 * 60_000, finishedTtlMs: 5 * 60_000 };
+
+  it('removes an empty room past the empty TTL', () => {
+    const stale = roomManager.createRoom('public');
+    stale.createdAt = Date.now() - 11 * 60_000;
+    const res = roomManager.sweepIdleRooms(TTL);
+    expect(res.empty).toBeGreaterThanOrEqual(1);
+    expect(roomManager.getRoom(stale.code)).toBeUndefined();
+  });
+
+  it('keeps a fresh empty room within the TTL', () => {
+    const fresh = roomManager.createRoom('public'); // createdAt = now
+    roomManager.sweepIdleRooms(TTL);
+    expect(roomManager.getRoom(fresh.code)).toBeDefined();
+    roomManager['rooms'].delete(fresh.code);
+  });
+
+  it('NEVER removes a room with an active human player, however old', () => {
+    const room = seatHost('public');
+    room.createdAt = Date.now() - 60 * 60_000; // an hour old
+    roomManager.sweepIdleRooms(TTL);
+    expect(roomManager.getRoom(room.code)).toBeDefined();
+    roomManager.leaveRoom(`h-${room.code}`);
+  });
+
+  it('NEVER removes a room that still has a spectator', () => {
+    const room = roomManager.createRoom('public');
+    room.createdAt = Date.now() - 60 * 60_000;
+    room.spectators = [{ id: 'spec1', name: 'Watcher', secret: 'x' }];
+    roomManager.sweepIdleRooms(TTL);
+    expect(roomManager.getRoom(room.code)).toBeDefined();
+    roomManager['rooms'].delete(room.code);
+  });
+
+  it('removes a member-less finished room past the (shorter) finished TTL', () => {
+    const room = roomManager.createRoom('public');
+    // Finished match, member-less, aged past finishedTtl but NOT emptyTtl.
+    room.createdAt = Date.now() - 6 * 60_000;
+    room.match = {
+      scores: {},
+      targetScore: 500,
+      round: 3,
+      lastRound: null,
+      matchWinnerName: 'Alice',
+    };
+    const res = roomManager.sweepIdleRooms(TTL);
+    expect(res.finished).toBeGreaterThanOrEqual(1);
+    expect(roomManager.getRoom(room.code)).toBeUndefined();
+  });
+});

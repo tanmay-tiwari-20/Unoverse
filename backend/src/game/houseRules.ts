@@ -95,6 +95,9 @@ export interface HouseRules {
   turnTimer: boolean;
   /** (child of turnTimer) Seconds allowed per turn. */
   turnTimerSeconds: number;
+  /** Enable the real-time text chat for the room. When off, the chat UI is hidden
+   *  and the server rejects `send-chat` events. Emoji reactions are unaffected. */
+  enableChat: boolean;
   /** Allow late/extra joiners to watch as spectators once the table is full. */
   spectatorMode: boolean;
   /** (child of spectatorMode) Maximum number of spectators who may watch at once.
@@ -153,6 +156,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
   autoReshuffle: true,
   turnTimer: true,
   turnTimerSeconds: 45,
+  enableChat: true,
   spectatorMode: true,
   maxSpectators: 20,
   allowRejoin: true,
@@ -251,6 +255,7 @@ export function normalizeHouseRules(input?: Partial<HouseRules> | null): HouseRu
     autoReshuffle: asBool(src.autoReshuffle, d.autoReshuffle),
     turnTimer: asBool(src.turnTimer, d.turnTimer),
     turnTimerSeconds: clampInt(src.turnTimerSeconds, d.turnTimerSeconds, RULE_BOUNDS.turnTimerSeconds.min, RULE_BOUNDS.turnTimerSeconds.max),
+    enableChat: asBool(src.enableChat, d.enableChat),
     spectatorMode: asBool(src.spectatorMode, d.spectatorMode),
     maxSpectators: clampInt(src.maxSpectators, d.maxSpectators, RULE_BOUNDS.maxSpectators.min, RULE_BOUNDS.maxSpectators.max),
     allowRejoin: asBool(src.allowRejoin, d.allowRejoin),
