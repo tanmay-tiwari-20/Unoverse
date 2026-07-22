@@ -1,7 +1,7 @@
 {
-  "name": "uno-real-backend",
+  "name": "unoverse_backend",
   "version": "1.0.0",
-  "description": "UNO Real Multiplayer Backend",
+  "description": "Unoverse Multiplayer Backend",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
