@@ -147,6 +147,24 @@ export const ROOM_SWEEP_CONFIG: RoomSweepConfig = {
 export const TURN_TIMER_RETRY_MS = num(process.env.TURN_TIMER_RETRY_MS, 5_000);
 
 // ---------------------------------------------------------------------------
+// Game-state broadcast payload.
+// ---------------------------------------------------------------------------
+
+/**
+ * How many cards from the top of the discard pile are sent to clients.
+ *
+ * The discard pile grows for the whole round, but the table only ever *renders*
+ * a short stack of the most recent cards (everything below is occluded) and all
+ * game logic reads only the top card. Shipping the full pile on every action was
+ * O(round length) — this window makes each broadcast O(1) while leaving the
+ * rendered stack pixel-identical.
+ *
+ * Must stay >= the number of cards the client stacks (frontend renders the last
+ * 10). Total pile size travels separately as `discardCount`.
+ */
+export const DISCARD_VISIBLE_COUNT = 10;
+
+// ---------------------------------------------------------------------------
 // CORS.
 // ---------------------------------------------------------------------------
 

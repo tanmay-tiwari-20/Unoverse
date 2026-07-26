@@ -11,8 +11,9 @@ import {
   X, Volume2, Volume1, Mic, Monitor, Layers,
   Sparkles, Bug, Keyboard, Info, LogOut,
   Headphones, Zap, Video, Eye, Speaker,
-  Gamepad2, Wand2, BookOpen, Tag
+  Gamepad2, Wand2, BookOpen, Tag, Gauge
 } from 'lucide-react';
+import { useEffectiveQuality } from '../../hooks/useEffectiveQuality';
 
 export const SettingsModal: React.FC = () => {
   const { 
@@ -29,10 +30,14 @@ export const SettingsModal: React.FC = () => {
     vfxQuality, setVfxQuality,
     postProcessing, setPostProcessing,
     performanceMode, setPerformanceMode,
+    adaptiveQuality, setAdaptiveQuality,
     cardAnimations, setCardAnimations,
     cameraMotion, setCameraMotion,
     cameraSensitivity, setCameraSensitivity
   } = useSettingsStore();
+
+  // Reported back to the user so "Auto Graphics" isn't a black box.
+  const { tier, isAutoDowngraded } = useEffectiveQuality();
 
   const addToast = useGameStore((state) => state.addToast);
   const { leaveRoom } = useSocket();
@@ -187,6 +192,17 @@ export const SettingsModal: React.FC = () => {
                 </h3>
                 <div className="space-y-3">
                   <ToggleField icon={Monitor} label="Show FPS Counter" checked={showFPS} setter={setShowFPS} />
+                  <ToggleField icon={Gauge} label="Auto Graphics" checked={adaptiveQuality} setter={setAdaptiveQuality} />
+                  {/* Only shown while auto-scaling is actually holding quality
+                      below what the settings below ask for, so the panel never
+                      looks like it's lying about the active configuration. */}
+                  {isAutoDowngraded && (
+                    <p className="px-2.5 -mt-1 text-[10px] leading-relaxed text-slate-500">
+                      Graphics automatically reduced to{' '}
+                      <span className="font-bold uppercase text-amber-400">{tier}</span> to keep
+                      the game smooth on this device.
+                    </p>
+                  )}
                   <ToggleField icon={Zap} label="Performance Mode" checked={performanceMode} setter={setPerformanceMode} />
                   <ToggleField icon={Sparkles} label="Post Processing" checked={postProcessing} setter={setPostProcessing} />
                   

@@ -39,13 +39,17 @@ export const CardFlightAnimations: React.FC = () => {
   const player = useGameStore((s) => s.player);
   const playerCards = useGameStore((s) => s.playerCards);
   const discardPile = useGameStore((s) => s.discardPile);
+  const discardCount = useGameStore((s) => s.discardCount);
   const gameStatus = useGameStore((s) => s.gameStatus);
   const { cardAnimations } = useSettingsStore();
 
   const [flyingCards, setFlyingCards] = useState<FlyingCard[]>([]);
 
-  // Track previous state for diffing
-  const prevDiscardLenRef = useRef(0);
+  // Track previous state for diffing. Pile growth is diffed on `discardCount`
+  // (the authoritative total) rather than `discardPile.length`: the store keeps
+  // only a bounded window of the pile, whose length plateaus mid-round and would
+  // stop reporting plays entirely.
+  const prevDiscardCountRef = useRef(0);
   const prevTopCardIdRef = useRef<string | null>(null);
   const prevHandSizesRef = useRef<Record<number, number>>({});
   const initializedRef = useRef(false);
@@ -72,7 +76,7 @@ export const CardFlightAnimations: React.FC = () => {
   useEffect(() => {
     if (gameStatus !== 'playing' && gameStatus !== 'awaiting_color_selection') {
       // Reset tracking on game restart
-      prevDiscardLenRef.current = discardPile.length;
+      prevDiscardCountRef.current = discardCount;
       prevTopCardIdRef.current = discardPile.length > 0 ? discardPile[discardPile.length - 1]?.id : null;
       const sizes: Record<number, number> = {};
       playersList.forEach(p => {
@@ -85,7 +89,7 @@ export const CardFlightAnimations: React.FC = () => {
 
     // Skip the very first state update (initial deal) to avoid mass flight chaos
     if (!initializedRef.current) {
-      prevDiscardLenRef.current = discardPile.length;
+      prevDiscardCountRef.current = discardCount;
       prevTopCardIdRef.current = discardPile.length > 0 ? discardPile[discardPile.length - 1]?.id : null;
       const sizes: Record<number, number> = {};
       playersList.forEach(p => {
@@ -102,7 +106,7 @@ export const CardFlightAnimations: React.FC = () => {
     // 1. Detect card played (discard pile grew)
     if (
       topCard &&
-      discardPile.length > prevDiscardLenRef.current &&
+      discardCount > prevDiscardCountRef.current &&
       topCard.id !== prevTopCardIdRef.current
     ) {
       // Find which player lost a card (hand shrunk)
@@ -137,7 +141,7 @@ export const CardFlightAnimations: React.FC = () => {
       const currSize = playerCards[p.seatNumber]?.length ?? 0;
       const cardsGained = currSize - prevSize;
 
-      if (cardsGained > 0 && discardPile.length <= prevDiscardLenRef.current) {
+      if (cardsGained > 0 && discardCount <= prevDiscardCountRef.current) {
         // Only create flight for draw events (not when discard pile also changed, which is a play)
         // Actually, draw_two/draw_four cause BOTH pile change and hand growth simultaneously
         // So let's always animate draw when hand grows
@@ -162,7 +166,7 @@ export const CardFlightAnimations: React.FC = () => {
     });
 
     // Update refs
-    prevDiscardLenRef.current = discardPile.length;
+    prevDiscardCountRef.current = discardCount;
     prevTopCardIdRef.current = topCard?.id ?? null;
     const sizes: Record<number, number> = {};
     playersList.forEach(p => {
@@ -174,7 +178,7 @@ export const CardFlightAnimations: React.FC = () => {
     if (newFlying.length > 0) {
       setFlyingCards(prev => [...prev, ...newFlying]);
     }
-  }, [discardPile, playerCards, gameStatus]);
+  }, [discardPile, discardCount, playerCards, gameStatus]);
 
   const removeFlyingCard = (id: string) => {
     setFlyingCards(prev => prev.filter(f => f.id !== id));

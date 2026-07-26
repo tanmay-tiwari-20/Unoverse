@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useGameStore } from '../../store/useGameStore';
-import { useSettingsStore } from '../../store/useSettingsStore';
+import { useEffectiveQuality } from '../../hooks/useEffectiveQuality';
 import { getHandRingRadii } from '../../utils/tableLayout';
 import { getLayoutSeatCount } from '../../utils/capacity';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -37,11 +37,14 @@ export const ActionEffects3D: React.FC = () => {
   const player = useGameStore((s) => s.player);
   const playerCards = useGameStore((s) => s.playerCards);
   const discardPile = useGameStore((s) => s.discardPile);
+  const discardCount = useGameStore((s) => s.discardCount);
   const gameStatus = useGameStore((s) => s.gameStatus);
 
   const [effects, setEffects] = useState<ActiveEffect[]>([]);
 
-  const prevDiscardLenRef = useRef(0);
+  // Pile growth is diffed on the authoritative total, not on `discardPile.length`
+  // — the store holds only a bounded window whose length plateaus mid-round.
+  const prevDiscardCountRef = useRef(0);
   const prevTopCardIdRef = useRef<string | null>(null);
   const prevHandSizesRef = useRef<Record<number, number>>({});
   
@@ -69,7 +72,7 @@ export const ActionEffects3D: React.FC = () => {
 
   useEffect(() => {
     if (gameStatus !== 'playing' && gameStatus !== 'awaiting_color_selection') {
-      prevDiscardLenRef.current = discardPile.length;
+      prevDiscardCountRef.current = discardCount;
       prevTopCardIdRef.current = discardPile.length > 0 ? discardPile[discardPile.length - 1]?.id : null;
       return;
     }
@@ -84,7 +87,7 @@ export const ActionEffects3D: React.FC = () => {
     const newEffects: ActiveEffect[] = [];
 
     // 1. Detect Action Card Plays (discard pile grew & top card changed)
-    if (topCard && discardPile.length > prevDiscardLenRef.current && topCard.id !== prevTopCardIdRef.current) {
+    if (topCard && discardCount > prevDiscardCountRef.current && topCard.id !== prevTopCardIdRef.current) {
       const eid = `effect-${now}-${Math.random().toString(36).substring(2, 6)}`;
       
       if (topCard.value === 'skip') {
@@ -142,19 +145,22 @@ export const ActionEffects3D: React.FC = () => {
     }
 
     // Update refs
-    prevDiscardLenRef.current = discardPile.length;
+    prevDiscardCountRef.current = discardCount;
     prevTopCardIdRef.current = topCard?.id ?? null;
     prevHandSizesRef.current = currentSizes;
     prevUnoCalledRef.current = { ...unoCalled };
-  }, [discardPile, playerCards, gameStatus, unoCalled]);
+  }, [discardPile, discardCount, playerCards, gameStatus, unoCalled]);
 
   const removeEffect = (id: string) => {
     setEffects(prev => prev.filter(e => e.id !== id));
   };
 
-  const { vfxQuality, performanceMode } = useSettingsStore();
+  // Gated on the EFFECTIVE tier, so these are dropped both when the user asks
+  // for low VFX / Performance Mode (as before) and when adaptive scaling has
+  // decided this device can't afford them.
+  const { effects3D } = useEffectiveQuality();
 
-  if (vfxQuality === 'low' || performanceMode) return null;
+  if (!effects3D) return null;
 
   return (
     <group>

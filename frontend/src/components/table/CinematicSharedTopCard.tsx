@@ -9,6 +9,7 @@ import { PhysicalCard } from '../cards/PhysicalCard';
 
 export const CinematicSharedTopCard: React.FC = () => {
   const discardPile = useGameStore((state) => state.discardPile);
+  const discardCount = useGameStore((state) => state.discardCount);
   const wildColor = useGameStore((state) => state.wildColor);
   const topCard = discardPile && discardPile.length > 0 ? discardPile[discardPile.length - 1] : null;
 
@@ -41,7 +42,9 @@ export const CinematicSharedTopCard: React.FC = () => {
     const t = THREE.MathUtils.smoothstep(animProgress.current, 0, 1);
 
     // Start: flat on top of the discard pile
-    const pileHeight = (discardPile?.length || 1) * 0.002;
+    // Height of the real pile, not of the visible window — `discardPile` is
+    // capped at DISCARD_VISIBLE_COUNT, so its length stops growing mid-round.
+    const pileHeight = (discardCount || 1) * 0.002;
     const startX = 0;
     const startY = pileHeight;
     const startZ = 0;

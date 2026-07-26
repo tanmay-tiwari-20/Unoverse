@@ -56,7 +56,12 @@ interface GameState {
   
   // Card Engine States
   playerCards: Record<number, CardItem[]>; // seatNumber -> CardItem[]
+  // The VISIBLE top of the discard pile (oldest -> newest), capped at
+  // DISCARD_VISIBLE_COUNT entries. The server no longer ships the round's full
+  // history, so this array is a window, not the whole pile — anything that needs
+  // the real pile size must read `discardCount`, never `discardPile.length`.
   discardPile: CardItem[];
+  discardCount: number; // authoritative total number of cards in the discard pile
   drawPileCount: number;
   selectedCardId: string | null;
   isProcessing: boolean;
@@ -125,9 +130,26 @@ interface GameState {
   clearAllCards: () => void;
   
   // Game state bulk updater
-  setGameState: (payload: {
-    hands: Record<number, CardItem[]>;
-    discardPile: CardItem[];
+  setGameState: (payload: GameUpdatePayload) => void;
+
+  reset: () => void;
+}
+
+/**
+ * The wire shape of the server's `game-updated` broadcast.
+ *
+ * Deliberately count-based: the server sends one integer per opponent seat
+ * instead of an array of face-down placeholder objects, and a bounded window of
+ * the discard pile instead of the whole round's history. The store expands both
+ * back into the render-ready shapes components already consume, so the payload
+ * can stay small without any component knowing about it.
+ */
+export interface GameUpdatePayload {
+    handCounts: Record<number, number>; // seatNumber -> number of cards held
+    ownSeat: number | null; // recipient's seat (null for spectators)
+    hand: CardItem[]; // recipient's OWN real cards (empty for spectators)
+    discardTop: CardItem[]; // last <= DISCARD_VISIBLE_COUNT discards, oldest -> newest
+    discardCount: number; // true size of the discard pile
     drawPileCount: number;
     currentPlayerId: string;
     currentPlayerSeat: number;
@@ -147,10 +169,46 @@ interface GameState {
     match?: MatchState | null;
     houseRules?: HouseRules | null;
     lastAction?: GameLastAction | null;
-  }) => void;
-  
-  reset: () => void;
 }
+
+/**
+ * How many discard-pile cards the server sends and the table stacks. Mirrors
+ * DISCARD_VISIBLE_COUNT in backend/src/config/serverConfig.ts — everything below
+ * this depth is fully occluded by the cards above it, so it is never rendered.
+ */
+export const DISCARD_VISIBLE_COUNT = 10;
+
+/**
+ * Rebuild the per-seat hand map the table renders from the server's counts.
+ *
+ * Every seat except the recipient's own is face-down, so a count is all the
+ * client needs; the placeholders are synthesized here with ids that are stable
+ * across broadcasts (seat + index) so React keys and the WebGL card instances
+ * don't churn between updates.
+ */
+const expandHands = (
+  handCounts: Record<number, number>,
+  ownSeat: number | null,
+  ownHand: CardItem[]
+): Record<number, CardItem[]> => {
+  const hands: Record<number, CardItem[]> = {};
+  Object.entries(handCounts || {}).forEach(([seatKey, count]) => {
+    const seat = Number(seatKey);
+    if (seat === ownSeat) {
+      hands[seat] = ownHand;
+      return;
+    }
+    hands[seat] = Array.from({ length: count }, (_c, idx) => ({
+      id: `seat-${seat}-back-${idx}`,
+      color: 'wild' as CardColor,
+      value: 'wild' as const,
+    }));
+  });
+  // A spectator has no seat; a player always renders their own real hand even if
+  // the counts map somehow omitted their seat.
+  if (ownSeat !== null && !hands[ownSeat]) hands[ownSeat] = ownHand;
+  return hands;
+};
 
 export const useGameStore = create<GameState>((set) => ({
   socket: null,
@@ -164,6 +222,7 @@ export const useGameStore = create<GameState>((set) => ({
   // Card defaults
   playerCards: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
   discardPile: [],
+  discardCount: 0,
   drawPileCount: 108,
   selectedCardId: null,
   isProcessing: false,
@@ -266,15 +325,22 @@ export const useGameStore = create<GameState>((set) => ({
     
     return {
       playerCards: { ...state.playerCards, [seatNumber]: hand.filter(c => c.id !== cardId) },
-      discardPile: [...state.discardPile, cardToPlay],
+      // Keep the local window bounded exactly like the server's, and advance the
+      // authoritative total alongside it.
+      discardPile: [...state.discardPile, cardToPlay].slice(-DISCARD_VISIBLE_COUNT),
+      discardCount: state.discardCount + 1,
       selectedCardId: state.selectedCardId === cardId ? null : state.selectedCardId
     };
   }),
-  setDiscardPile: (discardPile) => set({ discardPile }),
+  setDiscardPile: (discardPile) => set({
+    discardPile: discardPile.slice(-DISCARD_VISIBLE_COUNT),
+    discardCount: discardPile.length,
+  }),
   setDrawPileCount: (drawPileCount) => set({ drawPileCount }),
   clearAllCards: () => set({
     playerCards: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
     discardPile: [],
+    discardCount: 0,
     drawPileCount: 52,
     selectedCardId: null,
     isProcessing: false,
@@ -307,10 +373,12 @@ export const useGameStore = create<GameState>((set) => ({
   }),
 
   setGameState: (payload) => {
-    logger.debug(`[STORE] SETTING GAME STATE. DISCARD PILE:`, payload.discardPile?.length, 'TOP:', payload.discardPile?.[payload.discardPile.length - 1]);
+    const discardTop = payload.discardTop ?? [];
+    logger.debug(`[STORE] SETTING GAME STATE. DISCARD COUNT:`, payload.discardCount, 'TOP:', discardTop[discardTop.length - 1]);
     set((state) => ({
-      playerCards: payload.hands,
-      discardPile: payload.discardPile,
+      playerCards: expandHands(payload.handCounts, payload.ownSeat ?? null, payload.hand ?? []),
+      discardPile: discardTop,
+      discardCount: payload.discardCount ?? discardTop.length,
       drawPileCount: payload.drawPileCount,
       currentPlayerId: payload.currentPlayerId,
       currentPlayerSeat: payload.currentPlayerSeat,
@@ -343,6 +411,7 @@ export const useGameStore = create<GameState>((set) => ({
     cameraMode: 'seated',
     playerCards: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
     discardPile: [],
+    discardCount: 0,
     drawPileCount: 52,
     selectedCardId: null,
     isProcessing: false,

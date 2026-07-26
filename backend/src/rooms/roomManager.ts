@@ -218,13 +218,29 @@ class RoomManager {
     return rest;
   }
 
+  /**
+   * Lobby-safe view of a room.
+   *
+   * Strips every private field before the object crosses the wire:
+   *  - each Player/Spectator `secret` (per-session reconnect token), and
+   *  - the entire `game` state.
+   *
+   * Dropping `game` matters for correctness, not just bandwidth: UnoGameState
+   * carries `hands` (every player's REAL cards) and `deck` (the full ordered
+   * draw pile). Because `lobby-updated` / `game-started` / `game-stopped` are
+   * room-wide broadcasts, spreading `...room` verbatim handed every client its
+   * opponents' hands and the deck order — bypassing the face-down masking that
+   * broadcastGameState is careful to apply. Authoritative game state reaches
+   * clients ONLY via broadcastGameState, which masks per recipient.
+   */
   public publicRoom(room: Room): Room {
+    const { game, ...rest } = room;
     return {
-      ...room,
+      ...rest,
       players: room.players.map((p) => this.publicPlayer(p) as Player),
       spectators: room.spectators?.map((s) => {
-        const { secret, ...rest } = s;
-        return rest as Spectator;
+        const { secret, ...specRest } = s;
+        return specRest as Spectator;
       }),
     };
   }

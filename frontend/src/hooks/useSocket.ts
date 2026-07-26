@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { useGameStore } from '../store/useGameStore';
+import { io, Socket, type ManagerOptions, type SocketOptions } from 'socket.io-client';
+import { useGameStore, type GameUpdatePayload } from '../store/useGameStore';
 import { CardColor, CardItem } from '../lib/cards/cardEngine';
 import { HouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
@@ -35,6 +35,38 @@ const loadSecret = (code: string, name: string): string | undefined => {
   }
 };
 
+// --- Transport strategy -----------------------------------------------------
+// Start on HTTP long-polling, then let Engine.IO silently upgrade to WebSocket
+// once it proves a WebSocket handshake actually succeeds.
+//
+// We previously pinned `transports: ['websocket']`. That skips the (small)
+// polling handshake on a healthy network, but it is fail-closed: on corporate
+// proxies, captive portals, school/hospital firewalls and some in-app browsers
+// that strip the `Upgrade` header, the WebSocket handshake never completes and
+// the client has no second option — the game is simply unreachable. Polling
+// first is fail-open: everyone connects, and the vast majority are upgraded to
+// a real WebSocket within a few hundred milliseconds, so steady-state gameplay
+// latency and bandwidth are unchanged.
+//
+// `upgrade: true` (the default, stated explicitly here so it can't be lost) is
+// what performs that handshake; `rememberUpgrade` then lets subsequent
+// connections in the same tab retry WebSocket immediately instead of paying for
+// the polling round trip again.
+const SOCKET_OPTIONS: Partial<ManagerOptions & SocketOptions> = {
+  autoConnect: false,
+  transports: ['polling', 'websocket'],
+  upgrade: true,
+  rememberUpgrade: true,
+  // Reconnection is Socket.IO's default-on behavior; spelled out so a future
+  // options change can't silently disable it. Backoff is capped so a client that
+  // dropped mid-round rejoins promptly rather than after a long exponential wait.
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+};
+
 // Global singleton socket instance to prevent duplicate socket connections
 let sharedSocket: Socket | null = null;
 let listenersAttached = false;
@@ -44,7 +76,7 @@ function setupSocketListeners(socketInstance: Socket) {
   listenersAttached = true;
 
   // Transition animator to compare incoming payload and trigger visual card flights
-  const handleGameUpdateAnimation = (payload: any) => {
+  const handleGameUpdateAnimation = (payload: GameUpdatePayload) => {
     const state = useGameStore.getState();
     
     // Play turn start chime if turn has shifted to a new player
@@ -58,18 +90,17 @@ function setupSocketListeners(socketInstance: Socket) {
     }
 
     const playersList = state.room?.players || [];
-    const isInitialLoad = state.gameStatus !== 'playing' || state.discardPile.length === 0;
+    const isInitialLoad = state.gameStatus !== 'playing' || state.discardCount === 0;
 
     if (isInitialLoad) {
       useGameStore.getState().setGameState(payload);
       return;
     }
 
-    // Play sound effects based on what changed
-    const oldDiscard: CardItem[] = state.discardPile;
-    const newDiscard: CardItem[] = payload.discardPile;
-    
-    if (newDiscard.length > oldDiscard.length) {
+    // Play sound effects based on what changed. Compare the authoritative pile
+    // SIZE, never `discardPile.length` — the local pile is a bounded window that
+    // stops growing once it saturates, which would silently mute this cue.
+    if (payload.discardCount > state.discardCount) {
       soundManager.play('card_play');
     }
 
@@ -77,9 +108,9 @@ function setupSocketListeners(socketInstance: Socket) {
     for (const player of playersList) {
       const seat = player.seatNumber;
       const oldHand: CardItem[] = state.playerCards[seat] || [];
-      const newHand: CardItem[] = payload.hands[seat] || [];
-      
-      if (newHand.length > oldHand.length && !drawSoundPlayed) {
+      const newHandSize: number = payload.handCounts?.[seat] ?? 0;
+
+      if (newHandSize > oldHand.length && !drawSoundPlayed) {
         // Play sound if local player or others draw
         soundManager.play('card_draw');
         drawSoundPlayed = true;
@@ -286,10 +317,7 @@ export const useSocket = () => {
   useEffect(() => {
     if (!sharedSocket) {
       logger.debug('SOCKET_CREATED');
-      sharedSocket = io(BACKEND_URL, {
-        autoConnect: false,
-        transports: ['websocket'],
-      });
+      sharedSocket = io(BACKEND_URL, SOCKET_OPTIONS);
       setupSocketListeners(sharedSocket);
     }
 

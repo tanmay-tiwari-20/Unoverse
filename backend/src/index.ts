@@ -26,6 +26,7 @@ import {
   CorsOriginResolver,
   ROOM_SWEEP_CONFIG,
   TURN_TIMER_RETRY_MS,
+  DISCARD_VISIBLE_COUNT,
 } from './config/serverConfig';
 import type { ZodType } from 'zod';
 import {
@@ -252,30 +253,31 @@ function broadcastGameState(code: string) {
     logger.debug(`  Player -> playerId: ${p.id}, socketId: ${p.id}, seat: ${p.seatNumber}, cards.length: ${game.hands[p.id]?.length || 0}`);
   });
   
-  // Face-down placeholder view of every hand, built ONCE per broadcast. This is
-  // both the spectator view and the base each player's own hand is merged over,
-  // so no recipient can ever see another player's actual cards.
-  const faceDownHands: Record<number, any[]> = {};
+  // Per-seat hand SIZES. Every hand except the recipient's own renders face-down,
+  // so the client needs only a count and synthesizes the placeholder cards
+  // locally. Previously we shipped one `{id,color:'wild',value:'wild'}` object per
+  // card in every hand (~64 bytes each; 2.7-5 KB per broadcast) to carry exactly
+  // the information a single integer per seat conveys.
+  const handCounts: Record<number, number> = {};
   room.players.forEach((p) => {
-    const actualHand = game.hands[p.id] || [];
-    faceDownHands[p.seatNumber] = actualHand.map((_c, idx) => ({
-      id: `${p.id}-back-${idx}`,
-      color: 'wild',
-      value: 'wild',
-    }));
+    handCounts[p.seatNumber] = (game.hands[p.id] || []).length;
   });
 
   const activeSeat = activePlayerObj ? activePlayerObj.seatNumber : 1;
   const winnerObj = game.winnerId ? room.players.find(p => p.id === game.winnerId) : null;
 
-  // One shared payload for every recipient (player or spectator); only `hands`
-  // (each player's own view) and `drawnCardId` (players only) are overridden per
-  // recipient. Keeping a single literal means a future game-state field can never
-  // reach players but silently miss spectators.
+  // One shared payload for every recipient (player or spectator); only `ownSeat` /
+  // `hand` (the recipient's own real cards) and `drawnCardId` (players only) are
+  // overridden per recipient. Keeping a single literal means a future game-state
+  // field can never reach players but silently miss spectators.
   const basePayload = {
-    roomCode: room.code,
-    hands: faceDownHands,
-    discardPile: game.discardPile,
+    handCounts,
+    // Only the VISIBLE top of the discard pile travels, never the round's full
+    // history. The client renders a stack of at most DISCARD_VISIBLE_COUNT cards
+    // and otherwise reads only the top card, so this is everything it can display
+    // — while keeping the payload O(1) instead of growing all round long.
+    discardTop: game.discardPile.slice(-DISCARD_VISIBLE_COUNT),
+    discardCount: game.discardPile.length,
     drawPileCount: game.deck.length,
     currentPlayerId: game.currentPlayerId,
     currentPlayerSeat: activeSeat,
@@ -302,8 +304,10 @@ function broadcastGameState(code: string) {
   room.players.forEach((targetPlayer) => {
     io.to(targetPlayer.id).emit('game-updated', {
       ...basePayload,
-      // The recipient sees their own real cards; everyone else stays face-down.
-      hands: { ...faceDownHands, [targetPlayer.seatNumber]: game.hands[targetPlayer.id] || [] },
+      // The recipient sees their own real cards; every other seat is a count that
+      // the client renders face-down.
+      ownSeat: targetPlayer.seatNumber,
+      hand: game.hands[targetPlayer.id] || [],
     });
   });
 
@@ -314,7 +318,7 @@ function broadcastGameState(code: string) {
   // Spectators observe the live game in real time — piles, turn order, counts and
   // action banners — with every hand face-down and no pending draw decision.
   room.spectators?.forEach((s) => {
-    io.to(s.id).emit('game-updated', { ...basePayload, drawnCardId: null });
+    io.to(s.id).emit('game-updated', { ...basePayload, ownSeat: null, hand: [], drawnCardId: null });
   });
 
   // Persist the room after every game-state broadcast. All in-game mutations
@@ -558,6 +562,16 @@ app.post('/api/rooms/join', (req, res) => {
 });
 
 // --- Socket.IO Server Setup ---
+// Transports are left at the Socket.IO default (`['polling', 'websocket']`) on
+// purpose. Clients open on HTTP long-polling and upgrade to WebSocket once the
+// handshake succeeds, so users behind proxies/firewalls that strip the `Upgrade`
+// header can still play instead of failing to connect at all. GET *and* POST are
+// allowed through CORS because the polling transport needs both.
+//
+// Operational note: because a connection begins as polling, multi-instance
+// deployments need sticky sessions at the load balancer so every request of a
+// given handshake reaches the same process (this is the same requirement the
+// Redis adapter note below describes).
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {

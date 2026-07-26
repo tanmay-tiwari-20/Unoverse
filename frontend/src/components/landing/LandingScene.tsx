@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from '../table/RoomEnvironment';
 import { PhysicalCard } from '../cards/PhysicalCard';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { ErrorBoundary } from '../providers/ErrorBoundary';
 
 /**
  * Premium 3D background for the landing page.
@@ -80,9 +81,15 @@ const LandingSceneContent: React.FC = () => {
 
 export const LandingScene: React.FC = () => {
   return (
-    <RoomEnvironment numPlayers={2} localIndex={0} isLandingPage={true}>
-      <LandingSceneContent />
-    </RoomEnvironment>
+    // The landing scene is pure decoration behind the join form. If WebGL is
+    // unavailable or the scene throws, render nothing at all — the form's own
+    // background is already sufficient, and a visible error here would be worse
+    // than the missing ambience.
+    <ErrorBoundary section="Landing Scene" fallback={null}>
+      <RoomEnvironment numPlayers={2} localIndex={0} isLandingPage={true}>
+        <LandingSceneContent />
+      </RoomEnvironment>
+    </ErrorBoundary>
   );
 };
 

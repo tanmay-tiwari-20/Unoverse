@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useGameStore } from '../../store/useGameStore';
+import { useGameStore, DISCARD_VISIBLE_COUNT } from '../../store/useGameStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useSocket } from '../../hooks/useSocket';
 import { PhysicalCard } from '../cards/PhysicalCard';
@@ -67,6 +67,7 @@ export const WebGLCards: React.FC = () => {
   const currentPlayerId = useGameStore((state) => state.currentPlayerId);
   const playerCards = useGameStore((state) => state.playerCards);
   const discardPile = useGameStore((state) => state.discardPile);
+  const discardCount = useGameStore((state) => state.discardCount);
   const drawPileCount = useGameStore((state) => state.drawPileCount);
   const gameStatus = useGameStore((state) => state.gameStatus);
   const isProcessing = useGameStore((state) => state.isProcessing);
@@ -108,9 +109,11 @@ export const WebGLCards: React.FC = () => {
     <group>
       {/* 1. DISCARD PILE (RIGHT SIDE) */}
       <group position={[0.3, 0.896, 0]}>
-        {discardPile.slice(-10).map((card, sliceIdx, arr) => {
-          // sliceIdx is 0 to 3. idx should be the actual index for pseudo-randomness
-          const actualIdx = discardPile.length - arr.length + sliceIdx;
+        {discardPile.slice(-DISCARD_VISIBLE_COUNT).map((card, sliceIdx, arr) => {
+          // `discardPile` is only the visible window of the pile, so the card's
+          // real depth (which drives both its stacked height and its stable
+          // pseudo-random jitter) comes from the authoritative total.
+          const actualIdx = discardCount - arr.length + sliceIdx;
           const isTop = sliceIdx === arr.length - 1;
           const randAngle = (Math.sin(actualIdx * 12.9898) * 43758.5453) % 1;
           const randRot = (Math.cos(actualIdx * 78.233) * 43758.5453) % 1;

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { getReducedMotionPreference } from '../hooks/useReducedMotion';
+import type { QualityTier } from '../lib/quality/qualityTiers';
 
 interface SettingsState {
   // UI State (Not persisted)
@@ -23,7 +24,24 @@ interface SettingsState {
   vfxQuality: 'low' | 'medium' | 'high';
   postProcessing: boolean;
   performanceMode: boolean;
-  
+  /**
+   * Master switch for automatic graphics scaling. When on, the renderer watches
+   * sustained framerate and lowers quality on devices that can't keep up (and
+   * restores it when they can). Off = the manual settings above are used exactly
+   * as written, however the game runs.
+   */
+  adaptiveQuality: boolean;
+
+  /**
+   * Tier chosen by the adaptive monitor. Runtime-only — deliberately NOT
+   * persisted, because it describes how the device is coping *right now* (which
+   * changes with thermal state, battery saver, other tabs) and must never be
+   * restored as though it were a user preference. It acts as a ceiling combined
+   * with the manual settings in `useEffectiveQuality`; it can lower quality
+   * below the user's choice but never raise it above.
+   */
+  autoTier: QualityTier;
+
   cardAnimations: boolean;
   cameraMotion: boolean;
   cameraSensitivity: number;
@@ -49,7 +67,9 @@ interface SettingsState {
   setVfxQuality: (quality: 'low' | 'medium' | 'high') => void;
   setPostProcessing: (enabled: boolean) => void;
   setPerformanceMode: (enabled: boolean) => void;
-  
+  setAdaptiveQuality: (enabled: boolean) => void;
+  setAutoTier: (tier: QualityTier) => void;
+
   setCardAnimations: (enabled: boolean) => void;
   setCameraMotion: (enabled: boolean) => void;
   setCameraSensitivity: (sens: number) => void;
@@ -80,7 +100,12 @@ export const useSettingsStore = create<SettingsState>()(
       vfxQuality: 'high',
       postProcessing: true,
       performanceMode: false,
-      
+      adaptiveQuality: true,
+      // Optimistic start: assume the device can handle the full scene, and let
+      // the monitor step down within a few seconds if it can't. Starting low and
+      // climbing would make every capable device look bad for its first seconds.
+      autoTier: 'high',
+
       cardAnimations: true,
       cameraMotion: true,
       cameraSensitivity: 50,
@@ -108,7 +133,14 @@ export const useSettingsStore = create<SettingsState>()(
       setVfxQuality: (quality) => set({ vfxQuality: quality }),
       setPostProcessing: (enabled) => set({ postProcessing: enabled }),
       setPerformanceMode: (enabled) => set({ performanceMode: enabled }),
-      
+      setAdaptiveQuality: (enabled) => set({
+        adaptiveQuality: enabled,
+        // Turning auto-scaling off must not leave a downgrade stuck in place —
+        // release the ceiling so the manual settings take effect immediately.
+        ...(enabled ? {} : { autoTier: 'high' as QualityTier }),
+      }),
+      setAutoTier: (tier) => set({ autoTier: tier }),
+
       setCardAnimations: (enabled) => set({ cardAnimations: enabled }),
       setCameraMotion: (enabled) => set({ cameraMotion: enabled }),
       setCameraSensitivity: (sens) => set({ cameraSensitivity: sens }),
@@ -129,6 +161,9 @@ export const useSettingsStore = create<SettingsState>()(
         vfxQuality: state.vfxQuality,
         postProcessing: state.postProcessing,
         performanceMode: state.performanceMode,
+        adaptiveQuality: state.adaptiveQuality,
+        // NOTE: `autoTier` is intentionally absent — it is live device state,
+        // not a preference. See its declaration above.
         cardAnimations: state.cardAnimations,
         cameraMotion: state.cameraMotion,
         cameraSensitivity: state.cameraSensitivity,

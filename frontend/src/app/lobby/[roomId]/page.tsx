@@ -1,388 +1,96 @@
-'use client';
+"use client";
 
-import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useSearchParams, useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
-import { useSocket } from '../../../hooks/useSocket';
-import { useGameStore } from '../../../store/useGameStore';
-import { ReactionsHandler } from '../../../components/social/ReactionsHandler';
-import { ChatPanel } from '../../../components/social/ChatPanel';
-import { getSeatCoords } from '../../../utils/seating';
-import {
-  getMaxPlayers,
-  getSpectatorCount,
-  getMaxSpectators,
-  isRoomFull,
-  isRoomCompletelyFull,
-} from '../../../utils/capacity';
-import { TurnGlowIndicator } from '../../../components/table/TurnGlowIndicator';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Copy,
-  Check,
-  LogOut,
-  ShieldAlert,
-  Volume2,
-  VolumeX,
-  Mic,
-  MicOff,
-  Headphones,
-  Settings,
-  Pause,
-  X,
-  Trophy,
-  Star,
-  Siren,
-  PartyPopper,
-  Medal,
-  Award,
-  RefreshCw,
-  Hourglass,
-  Info,
-  CheckCircle2,
-  AlertTriangle,
-  Play,
-  WifiOff,
-  ScrollText,
-  Gavel,
-  ArrowLeftRight,
-  MessageCircle,
-  Eye,
-  Share2,
-  Users,
-  Bot,
-  Plus,
-  Minus
-} from 'lucide-react';
-import { getCardColorHex, getCardValueLabel, isValidMove } from '../../../lib/cards/cardEngine';
-import { summarizeActiveRules } from '../../../lib/houseRules';
-import { PlayerNameplates } from '../../../components/table/PlayerNameplates';
-import { TurnTimer } from '../../../components/table/TurnTimer';
-import { SettingsModal } from '../../../components/ui/SettingsModal';
-import { HouseRulesModal } from '../../../components/ui/HouseRulesModal';
-import { HelpModals } from '../../../components/ui/HelpModals';
-import { RoomRoster } from '../../../components/ui/RoomRoster';
-import { FPSCounter } from '../../../components/ui/FPSCounter';
-import { useVoiceChat } from '../../../hooks/useVoiceChat';
-import { useVoiceStore } from '../../../store/useVoiceStore';
-import { useSettingsStore } from '../../../store/useSettingsStore';
-import { useDialogA11y } from '../../../hooks/useDialogA11y';
-
-// Mini UNO cards used in the loader's shuffle animation
-const SHUFFLE_CARDS = [
-  { color: '#ef4444', label: '7' },   // red
-  { color: '#eab308', label: '+2' },  // yellow
-  { color: '#22c55e', label: 'W' },   // green
-  { color: '#3b82f6', label: '4' },   // blue
-  { color: '#ef4444', label: '+4' },   // red
-];
-
-// A single mini UNO card face
-const MiniUnoCard: React.FC<{ color: string; label: string }> = ({ color, label }) => (
-  <div
-    className="w-full h-full rounded-xl border-[3px] border-white shadow-[0_8px_16px_rgba(0,0,0,0.45)] flex items-center justify-center p-1"
-    style={{ background: color }}
-  >
-    <div className="w-full h-full rounded-lg border border-black/10 flex items-center justify-center overflow-hidden">
-      {/* White oval badge with the value, classic UNO style */}
-      <div className="w-[78%] h-[58%] bg-white rounded-[999px] flex items-center justify-center -rotate-12 shadow-inner">
-        <span className="font-arcade text-lg leading-none" style={{ color }}>
-          {label}
-        </span>
-      </div>
-    </div>
-  </div>
-);
-
-// Gamified loader: a deck of UNO cards riffle-shuffling in a loop
-const PremiumLoader: React.FC<{ message: string; submessage?: string }> = ({ message, submessage }) => {
-  const cycle = 2.6; // seconds for one full shuffle loop
-  return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center arcade-bg arcade-dots text-slate-100 gap-8 z-[999] overflow-hidden select-none">
-      {/* Rotating festive glow rings behind the deck */}
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ repeat: Infinity, duration: 14, ease: 'linear' }}
-        className="absolute w-[420px] h-[420px] rounded-full blur-[70px] pointer-events-none opacity-50"
-        style={{
-          background:
-            'conic-gradient(from 0deg, #ef4444, #eab308, #22c55e, #3b82f6, #ef4444)',
-        }}
-      />
-
-      {/* Shuffling Deck */}
-      <div className="relative w-44 h-40 flex items-center justify-center">
-        {SHUFFLE_CARDS.map((card, i) => {
-          const baseX = (i - (SHUFFLE_CARDS.length - 1) / 2) * 6;
-          const baseRot = (i - (SHUFFLE_CARDS.length - 1) / 2) * 5;
-          const delay = (i * cycle) / SHUFFLE_CARDS.length;
-          return (
-            <motion.div
-              key={i}
-              className="absolute w-[4.5rem] h-[6.5rem]"
-              style={{ transformOrigin: 'bottom center' }}
-              animate={{
-                x: [baseX, baseX + 96, baseX - 96, baseX],
-                y: [0, -56, -20, 0],
-                rotate: [baseRot, 22, -16, baseRot],
-                scale: [1, 1.12, 1.06, 1],
-                zIndex: [i, 60, 30, i],
-              }}
-              transition={{
-                duration: cycle,
-                times: [0, 0.4, 0.7, 1],
-                repeat: Infinity,
-                ease: 'easeInOut',
-                delay,
-              }}
-            >
-              <MiniUnoCard color={card.color} label={card.label} />
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Message and Submessage */}
-      <div className="text-center space-y-2.5 relative z-10 px-6">
-        <h2 className="font-arcade text-2xl text-yellow-400 uppercase tracking-wide arcade-stroke-uno-sm flex items-center justify-center gap-1">
-          <span>{message}</span>
-          {/* Bouncing dots */}
-          <span className="inline-flex gap-1 ml-0.5">
-            {[0, 1, 2].map((d) => (
-              <motion.span
-                key={d}
-                className="w-1.5 h-1.5 rounded-full bg-yellow-300 inline-block"
-                animate={{ y: [0, -6, 0], opacity: [0.4, 1, 0.4] }}
-                transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut', delay: d * 0.15 }}
-              />
-            ))}
-          </span>
-        </h2>
-        {submessage && (
-          <p className="font-rounded text-cyan-200 text-xs font-bold uppercase tracking-wider">
-            {submessage}
-          </p>
-        )}
-      </div>
-
-      {/* Chunky arcade progress bar */}
-      <div className="w-56 h-3 bg-black/50 rounded-full overflow-hidden relative border-[3px] border-white/70 shadow-[0_4px_0_0_rgba(0,0,0,0.35)]">
-        <motion.div
-          animate={{ x: ['-100%', '320%'] }}
-          transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
-          className="absolute inset-y-0 w-1/3 rounded-full"
-          style={{
-            background:
-              'linear-gradient(90deg, transparent, #ef4444, #eab308, #22c55e, #3b82f6, transparent)',
-          }}
-        />
-      </div>
-    </div>
-  );
-};
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+import { useSocket } from "../../../hooks/useSocket";
+import { useVoiceChat } from "../../../hooks/useVoiceChat";
+import { useChatEnabled } from "../../../hooks/useChatEnabled";
+import { useGameStore } from "../../../store/useGameStore";
+import { ErrorBoundary } from "../../../components/providers/ErrorBoundary";
+import { ReactionsHandler } from "../../../components/social/ReactionsHandler";
+import { ChatPanel } from "../../../components/social/ChatPanel";
+import { PlayerNameplates } from "../../../components/table/PlayerNameplates";
+import { TurnGlowIndicator } from "../../../components/table/TurnGlowIndicator";
+import { SettingsModal } from "../../../components/ui/SettingsModal";
+import { HouseRulesModal } from "../../../components/ui/HouseRulesModal";
+import { HelpModals } from "../../../components/ui/HelpModals";
+import { FPSCounter } from "../../../components/ui/FPSCounter";
+import { PremiumLoader } from "../../../components/lobby/PremiumLoader";
+import { JoinStatusScreen } from "../../../components/lobby/JoinStatusScreen";
+import { ConnectionOverlay } from "../../../components/lobby/ConnectionOverlay";
+import { ToastStack } from "../../../components/lobby/ToastStack";
+import { LobbyHeader } from "../../../components/lobby/LobbyHeader";
+import { GameHUD } from "../../../components/lobby/GameHUD";
+import { GameStoppedNotice } from "../../../components/lobby/GameStoppedNotice";
+import { WinnerOverlay } from "../../../components/lobby/WinnerOverlay";
+import { ColorPickerDialog } from "../../../components/lobby/ColorPickerDialog";
+import { SwapTargetDialog } from "../../../components/lobby/SwapTargetDialog";
+import { EndOfRound } from "../../../components/lobby/EndOfRound";
+import { InviteModal } from "../../../components/lobby/InviteModal";
 
 // Dynamically import full-screen 2.5D Table Scene with SSR disabled
 const TableScene = dynamic(
-  () => import('../../../components/table/TableScene').then((mod) => mod.TableScene),
-  { 
+  () =>
+    import("../../../components/table/TableScene").then(
+      (mod) => mod.TableScene,
+    ),
+  {
     ssr: false,
-    loading: () => <PremiumLoader message="Drawing Card Table..." submessage="Aligning table felt & wood grain..." />
-  }
+    loading: () => (
+      <PremiumLoader
+        message="Drawing Card Table..."
+        submessage="Aligning table felt & wood grain..."
+      />
+    ),
+  },
 );
 
-// High-performance canvas confetti particle effect
-const ConfettiCanvas: React.FC = () => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let animationId: number;
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
-
-    const handleResize = () => {
-      if (canvas) {
-        width = canvas.width = window.innerWidth;
-        height = canvas.height = window.innerHeight;
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
-    const colors = ['#ef4444', '#3b82f6', '#10b981', '#eab308', '#a855f7', '#ff7849'];
-    const particles = Array.from({ length: 140 }).map(() => ({
-      x: Math.random() * width,
-      y: Math.random() * height - height,
-      r: Math.random() * 6 + 4,
-      d: Math.random() * height,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      tilt: Math.random() * 10 - 5,
-      tiltAngleIncremental: Math.random() * 0.07 + 0.02,
-      tiltAngle: 0,
-    }));
-
-    const draw = () => {
-      ctx.clearRect(0, 0, width, height);
-
-      particles.forEach((p, idx) => {
-        p.tiltAngle += p.tiltAngleIncremental;
-        p.y += (Math.cos(p.d) + 3 + p.r / 2) / 2;
-        p.x += Math.sin(p.tiltAngle);
-        p.tilt = Math.sin(p.tiltAngle - idx / 3) * 15;
-
-        ctx.beginPath();
-        ctx.lineWidth = p.r;
-        ctx.strokeStyle = p.color;
-        ctx.moveTo(p.x + p.tilt + p.r / 2, p.y);
-        ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r / 2);
-        ctx.stroke();
-
-        if (p.y > height) {
-          particles[idx] = {
-            ...p,
-            x: Math.random() * width,
-            y: -20,
-            tilt: Math.random() * 10 - 5,
-          };
-        }
-      });
-
-      animationId = requestAnimationFrame(draw);
-    };
-
-    draw();
-
-    return () => {
-      cancelAnimationFrame(animationId);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-10 w-full h-full" />;
-};
-
+/**
+ * Room route.
+ *
+ * This component owns only what is genuinely route-scoped: the room/name from
+ * the URL, joining and leaving, the single mount points for the socket and the
+ * WebRTC voice mesh, and the layer order of the screen. Every panel, banner and
+ * dialog below reads what it needs straight from the authoritative game store,
+ * so nothing here has to thread game state through props.
+ *
+ * Each independent region sits behind its own ErrorBoundary: a crash in chat,
+ * reactions or a dialog is contained to that region and leaves the socket,
+ * the table and the rest of the HUD running.
+ */
 export default function LobbyPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
-  
-  const roomId = params?.roomId as string;
-  const name = searchParams?.get('name');
 
-  const {
-    socket,
-    joinRoom,
-    leaveRoom,
-    startGame,
-    addBots,
-    removeBot,
-    playCard,
-    chooseColor,
-    callUno,
-    drawCard,
-    passTurn,
-    chooseSwapTarget,
-    challengeWildFour
-  } = useSocket();
+  const roomId = params?.roomId as string;
+  const name = searchParams?.get("name");
+
+  const { socket, joinRoom } = useSocket();
+  // The voice mesh must be mounted exactly once, for the whole life of the
+  // route — it is signalled over the game socket and rebuilds every peer
+  // connection when it remounts. Hence: here, not inside the HUD button.
+  const { toggleMic } = useVoiceChat();
 
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
   const error = useGameStore((state) => state.error);
   const setError = useGameStore((state) => state.setError);
-  const connectionStatus = useGameStore((state) => state.connectionStatus);
-  const playerCards = useGameStore((state) => state.playerCards);
-  const discardPile = useGameStore((state) => state.discardPile);
-  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
-  const currentPlayerSeat = useGameStore((state) => state.currentPlayerSeat);
-  const direction = useGameStore((state) => state.direction);
-  const wildColor = useGameStore((state) => state.wildColor);
-  const gameStatus = useGameStore((state) => state.gameStatus);
-  const colorChooserId = useGameStore((state) => state.colorChooserId);
-  const winnerId = useGameStore((state) => state.winnerId);
-  const winnerName = useGameStore((state) => state.winnerName);
-  const unoCalled = useGameStore((state) => state.unoCalled);
-  const drawStack = useGameStore((state) => state.drawStack);
-  const pendingDrawType = useGameStore((state) => state.pendingDrawType);
-  const drawnCardId = useGameStore((state) => state.drawnCardId);
-  const swapChooserId = useGameStore((state) => state.swapChooserId);
-  const challengeableById = useGameStore((state) => state.challengeableById);
-  const houseRules = useGameStore((state) => state.houseRules);
-  const match = useGameStore((state) => state.match);
   const clearAllCards = useGameStore((state) => state.clearAllCards);
-  const isProcessing = useGameStore((state) => state.isProcessing);
-  const setIsProcessing = useGameStore((state) => state.setIsProcessing);
   const isSpectator = useGameStore((state) => state.isSpectator);
-  const toasts = useGameStore((state) => state.toasts);
-  const addToast = useGameStore((state) => state.addToast);
-  const removeToast = useGameStore((state) => state.removeToast);
-  const tableTheme = useGameStore((state) => state.tableTheme);
-  const setTableTheme = useGameStore((state) => state.setTableTheme);
-  const isMuted = useGameStore((state) => state.isMuted);
-  const toggleMute = useGameStore((state) => state.toggleMute);
-  const gameStoppedNotice = useGameStore((state) => state.gameStoppedNotice);
-  const setGameStoppedNotice = useGameStore((state) => state.setGameStoppedNotice);
+  const gameStatus = useGameStore((state) => state.gameStatus);
   const isChatOpen = useGameStore((state) => state.isChatOpen);
   const setChatOpen = useGameStore((state) => state.setChatOpen);
-  const unreadChatCount = useGameStore((state) => state.unreadChatCount);
 
-  // Table Chat is a host-configurable house rule. When disabled we hide the chat
-  // button + panel entirely (the server also rejects chat). Reactions stay on.
-  const chatEnabled = (room?.houseRules ?? houseRules)?.enableChat !== false;
+  const chatEnabled = useChatEnabled();
 
-  const { toggleMic } = useVoiceChat();
-  const { isMicEnabled, isSpeakerEnabled, setSpeakerEnabled } = useVoiceStore();
-  const { setIsSettingsOpen, setIsHouseRulesOpen } = useSettingsStore();
-  
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-
-  const handleCopyCodeOnly = () => {
-    if (!roomId) return;
-    navigator.clipboard.writeText(roomId.toUpperCase());
-    setCopiedCode(true);
-    addToast('Lobby code copied!', 'success');
-    setTimeout(() => setCopiedCode(false), 2000);
-  };
-
-  const handleCopyLinkOnly = () => {
-    if (!roomId) return;
-    const inviteLink = `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
-    navigator.clipboard.writeText(inviteLink);
-    setCopiedLink(true);
-    addToast('Invitation link copied!', 'success');
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
-  const handleShareLink = async () => {
-    if (!roomId) return;
-    const inviteLink = `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
-    
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Join my Unoverse Table!',
-          text: `Join my Unoverse table! Room Code: ${roomId.toUpperCase()}`,
-          url: inviteLink,
-        });
-      } catch (err) {
-        console.error('Error sharing:', err);
-      }
-    } else {
-      navigator.clipboard.writeText(inviteLink);
-      addToast('Link copied to clipboard for sharing!', 'success');
-    }
-  };
-
-  const [debugMode, setDebugMode] = useState(false);
 
   // Redirect back if name query parameter is missing
   useEffect(() => {
     if (!name) {
-      router.replace('/');
+      router.replace("/");
     }
   }, [name, router]);
 
@@ -394,10 +102,10 @@ export default function LobbyPage() {
 
   // Auto-redirect if room no longer exists
   useEffect(() => {
-    if (error === 'Room not found' || error === 'This room no longer exists') {
+    if (error === "Room not found" || error === "This room no longer exists") {
       const timer = setTimeout(() => {
         setError(null);
-        router.push('/');
+        router.push("/");
       }, 4000);
       return () => clearTimeout(timer);
     }
@@ -406,1008 +114,111 @@ export default function LobbyPage() {
   // Connect socket and join room seating list
   useEffect(() => {
     if (!roomId || !name || !socket) return;
-    
+
     joinRoom(roomId, name);
 
     return () => {
       clearAllCards();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, name, socket]);
-
-  // Keydown listener to toggle socket debug panel (Ctrl + Shift + D)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        setDebugMode((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-
-
-  const isHost = player?.isHost || false;
-  const totalPlayers = room?.players.length || 0;
-  const humanPlayers = room?.players.filter((p) => !p.isBot) ?? [];
-  const botPlayers = room?.players.filter((p) => p.isBot) ?? [];
-  const canStart = totalPlayers >= 2;
-  // Active-player capacity comes from the authoritative room config (house rules),
-  // derived through the shared helpers so every surface shows the same numbers.
-  const maxPlayers = getMaxPlayers(room, houseRules);
-  const spectatorCount = getSpectatorCount(room);
-  const maxSpectators = getMaxSpectators(room, houseRules);
-  const roomIsFull = isRoomFull(room, houseRules);
-  const roomCompletelyFull = isRoomCompletelyFull(room, houseRules);
-  
-  const localSeatNumber = player?.seatNumber || 1;
-  const myHand = playerCards[localSeatNumber] || [];
-
-  const isMyTurn = currentPlayerId === player?.id && gameStatus === 'playing';
-
-  // ---- Accessibility: game-driven overlays behave as modal dialogs ----------
-  // These are forced choices (color / swap), so Escape must NOT dismiss them —
-  // but focus is still moved in, trapped, and restored when they resolve.
-  const colorDialogRef = useRef<HTMLDivElement>(null);
-  const swapDialogRef = useRef<HTMLDivElement>(null);
-  const isColorPromptOpen = gameStatus === 'awaiting_color_selection' && !!player && colorChooserId === player.id;
-  const isSwapPromptOpen = gameStatus === 'awaiting_swap_target' && !!player && swapChooserId === player.id;
-  useDialogA11y(colorDialogRef, isColorPromptOpen, undefined, { closeOnEscape: false });
-  useDialogA11y(swapDialogRef, isSwapPromptOpen, undefined, { closeOnEscape: false });
-
-  // End-of-round summary is a modal dialog (not dismissible — the host advances).
-  const endDialogRef = useRef<HTMLDivElement>(null);
-  useDialogA11y(endDialogRef, gameStatus === 'ended', undefined, { closeOnEscape: false });
-
-  // Find winner coordinates for localized spotlight render
-  const getWinnerCoords = () => {
-    const winnerPlayer = room?.players.find(p => p.id === winnerId);
-    if (!winnerPlayer || !room) return { left: '50%', top: '50%' };
-    const playerIndex = room.players.findIndex(p => p.id === winnerId);
-    if (playerIndex !== -1) {
-      const localIndex = room.players.findIndex(p => p.id === player?.id);
-      const visualSlotIndex = (playerIndex - (localIndex !== -1 ? localIndex : 0) + room.players.length) % room.players.length;
-      return getSeatCoords(visualSlotIndex, 0, room.players.length);
-    }
-    return getSeatCoords(winnerPlayer.seatNumber, localSeatNumber, 6);
-  };
-  const winnerCoords = getWinnerCoords();
-  const winnerPlayerObj = room?.players.find(p => p.id === winnerId);
-
-  // Calculate final leaderboard standings at ended status
-  const getStandings = () => {
-    if (!room) return [];
-    return [...room.players]
-      .map((p) => {
-        const count = playerCards[p.seatNumber]?.length || 0;
-        return { name: p.name, id: p.id, cardCount: count };
-      })
-      .sort((a, b) => a.cardCount - b.cardCount);
-  };
-  const standings = getStandings();
-
-  // Match scoreboard (cumulative points across rounds), highest first. Scores are
-  // keyed by lowercased name on the server so they survive reconnects.
-  const getScoreboard = () => {
-    if (!match) return [];
-    return Object.entries(match.scores)
-      .map(([nameKey, score]) => {
-        const p = room?.players.find((pl) => pl.name.toLowerCase() === nameKey);
-        return { nameKey, name: p?.name ?? nameKey, id: p?.id ?? nameKey, score };
-      })
-      .sort((a, b) => b.score - a.score);
-  };
-  const scoreboard = getScoreboard();
 
   // Render connection/error loading states
   if (!room || (!player && !isSpectator)) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 min-h-screen arcade-bg arcade-dots">
-        <div className="text-center max-w-sm flex flex-col items-center gap-4">
-          {error ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="panel-arcade bg-gradient-to-b from-rose-600 to-red-800 p-6 flex flex-col items-center gap-4"
-            >
-              <ShieldAlert className="text-yellow-300 animate-bounce" size={48} />
-              <h2 className="font-arcade text-2xl uppercase tracking-wide text-white arcade-stroke-sm">Join Failed</h2>
-              <p className="font-rounded text-white/90 text-sm leading-relaxed font-semibold">
-                {error === 'Room not found' ? 'This room no longer exists' : error}
-              </p>
-              {(error === 'Room not found' || error === 'This room no longer exists') && (
-                <p className="font-rounded text-[11px] text-yellow-200 font-bold uppercase tracking-wider animate-pulse">
-                  Redirecting to home page shortly...
-                </p>
-              )}
-              <button
-                onClick={() => {
-                  setError(null);
-                  router.push('/');
-                }}
-                className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase"
-              >
-                Return Home
-              </button>
-            </motion.div>
-          ) : (
-            <PremiumLoader 
-              message="Connecting to Lobby..." 
-              submessage={`Status: ${connectionStatus.toUpperCase()} • Syncing seating slots...`} 
-            />
-          )}
-        </div>
-      </div>
-    );
+    return <JoinStatusScreen />;
   }
 
   return (
     <div className="w-screen h-screen-dvh flex flex-col bg-slate-950 text-slate-100 select-none overflow-hidden relative">
-      
       {/* Reactions Layer Overlay */}
-      <ReactionsHandler />
+      <ErrorBoundary section="Reactions" fallback={null}>
+        <ReactionsHandler />
+      </ErrorBoundary>
 
       {/* Connection Status Banner/Overlay */}
-      {connectionStatus !== 'connected' && (
-        <div className="absolute inset-0 z-[3000] flex flex-col items-center justify-center bg-black/75 backdrop-blur-md pointer-events-auto">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-8 flex flex-col items-center gap-5 text-center max-w-sm"
-          >
-            <div className="relative flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 border-2 border-red-500/30 text-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
-              <WifiOff size={28} className="animate-pulse" />
-              <motion.span
-                className="absolute inset-0 rounded-full border-2 border-red-500"
-                animate={{ scale: [1, 1.4, 1], opacity: [1, 0, 1] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
-              />
-            </div>
-            <div>
-              <h3 className="font-arcade text-xl uppercase tracking-wide text-red-500 arcade-stroke-sm">
-                Connection Lost
-              </h3>
-              <p className="font-rounded font-bold text-white/90 text-xs mt-2 leading-relaxed">
-                Attempting to reconnect to game server...
-              </p>
-              <p className="font-rounded text-[10px] text-slate-400 mt-1 font-mono uppercase">
-                Status: {connectionStatus.toUpperCase()}
-              </p>
-            </div>
-            {/* Chunky arcade progress indicator */}
-            <div className="w-40 h-2 bg-neutral-800 rounded-full overflow-hidden relative border-2 border-white/20">
-              <motion.div
-                animate={{ x: ['-100%', '250%'] }}
-                transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
-                className="absolute inset-y-0 w-1/3 bg-red-500 rounded-full shadow-[0_0_8px_#ef4444]"
-              />
-            </div>
-          </motion.div>
-        </div>
-      )}
+      <ConnectionOverlay />
 
       {/* Voice Chat Player Nameplates */}
-      <PlayerNameplates />
+      <ErrorBoundary section="Voice Nameplates" fallback={null}>
+        <PlayerNameplates />
+      </ErrorBoundary>
 
-      {/* Premium Settings Modal */}
-      <SettingsModal />
-
-      {/* House Rules Configuration Modal */}
-      <HouseRulesModal />
+      {/* Premium Settings + House Rules Configuration modals. Grouped: both are
+          optional menus, and neither is on the path to playing a card. */}
+      <ErrorBoundary section="Menus" fallback={null}>
+        <SettingsModal />
+        <HouseRulesModal />
+      </ErrorBoundary>
 
       {/* Real-time Table Chat (desktop side panel / mobile bottom sheet).
           Not mounted when the host has disabled Table Chat. */}
-      {chatEnabled && <ChatPanel />}
+      {chatEnabled && (
+        <ErrorBoundary section="Table Chat" fallback={null}>
+          <ChatPanel />
+        </ErrorBoundary>
+      )}
 
       {/* Help & Utility Modals */}
-      <HelpModals />
+      <ErrorBoundary section="Help" fallback={null}>
+        <HelpModals />
+      </ErrorBoundary>
       <FPSCounter />
 
-
-
       {/* Toast Notifications Container */}
-      <div
-        className="fixed top-16 sm:top-4 right-2 sm:right-4 z-[999] flex flex-col gap-2 pointer-events-none max-w-[72vw] sm:max-w-sm w-full safe-x"
-        role="status"
-        aria-live="polite"
-        aria-atomic="false"
-      >
-        <AnimatePresence>
-          {toasts.map((toast) => (
-            <motion.div
-              key={toast.id}
-              initial={{ opacity: 0, y: -20, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.9, transition: { duration: 0.2 } }}
-              className={`pointer-events-auto flex items-center justify-between p-3.5 rounded-2xl shadow-[0_5px_0_0_rgba(0,0,0,0.3)] border-[3px] ${
-                toast.type === 'error'
-                  ? 'bg-gradient-to-b from-rose-500 to-red-700 border-white text-white'
-                  : toast.type === 'success'
-                    ? 'bg-gradient-to-b from-lime-400 to-green-600 border-white text-white'
-                    : 'bg-gradient-to-b from-blue-500 to-blue-700 border-white text-white'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="shrink-0 leading-none select-none">
-                  {toast.type === 'error'
-                    ? <AlertTriangle size={15} />
-                    : toast.type === 'success'
-                      ? <CheckCircle2 size={15} />
-                      : <Info size={15} />}
-                </span>
-                <span className="font-rounded text-[11px] font-bold tracking-wide leading-tight">
-                  {toast.message}
-                </span>
-              </div>
-              <button
-                onClick={() => removeToast(toast.id)}
-                className="text-white/70 hover:text-white transition-colors ml-4"
-                aria-label="Dismiss notification"
-              >
-                <X size={13} />
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      <ToastStack />
 
       {/* =================================================================== */}
       {/* FULL SCREEN - Virtual Card Table Viewport                           */}
       {/* =================================================================== */}
       <div className="w-full h-full relative">
-        
         {/* Full-screen Table Scene */}
         <div className="w-full h-full absolute inset-0 z-0">
           <TableScene />
         </div>
 
         {/* Winner Highlight Spotlight Overlay */}
-        {gameStatus === 'ended' && winnerPlayerObj && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.8 }}
-            className="absolute inset-0 pointer-events-none z-10"
-            style={{
-              background: `radial-gradient(circle 200px at ${winnerCoords.left} ${winnerCoords.top}, transparent 10%, rgba(3, 7, 18, 0.88) 100%)`
-            }}
-          />
-        )}
+        <WinnerOverlay />
 
         {/* HUD: Overlay Top Header Panel */}
-        <header className="absolute top-0 left-0 right-0 hud-pad flex justify-between items-start z-20 pointer-events-none gap-2">
-          {/* Top Left: Compact Lobby Panel + Roster */}
-          {room && (
-            <div className="pointer-events-auto flex flex-col items-start gap-1.5">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <button
-                  onClick={() => setIsInviteModalOpen(true)}
-                  className="group chip-arcade flex items-center gap-1.5 sm:gap-2 bg-gradient-to-b from-neutral-800 to-black hover:border-yellow-400 px-2.5 py-1.5 sm:px-3.5 sm:py-2 cursor-pointer transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
-                  title="Invite Friends"
-                  aria-label={`Room code ${room.code}. Open invitation options`}
-                >
-                  <span className="font-arcade text-[10px] sm:text-xs text-white tracking-wider whitespace-nowrap">
-                    <span className="text-yellow-300 uppercase tracking-widest mr-1 opacity-90">Invite</span>
-                    {room.code}
-                  </span>
-                  <div className="transition-colors ml-0.5 sm:ml-1 text-white/80 group-hover:text-yellow-300">
-                    <Users size={13} />
-                  </div>
-                </button>
-
-                {/* Players n/max · Spectators — authoritative roster */}
-                <RoomRoster />
-              </div>
-
-              {/* Persistent local-role indicator: you are watching, not playing */}
-              {isSpectator && (
-                <span
-                  className="chip-arcade flex items-center gap-1.5 bg-gradient-to-b from-cyan-600 to-cyan-800 px-2.5 py-1 sm:px-3 sm:py-1.5"
-                  role="status"
-                >
-                  <Eye size={12} className="text-white" aria-hidden="true" />
-                  <span className="font-arcade text-[9px] sm:text-[10px] text-white uppercase tracking-widest">
-                    Spectating
-                  </span>
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Top Right: Essential Actions */}
-          <div className="flex gap-1.5 sm:gap-3 items-center pointer-events-auto">
-            <button
-              onClick={() => {
-                toggleMic();
-              }}
-              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
-                isMicEnabled
-                  ? 'bg-gradient-to-b from-lime-400 to-green-600'
-                  : 'bg-gradient-to-b from-rose-500 to-red-700'
-              }`}
-              title={isMicEnabled ? 'Mute Microphone' : 'Enable Microphone'}
-              aria-label={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
-              aria-pressed={isMicEnabled}
-            >
-              {isMicEnabled ? <Mic size={16} /> : <MicOff size={16} />}
-            </button>
-
-            <button
-              onClick={() => {
-                setSpeakerEnabled(!isSpeakerEnabled);
-                addToast(!isSpeakerEnabled ? 'Voice Chat Enabled' : 'Voice Chat Muted', 'info');
-              }}
-              className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
-                isSpeakerEnabled
-                  ? 'bg-gradient-to-b from-blue-400 to-blue-600'
-                  : 'bg-gradient-to-b from-rose-500 to-red-700'
-              }`}
-              title={isSpeakerEnabled ? 'Mute Voice Chat' : 'Enable Voice Chat'}
-              aria-label={isSpeakerEnabled ? 'Mute voice chat' : 'Enable voice chat'}
-              aria-pressed={isSpeakerEnabled}
-            >
-              <Headphones size={16} />
-            </button>
-
-            {/* Chat toggle — hidden entirely when the host disables Table Chat.
-                Reactions and voice remain available. */}
-            {chatEnabled && (
-              <button
-                onClick={() => setChatOpen(!isChatOpen)}
-                className={`chip-arcade relative w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
-                  isChatOpen
-                    ? 'bg-gradient-to-b from-blue-400 to-blue-600'
-                    : 'bg-gradient-to-b from-neutral-700 to-neutral-900'
-                }`}
-                title="Table Chat"
-                aria-label={
-                  isChatOpen
-                    ? 'Close table chat'
-                    : unreadChatCount > 0
-                      ? `Open table chat, ${unreadChatCount} unread ${unreadChatCount === 1 ? 'message' : 'messages'}`
-                      : 'Open table chat'
-                }
-                aria-expanded={isChatOpen}
-                aria-controls="table-chat-panel"
-              >
-                <MessageCircle size={16} />
-                {/* Unread indicator — only when the panel is closed */}
-                {!isChatOpen && unreadChatCount > 0 && (
-                  <span
-                    className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-b from-rose-500 to-red-600 border-2 border-neutral-900 text-white text-[9px] font-black flex items-center justify-center shadow-md"
-                    aria-hidden="true"
-                  >
-                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setIsSettingsOpen(true);
-              }}
-              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-700 to-neutral-900"
-              title="Settings"
-              aria-label="Open settings"
-              aria-haspopup="dialog"
-            >
-              <Settings size={16} className="text-white" />
-            </button>
-
-            <button
-              onClick={() => {
-                leaveRoom();
-                router.push('/');
-              }}
-              className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-rose-500 to-red-700"
-              title="Exit Table"
-              aria-label="Exit room"
-            >
-              <LogOut size={16} />
-            </button>
-          </div>
-        </header>
+        <ErrorBoundary section="Table Header">
+          <LobbyHeader
+            onOpenInvite={() => setIsInviteModalOpen(true)}
+            onToggleMic={toggleMic}
+          />
+        </ErrorBoundary>
 
         {/* HUD: Bottom Table Actions */}
-        <div className="absolute top-14 sm:top-16 left-0 right-0 flex flex-col items-center z-20 pointer-events-none px-3 text-center">
-          <div className="pointer-events-auto">
-            {/* Display state alert banners */}
-            <div className="flex flex-col items-center gap-1.5">
-              {gameStatus === 'lobby' ? (
-                <div className="flex flex-col items-center gap-2">
-                  {/* Capacity status — players vs the room's configured max, plus spectators */}
-                  <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-white px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
-                    Players: {totalPlayers} / {maxPlayers}
-                    {spectatorCount > 0 && (
-                      <span className="text-cyan-300">· Spectators: {spectatorCount} / {maxSpectators}</span>
-                    )}
-                  </span>
-
-                  {/* Full-room notice — extra joiners become spectators; once the
-                      spectator slots also run out, the room accepts no one else */}
-                  {roomCompletelyFull ? (
-                    <span className="font-rounded font-bold text-[10px] bg-rose-500/15 border-2 border-rose-400/50 text-rose-200 px-3 py-1 rounded-full shadow-md text-center">
-                      Room is completely full — all player seats and spectator slots are taken. No one else can join.
-                    </span>
-                  ) : roomIsFull ? (
-                    <span className="font-rounded font-bold text-[10px] bg-amber-500/15 border-2 border-amber-400/50 text-amber-200 px-3 py-1 rounded-full shadow-md text-center">
-                      Playing room is full — all player slots are filled. New participants will join as spectators.
-                    </span>
-                  ) : null}
-
-                  {/* Local spectator explanation while waiting in the lobby */}
-                  {isSpectator && (
-                    <span className="font-rounded font-bold text-[10px] bg-cyan-500/15 border-2 border-cyan-400/50 text-cyan-200 px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5 text-center">
-                      <Eye size={12} aria-hidden="true" /> You joined as a spectator — you can watch, chat and react, but not play.
-                    </span>
-                  )}
-
-                  {isHost ? (
-                    <div className="flex flex-col items-center gap-1.5">
-                      <div className="flex items-center gap-2">
-                        <button
-                          disabled={!canStart || isProcessing || isSpectator}
-                          onClick={() => {
-                            setIsProcessing(true);
-                            startGame();
-                          }}
-                          className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-2.5 px-7 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Play size={15} className="fill-white" /> Start Game
-                        </button>
-                        <button
-                          onClick={() => setIsHouseRulesOpen(true)}
-                          className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2.5 px-5 text-sm uppercase inline-flex items-center gap-1.5 cursor-pointer"
-                          title="Configure House Rules"
-                        >
-                          <ScrollText size={15} /> House Rules
-                        </button>
-                      </div>
-
-                      {/* Bot seat controls — add/remove AI opponents before the
-                          game starts. Bots fill player seats only; a joining
-                          human automatically takes a bot's place. */}
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-white px-2.5 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
-                          <Bot size={12} className="text-cyan-300" /> Bots: {botPlayers.length}
-                        </span>
-                        <button
-                          disabled={isProcessing || roomIsFull}
-                          onClick={() => addBots(1)}
-                          className="chip-arcade w-7 h-7 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-cyan-500 to-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Add a bot opponent"
-                          aria-label="Add a bot opponent"
-                        >
-                          <Plus size={13} />
-                        </button>
-                        <button
-                          disabled={isProcessing || botPlayers.length === 0}
-                          onClick={() => {
-                            const lastBot = botPlayers[botPlayers.length - 1];
-                            if (lastBot) removeBot(lastBot.id);
-                          }}
-                          className="chip-arcade w-7 h-7 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-600 to-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Remove a bot"
-                          aria-label="Remove a bot"
-                        >
-                          <Minus size={13} />
-                        </button>
-                        {humanPlayers.length < 2 && !roomIsFull && (
-                          <button
-                            disabled={isProcessing || isSpectator}
-                            onClick={() => {
-                              setIsProcessing(true);
-                              startGame({ fillWithBots: true });
-                            }}
-                            className="btn-arcade bg-gradient-to-b from-cyan-400 to-blue-600 text-white py-1.5 px-4 text-[11px] uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5 cursor-pointer"
-                            title="Fill every empty seat with bots and start"
-                          >
-                            <Bot size={13} /> Fill & Play vs Bots
-                          </button>
-                        )}
-                      </div>
-
-                      {!canStart && (
-                        <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3 py-1 rounded-full shadow-md">
-                          Waiting for players — invite a friend or add bots to start
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-1.5">
-                      <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3 py-1 rounded-full shadow-md">
-                        Waiting for host...
-                      </span>
-                      <button
-                        onClick={() => setIsHouseRulesOpen(true)}
-                        className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2 px-5 text-xs uppercase inline-flex items-center gap-1.5"
-                        title="View House Rules"
-                      >
-                        <ScrollText size={14} /> View Rules
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Compact summary of the notable active house rules */}
-                  {houseRules && (() => {
-                    const active = summarizeActiveRules(houseRules);
-                    if (!active.length) return null;
-                    return (
-                      <div className="flex flex-wrap items-center justify-center gap-1 max-w-md">
-                        {active.slice(0, 6).map((r) => (
-                          <span
-                            key={r}
-                            className="font-rounded font-bold text-[9px] uppercase tracking-wider bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-200 px-2 py-0.5 rounded-full"
-                          >
-                            {r}
-                          </span>
-                        ))}
-                        {active.length > 6 && (
-                          <span className="font-rounded font-bold text-[9px] text-slate-400">
-                            +{active.length - 6} more
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              ) : gameStatus === 'playing' ? (
-                isMyTurn ? (
-                  <span className="font-arcade text-xs bg-gradient-to-b from-lime-400 to-green-600 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide animate-pulse inline-flex items-center gap-1.5">
-                    <Star size={14} className="fill-white" /> Your Turn!
-                    <TurnTimer className="ml-1 text-[11px] no-underline normal-case not-italic" />
-                  </span>
-                ) : (
-                  <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-blue-300 px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
-                    Waiting for {room?.players.find(p => p.id === currentPlayerId)?.name || `Seat ${currentPlayerSeat}`}...
-                    <TurnTimer className="text-[10px]" />
-                  </span>
-                )
-              ) : gameStatus === 'awaiting_color_selection' ? (
-                <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1.5">
-                  Waiting for color selection...
-                  <TurnTimer className="text-[10px]" />
-                </span>
-              ) : gameStatus === 'awaiting_swap_target' ? (
-                <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-fuchsia-300 px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1.5">
-                  <ArrowLeftRight size={12} />
-                  {swapChooserId === player?.id ? 'Choose a player to swap hands with...' : 'Waiting for Seven-Swap...'}
-                  <TurnTimer className="text-[10px]" />
-                </span>
-              ) : null}
-
-              {/* Pending Draw Stack banner — shown while a +2/+4 chain is live. The
-                  active player must stack a matching draw card or draw the total. */}
-              {gameStatus === 'playing' && (drawStack ?? 0) > 0 && pendingDrawType && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  className="mt-1.5 font-arcade text-xs bg-gradient-to-b from-orange-500 to-red-700 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide inline-flex items-center gap-1.5"
-                >
-                  <Siren size={14} className="fill-white" />
-                  {isMyTurn
-                    ? `Stack a ${pendingDrawType === 'wild_draw_four' ? '+4' : '+2 / +4'} or draw ${drawStack}!`
-                    : `Draw stack building: +${drawStack}`}
-                </motion.div>
-              )}
-
-              {/* Challenge Wild Draw Four — shown to the targeted player when the
-                  challenge house rule is on and a +4 is pending against them. */}
-              {isMyTurn && !isSpectator && pendingDrawType === 'wild_draw_four' &&
-                challengeableById === player?.id && houseRules?.challengeWildDrawFour && (
-                <motion.button
-                  disabled={isProcessing}
-                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  whileTap={{ scale: 0.94, y: 3 }}
-                  onClick={() => challengeWildFour()}
-                  className="btn-arcade mt-1.5 text-white uppercase inline-flex items-center gap-1.5 px-6 py-2 text-sm bg-gradient-to-b from-violet-500 to-purple-700 disabled:cursor-not-allowed"
-                >
-                  <Gavel size={16} /> Challenge +4
-                </motion.button>
-              )}
-
-              {/* Declare UNO Button — shown while holding exactly 2 cards. Declaring
-                  now exempts you from the automatic +4 penalty that hits when a
-                  play would otherwise drop you to a single undeclared card. */}
-              {myHand.length === 2 && gameStatus === 'playing' && !isSpectator && !(player && unoCalled[player.id]) && (
-                <motion.button
-                  disabled={isProcessing}
-                  whileTap={{ scale: 0.92, y: 4 }}
-                  animate={{ scale: [1, 1.08, 1] }}
-                  transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
-                  onClick={() => {
-                    setIsProcessing(true);
-                    callUno();
-                  }}
-                  className="btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600"
-                >
-                  <Siren size={18} /> CALL UNO!
-                </motion.button>
-              )}
-
-              {/* Draw-then-play decision — the player drew and now has a playable
-                  card. They may play any valid card (the drawn one is highlighted)
-                  or keep it and pass. */}
-              {isMyTurn && drawnCardId && !isSpectator && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  className="mt-1.5 flex flex-col items-center gap-1.5"
-                >
-                  <span className="font-arcade text-xs bg-gradient-to-b from-amber-400 to-orange-600 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide inline-flex items-center gap-1.5">
-                    <Star size={14} className="fill-white" /> Play a card or keep it!
-                  </span>
-                  <motion.button
-                    disabled={isProcessing}
-                    whileTap={{ scale: 0.92, y: 4 }}
-                    onClick={() => {
-                      passTurn();
-                    }}
-                    className="btn-arcade text-white uppercase inline-flex items-center gap-1.5 px-6 py-2 text-sm bg-gradient-to-b from-slate-500 to-slate-700 disabled:cursor-not-allowed"
-                  >
-                    Keep & Pass
-                  </motion.button>
-                </motion.div>
-              )}
-            </div>
-          </div>
-        </div>
-
+        <GameHUD />
       </div>
 
       {/* =================================================================== */}
       {/* OVERLAYS: Game Stopped — Not Enough Players Banner                  */}
       {/* =================================================================== */}
-      <AnimatePresence>
-        {gameStatus === 'lobby' && gameStoppedNotice && (
-          <motion.div
-            initial={{ opacity: 0, y: -30, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            transition={{ type: 'spring', damping: 22, stiffness: 280 }}
-            className="absolute top-28 left-1/2 -translate-x-1/2 z-30 pointer-events-auto w-[90%] max-w-md"
-          >
-            <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black px-6 py-5 flex flex-col items-center gap-3 text-center relative">
-              <button
-                onClick={() => setGameStoppedNotice(false)}
-                className="absolute top-2.5 right-2.5 chip-arcade w-7 h-7 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"
-                title="Dismiss"
-                aria-label="Dismiss game stopped notice"
-              >
-                <X size={13} />
-              </button>
-              <div className="w-14 h-14 rounded-full bg-gradient-to-b from-amber-400 to-orange-600 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce">
-                <Pause size={26} className="fill-white" />
-              </div>
-              <h3 className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">
-                Game Stopped
-              </h3>
-              <p className="font-rounded font-semibold text-white/85 text-sm leading-snug">
-                Not enough players to keep playing. The table has been reset.
-              </p>
-              <p className="font-rounded font-bold text-[11px] uppercase tracking-wider text-cyan-200 animate-pulse">
-                {isHost
-                  ? canStart
-                    ? 'Press Start Game to play a fresh round!'
-                    : 'Waiting for another player to join…'
-                  : 'Waiting for the host to start a new game…'}
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <GameStoppedNotice />
 
       {/* =================================================================== */}
-      {/* OVERLAYS: Color Selection Wheel Dialog                              */}
+      {/* OVERLAYS: forced-choice dialogs and the end-of-round summary.       */}
+      {/* Reset on any phase change so a crashed dialog can't outlive it.     */}
       {/* =================================================================== */}
-      {gameStatus === 'awaiting_color_selection' && player && colorChooserId === player.id && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none p-4">
-          <div
-            ref={colorDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="color-dialog-title"
-            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto"
-          >
-            <div>
-              <h3 id="color-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">Choose Color</h3>
-              <p className="font-rounded font-semibold text-white/80 text-xs mt-1">Pick the active color for the Wild card</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4 w-full">
-              <button
-                disabled={isProcessing}
-                onClick={() => {
-                  setIsProcessing(true);
-                  chooseColor('red');
-                }}
-                className="btn-arcade bg-gradient-to-b from-red-400 to-red-600 text-white py-5 text-base uppercase disabled:cursor-not-allowed"
-              >
-                Red
-              </button>
-              <button
-                disabled={isProcessing}
-                onClick={() => {
-                  setIsProcessing(true);
-                  chooseColor('blue');
-                }}
-                className="btn-arcade bg-gradient-to-b from-blue-400 to-blue-600 text-white py-5 text-base uppercase disabled:cursor-not-allowed"
-              >
-                Blue
-              </button>
-              <button
-                disabled={isProcessing}
-                onClick={() => {
-                  setIsProcessing(true);
-                  chooseColor('green');
-                }}
-                className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-5 text-base uppercase disabled:cursor-not-allowed"
-              >
-                Green
-              </button>
-              <button
-                disabled={isProcessing}
-                onClick={() => {
-                  setIsProcessing(true);
-                  chooseColor('yellow');
-                }}
-                className="btn-arcade bg-gradient-to-b from-yellow-300 to-amber-500 text-neutral-900 py-5 text-base uppercase disabled:cursor-not-allowed"
-              >
-                Yellow
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =================================================================== */}
-      {/* OVERLAYS: Seven-O Swap Target Selection                             */}
-      {/* =================================================================== */}
-      {gameStatus === 'awaiting_swap_target' && player && swapChooserId === player.id && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none p-4">
-          <div
-            ref={swapDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="swap-dialog-title"
-            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto"
-          >
-            <div>
-              <h3 id="swap-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm inline-flex items-center gap-2">
-                <ArrowLeftRight size={22} /> Seven Swap
-              </h3>
-              <p className="font-rounded font-semibold text-white/80 text-xs mt-1">
-                Choose a player to swap your entire hand with
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-2.5 w-full">
-              {room?.players
-                .filter((p) => p.id !== player.id)
-                .map((p) => {
-                  const cardCount = playerCards[p.seatNumber]?.length ?? 0;
-                  return (
-                    <button
-                      key={p.id}
-                      disabled={isProcessing}
-                      onClick={() => chooseSwapTarget(p.id)}
-                      aria-label={`Swap hands with ${p.name}, ${cardCount} ${cardCount === 1 ? 'card' : 'cards'}`}
-                      className="btn-arcade bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-between gap-2"
-                    >
-                      <span className="truncate">{p.name}</span>
-                      <span className="font-rounded text-[10px] bg-black/30 px-2 py-0.5 rounded-full shrink-0">
-                        {cardCount} cards
-                      </span>
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =================================================================== */}
-      {/* OVERLAYS: Confetti Canvas Game Over Standings & Play Again          */}
-      {/* =================================================================== */}
-      {gameStatus === 'ended' && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 pointer-events-auto overflow-hidden p-4">
-          {/* Confetti canvas animation */}
-          <ConfettiCanvas />
-
-          {(() => {
-            const matchWon = !!match?.matchWinnerName;
-            const roundPoints = match?.lastRound?.pointsAwarded ?? 0;
-            const target = match?.targetScore ?? 500;
-            const headerText = matchWon
-              ? (player && match?.matchWinnerName === player.name ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
-              : (player && winnerName === player.name ? 'You won the round!' : `${winnerName} won the round!`);
-            return (
-          <div
-            ref={endDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="game-over-title"
-            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto"
-          >
-            <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce">
-              <Trophy size={30} className="fill-white/30" />
-            </div>
-            <div>
-              <h2 id="game-over-title" className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse">
-                {matchWon ? 'Match Over!' : `Round ${match?.round ?? 1}`}
-              </h2>
-              <p className="font-rounded font-bold text-white text-md mt-1 inline-flex items-center gap-1.5">
-                <PartyPopper size={16} className="text-yellow-300" />
-                {headerText}
-              </p>
-              {!matchWon && (
-                <p className="font-rounded font-semibold text-lime-300 text-xs mt-1">
-                  +{roundPoints} points banked · first to {target} wins
-                </p>
-              )}
-            </div>
-
-            {/* Running Match Scoreboard */}
-            <div className="w-full border-t-2 border-b-2 border-white/20 py-3 my-0.5 space-y-2 max-h-52 overflow-y-auto">
-              <span className="font-arcade text-[10px] uppercase tracking-widest text-yellow-200 block text-left mb-1">
-                Match Scoreboard · to {target}
-              </span>
-              {scoreboard.map((entry, idx) => {
-                const rank = idx + 1;
-                const isLeader = rank === 1;
-                const RankIcon = rank === 1 ? Trophy : rank === 2 ? Medal : Award;
-                const rankIconColor = rank === 1 ? 'text-yellow-300' : rank === 2 ? 'text-slate-300' : 'text-orange-400';
-                const isMe = entry.name.toLowerCase() === player?.name.toLowerCase();
-                const justWonRound = match?.lastRound?.winnerName?.toLowerCase() === entry.name.toLowerCase();
-                const pct = Math.min(100, Math.round((entry.score / target) * 100));
-                return (
-                  <div
-                    key={entry.id}
-                    className={`px-3 py-1.5 rounded-xl border-2 ${
-                      isLeader
-                        ? 'bg-amber-400/20 border-yellow-300/60 text-yellow-100'
-                        : isMe
-                          ? 'bg-blue-500/20 border-blue-400/50 text-blue-100'
-                          : 'bg-white/5 border-white/15 text-white/80'
-                    }`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2 text-[11px] font-rounded font-bold">
-                        <span className="inline-flex items-center gap-1">
-                          <RankIcon size={14} className={rankIconColor} /> #{rank}
-                        </span>
-                        <span className="font-arcade truncate max-w-[90px]">{entry.name}</span>
-                        {justWonRound && !matchWon && (
-                          <span className="text-[9px] font-rounded font-bold text-lime-300 uppercase">+{roundPoints}</span>
-                        )}
-                      </div>
-                      <span className="text-[12px] font-arcade text-white tabular-nums">{entry.score}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 w-full bg-black/40 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-lime-400 to-green-500 rounded-full" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Round / Match Loop Buttons */}
-            <div className="w-full space-y-2">
-              {isHost ? (
-                <button
-                  disabled={isProcessing}
-                  onClick={() => {
-                    setIsProcessing(true);
-                    startGame();
-                  }}
-                  className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3 px-6 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-                >
-                  <RefreshCw size={16} /> {matchWon ? 'New Match' : 'Next Round'}
-                </button>
-              ) : (
-                <div className="w-full py-2.5 px-4 rounded-full bg-white/5 border-2 border-white/15 text-center animate-pulse font-rounded font-bold text-[10px] uppercase tracking-widest text-yellow-200 inline-flex items-center justify-center gap-1.5">
-                  <Hourglass size={12} /> {matchWon ? 'Waiting for host to start a new match...' : 'Waiting for host to start next round...'}
-                </div>
-              )}
-
-              <button
-                onClick={() => {
-                  leaveRoom();
-                  router.push('/');
-                }}
-                className="btn-arcade w-full bg-gradient-to-b from-rose-500 to-red-700 text-white py-3 px-4 text-xs uppercase"
-              >
-                Exit to Menu
-              </button>
-            </div>
-          </div>
-            );
-          })()}
-        </div>
-      )}
+      <ErrorBoundary section="Game Dialogs" resetKeys={[gameStatus]}>
+        <ColorPickerDialog />
+        <SwapTargetDialog />
+        <EndOfRound />
+      </ErrorBoundary>
 
       {/* =================================================================== */}
       {/* OVERLAYS: Invite Friends Modal                                      */}
       {/* =================================================================== */}
-      <AnimatePresence>
-        {isInviteModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className="w-full max-w-md panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 relative text-white"
-            >
-              {/* Close Button */}
-              <button
-                onClick={() => setIsInviteModalOpen(false)}
-                className="absolute top-3 right-3 chip-arcade w-8 h-8 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700 hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-                title="Close"
-                aria-label="Close invite modal"
-              >
-                <X size={14} />
-              </button>
-
-              <h3 className="font-arcade text-lg sm:text-xl text-yellow-400 tracking-wider mb-6 text-center uppercase arcade-stroke-uno-sm">
-                Invite Friends
-              </h3>
-
-              <div className="flex flex-col items-center gap-6">
-                {/* Lobby Code Display */}
-                <div className="flex flex-col items-center gap-2 w-full">
-                  <span className="font-arcade text-[10px] tracking-wider text-slate-400 uppercase">
-                    Lobby Code
-                  </span>
-                  <div className="font-arcade text-3xl sm:text-4xl text-yellow-300 tracking-widest text-center py-2.5 px-7 bg-black/40 border border-neutral-800 rounded-lg select-all">
-                    {room.code}
-                  </div>
-                </div>
-
-                {/* Stack of action buttons */}
-                <div className="w-full flex flex-col gap-3">
-                  <button
-                    onClick={handleCopyCodeOnly}
-                    className={`btn-arcade py-3 text-xs uppercase cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 font-arcade tracking-wider bg-gradient-to-b ${
-                      copiedCode 
-                        ? 'from-lime-400 to-green-600 text-white' 
-                        : 'from-blue-400 to-blue-600 text-white hover:border-yellow-400'
-                    }`}
-                  >
-                    {copiedCode ? <Check size={14} className="stroke-[3]" /> : <Copy size={14} />}
-                    {copiedCode ? 'Code Copied!' : 'Copy Code'}
-                  </button>
-
-                  <button
-                    onClick={handleCopyLinkOnly}
-                    className={`btn-arcade py-3 text-xs uppercase cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 font-arcade tracking-wider bg-gradient-to-b ${
-                      copiedLink 
-                        ? 'from-lime-400 to-green-600 text-white' 
-                        : 'from-fuchsia-500 to-purple-700 text-white hover:border-yellow-400'
-                    }`}
-                  >
-                    {copiedLink ? <Check size={14} className="stroke-[3]" /> : <Copy size={14} />}
-                    {copiedLink ? 'Link Copied!' : 'Copy Invite Link'}
-                  </button>
-
-                  <button
-                    onClick={handleShareLink}
-                    className="btn-arcade py-3 text-xs uppercase cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-transform flex items-center justify-center gap-2 font-arcade tracking-wider bg-gradient-to-b from-amber-500 to-orange-600 text-white hover:border-yellow-400"
-                  >
-                    <Share2 size={14} />
-                    Share Invite
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <InviteModal
+        open={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+        roomId={roomId}
+      />
 
       {/* GAME EFFECTS LAYER */}
-      <TurnGlowIndicator />
-
+      <ErrorBoundary section="Turn Glow" fallback={null}>
+        <TurnGlowIndicator />
+      </ErrorBoundary>
     </div>
   );
 }

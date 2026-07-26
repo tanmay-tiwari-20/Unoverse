@@ -4,6 +4,9 @@ import React from 'react';
 import dynamic from 'next/dynamic';
 import { useGameStore } from '../../store/useGameStore';
 import { getLayoutSeatCount } from '../../utils/capacity';
+import { ErrorBoundary } from '../providers/ErrorBoundary';
+import { SceneCrashFallback } from './SceneCrashFallback';
+import { WebGLRecoveryOverlay } from './WebGLRecoveryOverlay';
 
 import { PlayerHandHUD } from './PlayerHandHUD';
 
@@ -50,15 +53,41 @@ export const TableScene: React.FC = () => {
       {/* ================================================================= */}
       {/* PURE WEBGL 3D ENVIRONMENT — No HTML overlays                      */}
       {/* ================================================================= */}
-      <RoomEnvironment numPlayers={numPlayers} localIndex={safeLocalIndex}>
-        <WebGLSeats />
-        <WebGLCards />
-        <CardFlightAnimations />
-        <ActionEffects3D />
-      </RoomEnvironment>
+      {/* The whole 3D layer is isolated. A Three.js/WebGL failure — a shader
+          that won't compile on an old driver, a context that can't be created —
+          is by far the most likely crash on low-end hardware, and it must not
+          take the HUD, the chat or the socket connection with it. The fallback
+          keeps the room fully playable via the 2D hand HUD.
+          `resetKeys` on the room code means entering a different room retries
+          the scene rather than inheriting the previous room's crash. */}
+      <ErrorBoundary
+        section="3D Table"
+        resetKeys={[room?.code]}
+        fallback={(_error, retry) => <SceneCrashFallback onRetry={retry} />}
+      >
+        <RoomEnvironment numPlayers={numPlayers} localIndex={safeLocalIndex}>
+          <WebGLSeats />
+          <WebGLCards />
+          {/* Card flights and action effects are decorative. If either throws,
+              drop it silently rather than degrading the table around it — the
+              game reads identically without them. */}
+          <ErrorBoundary section="Card Animations" fallback={null}>
+            <CardFlightAnimations />
+          </ErrorBoundary>
+          <ErrorBoundary section="Action Effects" fallback={null}>
+            <ActionEffects3D />
+          </ErrorBoundary>
+        </RoomEnvironment>
+      </ErrorBoundary>
 
-      {/* HUD LAYER */}
-      <PlayerHandHUD />
+      {/* Shown only while the GPU context is lost; covers the canvas, not the HUD. */}
+      <WebGLRecoveryOverlay />
+
+      {/* HUD LAYER — the hand is how the game is actually played, so it gets its
+          own boundary and is never brought down by the scene behind it. */}
+      <ErrorBoundary section="Your Hand">
+        <PlayerHandHUD />
+      </ErrorBoundary>
 
     </div>
   );

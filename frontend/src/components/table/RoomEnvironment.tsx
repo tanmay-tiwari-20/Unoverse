@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useRef, useMemo, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useEffectiveQuality } from '../../hooks/useEffectiveQuality';
+import { scaleParticles } from '../../lib/quality/qualityTiers';
 import { getTableGroupScale, getCameraDistanceBoost } from '../../utils/tableLayout';
+import { AdaptiveQuality } from './AdaptiveQuality';
+import { WebGLContextGuard } from './WebGLContextGuard';
 
 // Suppress Three.js Clock deprecation warnings originating from React Three Fiber v9 internals
 if (typeof window !== 'undefined') {
@@ -89,7 +93,7 @@ function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolea
 
 
 
-function Flies() {
+function Flies({ particleScale }: { particleScale: number }) {
   const fly1Ref = useRef<THREE.Group>(null);
   const fly2Ref = useRef<THREE.Group>(null);
   const wings1Ref = useRef<THREE.Group>(null);
@@ -145,10 +149,15 @@ function Flies() {
     </group>
   );
 
+  // Purely decorative ambience: 2 flies at High, 1 at Medium, none at Low. Each
+  // is an animated group of 4 meshes with a per-frame update, so dropping them
+  // removes real work as well as draw calls.
+  const flyCount = scaleParticles(2, particleScale);
+
   return (
     <group>
-      <FlyModel flyRef={fly1Ref} wingsRef={wings1Ref} scale={1.8} />
-      <FlyModel flyRef={fly2Ref} wingsRef={wings2Ref} scale={1.5} />
+      {flyCount > 0 && <FlyModel flyRef={fly1Ref} wingsRef={wings1Ref} scale={1.8} />}
+      {flyCount > 1 && <FlyModel flyRef={fly2Ref} wingsRef={wings2Ref} scale={1.5} />}
     </group>
   );
 }
@@ -270,7 +279,17 @@ function GameTable({ groupScale = [1, 1, 1] }: { groupScale?: [number, number, n
   );
 }
 
-function HangingLamp({ isLandingPage }: { isLandingPage?: boolean }) {
+function HangingLamp({
+  isLandingPage,
+  shadows,
+  shadowMapSize,
+  particleScale,
+}: {
+  isLandingPage?: boolean;
+  shadows: boolean;
+  shadowMapSize: number;
+  particleScale: number;
+}) {
   const spotRef = useRef<THREE.SpotLight>(null);
   const targetRef = useRef<THREE.Object3D>(null);
   const lampGroupRef = useRef<THREE.Group>(null);
@@ -292,12 +311,26 @@ function HangingLamp({ isLandingPage }: { isLandingPage?: boolean }) {
   useEffect(() => {
     if (spotRef.current && targetRef.current) {
       spotRef.current.target = targetRef.current;
-      spotRef.current.shadow.mapSize.set(2048, 2048);
       spotRef.current.shadow.bias = -0.0005;
       spotRef.current.shadow.camera.near = 0.5;
       spotRef.current.shadow.camera.far = 15;
     }
   }, []);
+
+  // Shadow map resolution follows the active quality tier. A 2048² map is four
+  // times the texels of a 1024² one and is re-rendered every frame the scene
+  // changes, so this is the single biggest saving available without losing
+  // shadows altogether. The existing render target must be disposed for the new
+  // size to take effect — Three.js allocates it lazily from `mapSize`.
+  useEffect(() => {
+    const spot = spotRef.current;
+    if (!spot) return;
+    if (spot.shadow.mapSize.width === shadowMapSize) return;
+    spot.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+    spot.shadow.map?.dispose();
+    spot.shadow.map = null;
+  }, [shadowMapSize]);
+
   const prefersReduced = useReducedMotion();
 
   useFrame(({ clock }) => {
@@ -325,7 +358,7 @@ function HangingLamp({ isLandingPage }: { isLandingPage?: boolean }) {
       </mesh>
 
       {/* Shade */}
-      <mesh geometry={shadeGeo} position={[0, 1.5, 0]} castShadow>
+      <mesh geometry={shadeGeo} position={[0, 1.5, 0]} castShadow={shadows}>
         <meshStandardMaterial color="#1a1a1a" roughness={0.4} metalness={0.7} side={THREE.DoubleSide} />
       </mesh>
 
@@ -343,13 +376,13 @@ function HangingLamp({ isLandingPage }: { isLandingPage?: boolean }) {
         penumbra={0.85}
         intensity={60}
         color="#ffcc77"
-        castShadow
+        castShadow={shadows}
         distance={10}
         decay={2}
       />
 
       {/* Tiny dark flies buzzing around the lamp */}
-      <Flies />
+      <Flies particleScale={particleScale} />
 
       {/* Spotlight target */}
       <object3D ref={targetRef} position={[0, 0.85, 0]} />
@@ -541,7 +574,8 @@ function RoomProps() {
 }
 
 function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironmentProps) {
-  const { cameraMotion, cameraSensitivity, shadowQuality, performanceMode } = useSettingsStore();
+  const { cameraMotion, cameraSensitivity, performanceMode } = useSettingsStore();
+  const quality = useEffectiveQuality();
 
   // Table + camera adapt to the active player count (spectators excluded upstream).
   const tableGroupScale = getTableGroupScale(numPlayers);
@@ -570,19 +604,29 @@ function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironm
       {/* Dim ambient room visibility (deep dark blue/brown) */}
       <hemisphereLight args={['#18120c', '#080402', 0.8]} />
 
-      {/* Under-table bounce light for table legs */}
-      <pointLight 
-        position={[0, 0.4, 0]} 
-        intensity={performanceMode ? 15 : 30} 
-        color="#ffaa55" 
-        distance={5} 
-        decay={2} 
-        castShadow={!performanceMode && shadowQuality !== 'low'} 
+      {/* Under-table bounce light for table legs. A second shadow-casting light
+          is one of the scene's most expensive elements, so it follows the
+          effective tier rather than the raw setting. */}
+      <pointLight
+        position={[0, 0.4, 0]}
+        intensity={performanceMode ? 15 : 30}
+        color="#ffaa55"
+        distance={5}
+        decay={2}
+        castShadow={quality.shadows}
       />
+
+      {/* Watches sustained framerate and steps the tier up/down. Renders nothing. */}
+      <AdaptiveQuality />
 
       <Floor />
       <GameTable groupScale={tableGroupScale} />
-      <HangingLamp isLandingPage={isLandingPage} />
+      <HangingLamp
+        isLandingPage={isLandingPage}
+        shadows={quality.shadows}
+        shadowMapSize={quality.shadowMapSize}
+        particleScale={quality.particleScale}
+      />
       <RoomProps />
       {children}
     </>
@@ -590,20 +634,38 @@ function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironm
 }
 
 export const RoomEnvironment: React.FC<RoomEnvironmentProps> = ({ numPlayers, localIndex, isLandingPage, children }) => {
-  const { performanceMode, shadowQuality, postProcessing } = useSettingsStore();
-  const enableShadows = !performanceMode && shadowQuality !== 'low';
+  const quality = useEffectiveQuality();
+
+  // The renderer's own construction options can only be set when the WebGL
+  // context is created — changing them later would force R3F to tear the context
+  // down and rebuild it, which is exactly the visible interruption adaptive
+  // scaling is supposed to avoid. So they are captured once, from the user's
+  // manual settings, and never re-derived from the live tier. `useState` with no
+  // setter is the capture-once idiom: evaluated on the first render, frozen after.
+  const [initialPostProcessing] = useState(quality.postProcessing);
 
   return (
     <Canvas
-      shadows={enableShadows ? { type: THREE.PCFShadowMap } : false}
+      // Both of these ARE safe to change at runtime: R3F applies a new `dpr` via
+      // setDpr and a new `shadows` value by toggling the shadow map, both in
+      // place on the existing context. This is what makes a tier change a smooth
+      // adjustment rather than a scene reload.
+      dpr={quality.dpr}
+      shadows={quality.shadows ? { type: THREE.PCFShadowMap } : false}
       camera={{ fov: 60, near: 0.1, far: 100 }}
       gl={{
-        antialias: postProcessing,
-        toneMapping: postProcessing ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping,
+        antialias: initialPostProcessing,
+        toneMapping: initialPostProcessing ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping,
         toneMappingExposure: 0.9,
+        // Ask the browser for the discrete GPU on hybrid-graphics laptops; on
+        // integrated-only machines this is simply ignored.
+        powerPreference: 'high-performance',
+        // Lets the canvas survive a GPU reset instead of being permanently lost.
+        failIfMajorPerformanceCaveat: false,
       }}
       style={{ background: '#020101', position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
     >
+      <WebGLContextGuard />
       <Scene numPlayers={numPlayers} localIndex={localIndex} isLandingPage={isLandingPage}>
         {children}
       </Scene>
