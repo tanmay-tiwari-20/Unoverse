@@ -92,14 +92,14 @@ export const LobbyView: React.FC = () => {
               }}
               className="btn-arcade bg-gradient-to-b from-lime-400 to-green-600 text-white py-2.5 px-7 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <Play size={15} className="fill-white" /> Start Game
+              <Play size={15} className="fill-white" /> Start
             </button>
             <button
               onClick={() => setIsHouseRulesOpen(true)}
               className="btn-arcade bg-gradient-to-b from-fuchsia-500 to-purple-700 text-white py-2.5 px-5 text-sm uppercase inline-flex items-center gap-1.5 cursor-pointer"
               title="Configure House Rules"
             >
-              <ScrollText size={15} /> House Rules
+              <ScrollText size={15} /> Rules
             </button>
             <button
               onClick={() => setIsArenaOpen(true)}
