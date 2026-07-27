@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { io, Socket, type ManagerOptions, type SocketOptions } from 'socket.io-client';
 import { useGameStore, type GameUpdatePayload } from '../store/useGameStore';
+import { useProfileStore } from '../store/useProfileStore';
 import { CardColor, CardItem } from '../lib/cards/cardEngine';
 import { HouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
@@ -8,6 +9,17 @@ import { getSeatCoords } from '../utils/seating';
 import { logger } from '../utils/logger';
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+
+// --- Persistent profile identity -------------------------------------------
+// The durable player identity (profileId + private secret) lives in
+// useProfileStore (localStorage). We attach it to every create/join/reconnect
+// emit from a single place so the server can verify ownership and key
+// server-authoritative stats to the profile. Returns `{}` when no profile
+// exists yet (profile-less play still works exactly as before).
+const profileCreds = (): { profileId?: string; profileSecret?: string } => {
+  const { profileId, profileSecret } = useProfileStore.getState();
+  return profileId && profileSecret ? { profileId, profileSecret } : {};
+};
 
 // --- Session secret persistence -------------------------------------------
 // The backend issues a private per-session secret on first join. We persist it
@@ -136,7 +148,7 @@ function setupSocketListeners(socketInstance: Socket) {
     if (state.room && identity) {
       useGameStore.getState().addToast('Reconnected to game server! Resyncing...', 'info');
       const secret = identity.secret || loadSecret(state.room.code, identity.name);
-      socketInstance.emit('join-room', { code: state.room.code, name: identity.name, secret });
+      socketInstance.emit('join-room', { code: state.room.code, name: identity.name, secret, ...profileCreds() });
     }
   });
 
@@ -219,6 +231,10 @@ function setupSocketListeners(socketInstance: Socket) {
     logger.debug('[Socket] Game ended. Winner:', winnerName);
     soundManager.play('victory');
     useGameStore.getState().setIsProcessing(false);
+    // Lifetime stats were just committed server-side for this match. Re-fetch the
+    // profile view (never computed client-side) so the profile modal shows fresh
+    // totals + the new match-history entry. Best-effort: a failure is silent.
+    useProfileStore.getState().refreshProfile().catch(() => {});
   });
 
   socketInstance.on('uno-penalty', ({ playerId, playerName }) => {
@@ -336,7 +352,7 @@ export const useSocket = () => {
   const createRoom = (name: string) => {
     const currentSocket = useGameStore.getState().socket;
     if (currentSocket) {
-      currentSocket.emit('create-room', { name });
+      currentSocket.emit('create-room', { name, ...profileCreds() });
     } else {
       logger.warn('[Socket] Socket not initialized yet');
     }
@@ -346,7 +362,7 @@ export const useSocket = () => {
     const currentSocket = useGameStore.getState().socket;
     if (currentSocket) {
       const secret = loadSecret(code, name);
-      currentSocket.emit('join-room', { code, name, secret });
+      currentSocket.emit('join-room', { code, name, secret, ...profileCreds() });
     } else {
       logger.warn('[Socket] Socket not initialized yet');
     }

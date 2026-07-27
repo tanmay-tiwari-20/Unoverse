@@ -4,12 +4,35 @@ import { isValidMove, isValidJumpIn } from './rules';
 import { getNextPlayerIndex, getNextActivePlayerId } from './turnManager';
 import { Player } from '../rooms/roomManager';
 import { logger } from '../utils/logger';
+import { RoundStatDelta, emptyRoundDelta } from '../profiles/profileTypes';
 import {
   HouseRules,
   DEFAULT_HOUSE_RULES,
   normalizeHouseRules,
   canFinishWithCard,
 } from './houseRules';
+
+/**
+ * Increment one player's per-round stat accumulator (server-authoritative stat
+ * capture). Lazily initializes the accumulator map/entry. This is folded into
+ * the player's persistent profile at round end; it counts server-observed
+ * actions only and is never influenced by client-supplied values.
+ */
+const bumpStat = (
+  state: UnoGameState,
+  playerId: string,
+  key: keyof RoundStatDelta,
+  amount: number = 1
+): void => {
+  if (amount <= 0) return;
+  if (!state.roundStats) state.roundStats = {};
+  let acc = state.roundStats[playerId];
+  if (!acc) {
+    acc = emptyRoundDelta();
+    state.roundStats[playerId] = acc;
+  }
+  acc[key] += amount;
+};
 
 // Safe card drawing. When the deck runs out it recycles the discard pile (minus
 // the top card) — but only if the autoReshuffle house rule is enabled. With
@@ -51,6 +74,9 @@ const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string
     state.hands[recipientId].push(...drawn);
     // Reset UNO call state when drawing cards
     state.unoCalled[recipientId] = false;
+    // Stat capture: every card that lands in a hand via a draw (normal draws,
+    // penalties, and eating a draw chain) counts as a card drawn.
+    bumpStat(state, recipientId, 'cardsDrawn', drawn.length);
   }
 
   return drawn.length;
@@ -228,6 +254,8 @@ export const startGameState = (players: Player[], rules?: HouseRules): UnoGameSt
     wildFourWasBluff: null,
     challengeableById: null,
     drawnCardId: null,
+    startedAt: Date.now(),
+    roundStats: {},
   };
 
   // If the first card is a Draw Two:
@@ -264,6 +292,23 @@ const resolvePlayedCard = (
   const rules = state.rules;
   const playerHand = state.hands[playerId];
 
+  // ---- Stat capture --------------------------------------------------------
+  // The card is already removed from the hand and pushed to the discard pile by
+  // the time we get here, so it is definitively "played" regardless of which
+  // effect branch below runs. Count it once, plus its type breakdown.
+  bumpStat(state, playerId, 'cardsPlayed');
+  if (card.value === 'reverse') bumpStat(state, playerId, 'reverseCardsPlayed');
+  else if (card.value === 'skip') bumpStat(state, playerId, 'skipCardsPlayed');
+  else if (card.value === 'draw_two') bumpStat(state, playerId, 'drawCardsPlayed');
+  else if (card.value === 'wild_draw_four') {
+    bumpStat(state, playerId, 'wildDrawFourPlayed');
+    bumpStat(state, playerId, 'drawCardsPlayed');
+  } else if (card.value === 'wild') {
+    bumpStat(state, playerId, 'wildsPlayed');
+  }
+  // Reaching exactly one card is a "last card" moment.
+  if (playerHand.length === 1) bumpStat(state, playerId, 'lastCardCalls');
+
   // The play resolves any open draw-then-play decision.
   state.drawnCardId = null;
   // Reset wild color chooser for the new top card.
@@ -287,6 +332,7 @@ const resolvePlayedCard = (
   if (penaltyApplies && playerHand.length === 1 && !state.unoCalled[playerId]) {
     drawCardsHelper(state, rules.unoPenaltyCards, playerId);
     unoPenalty = true;
+    bumpStat(state, playerId, 'unoPenalties');
     logger.debug(`[UNO_PENALTY] ${playerId} reached 1 card without declaring UNO — +${rules.unoPenaltyCards}.`);
   }
   // In auto mode the server declares UNO on the player's behalf.
@@ -624,6 +670,7 @@ export const jumpInAction = (
   state.discardPile.push(card);
   resolvePlayedCard(state, players, playerId, card);
   if (state.lastAction) state.lastAction.type = state.lastAction.type === 'play' ? 'jump_in' : state.lastAction.type;
+  bumpStat(state, playerId, 'jumpIns');
   logger.debug(`[JUMP_IN] ${playerId} jumped in with ${card.color} ${card.value}.`);
   return state;
 };
@@ -736,6 +783,7 @@ export const challengeWildFourAction = (
   if (wasBluff) {
     // Challenge succeeds: accused draws the stack, challenger keeps their turn.
     drawCardsHelper(state, stack, accusedId);
+    bumpStat(state, playerId, 'challengesWon');
     state.lastAction = { type: 'challenge', playerId, drawCount: stack, targetId: accusedId, challengeSuccess: true };
     logger.debug(`[CHALLENGE] ${playerId} caught ${accusedId}'s +4 bluff (+${stack}).`);
     // currentPlayerId stays the challenger — they now take their normal turn.
@@ -743,6 +791,7 @@ export const challengeWildFourAction = (
     // Challenge fails: challenger draws stack + 2 and is skipped.
     const penalty = stack + 2;
     drawCardsHelper(state, penalty, playerId);
+    bumpStat(state, playerId, 'challengesLost');
     state.lastAction = { type: 'challenge', playerId, drawCount: penalty, targetId: accusedId, challengeSuccess: false };
     logger.debug(`[CHALLENGE] ${playerId} wrongly challenged (+${penalty}) and is skipped.`);
     advanceTurn(state, players, 1);
@@ -780,5 +829,7 @@ export const callUnoAction = (state: UnoGameState, playerId: string): UnoGameSta
   }
 
   state.unoCalled[playerId] = true;
+  // A successful, intentional manual UNO declaration.
+  bumpStat(state, playerId, 'unoCalls');
   return state;
 };

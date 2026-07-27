@@ -22,17 +22,26 @@ const nonEmptyName = z.string().trim().min(1).max(40);
 const roomCode = z.string().trim().min(1).max(12);
 const cardId = z.string().min(1).max(120);
 const secret = z.string().min(1).max(200);
+// Persistent-profile identity presented on create/join. Both are opaque UUIDs;
+// the server verifies profileSecret against the stored profile before trusting
+// profileId. Optional everywhere — a client without a profile joins as before.
+const profileId = z.string().min(1).max(100);
+const profileSecret = z.string().min(1).max(200);
 
 export const cardColor = z.enum(['red', 'blue', 'green', 'yellow']);
 
 export const createRoomSchema = z.object({
   name: nonEmptyName,
+  profileId: profileId.optional(),
+  profileSecret: profileSecret.optional(),
 });
 
 export const joinRoomSchema = z.object({
   code: roomCode,
   name: nonEmptyName,
   secret: secret.optional(),
+  profileId: profileId.optional(),
+  profileSecret: profileSecret.optional(),
 });
 
 export const sendReactionSchema = z.object({

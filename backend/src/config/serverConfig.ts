@@ -165,6 +165,26 @@ export const TURN_TIMER_RETRY_MS = num(process.env.TURN_TIMER_RETRY_MS, 5_000);
 export const DISCARD_VISIBLE_COUNT = 10;
 
 // ---------------------------------------------------------------------------
+// Player profiles & statistics.
+// ---------------------------------------------------------------------------
+
+export interface ProfileConfig {
+  /** Max recent completed matches kept per profile for the match-history UI. */
+  recentMatchesMax: number;
+  /**
+   * Minimum number of HUMAN participants for a round/match to count toward
+   * lifetime stats. Solo-vs-bots practice (1 human) is ignored so stats reflect
+   * real competition; set to 1 to also count solo games. Bots never count.
+   */
+  minHumansForStats: number;
+}
+
+export const PROFILE_CONFIG: ProfileConfig = {
+  recentMatchesMax: num(process.env.RECENT_MATCHES_MAX, 20),
+  minHumansForStats: num(process.env.PROFILE_MIN_HUMANS, 2),
+};
+
+// ---------------------------------------------------------------------------
 // CORS.
 // ---------------------------------------------------------------------------
 

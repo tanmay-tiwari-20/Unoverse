@@ -2,11 +2,14 @@ import { randomUUID } from 'crypto';
 import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextActivePlayerId } from '../game/turnManager';
-import { calculateRoundPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
+import { calculateRoundPoints, handPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
 import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../game/houseRules';
 import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
 import { pickBotName } from '../bots/botNames';
+import { profileManager } from '../profiles/profileManager';
+import { MatchRecord, MatchPlayerRecord, emptyRoundDelta } from '../profiles/profileTypes';
+import { PROFILE_CONFIG } from '../config/serverConfig';
 
 export interface Player {
   id: string; // Socket ID (or a synthetic `bot:` id for server-side bots)
@@ -18,6 +21,13 @@ export interface Player {
   // rules engine as humans, but have no socket, never host, never spectate,
   // never join voice chat and never chat.
   isBot?: boolean;
+  // Persistent-profile identity carried ALONGSIDE the ephemeral socket id, never
+  // replacing it. Attached on join when the client presents a verified profile.
+  // profileId keys server-authoritative stats; tag/avatar are display data safe
+  // to broadcast (the profile's private secret is NEVER stored on the Player).
+  profileId?: string;
+  tag?: string;
+  avatar?: string | null;
 }
 
 /** Room discoverability. Public rooms are matched by Quick Play; private rooms
@@ -48,6 +58,8 @@ export interface MatchState {
   round: number;                  // 1-based index of the current/last round
   lastRound: RoundResult | null;  // result of the round that just ended
   matchWinnerName: string | null; // set once someone reaches targetScore
+  // Epoch ms the match began. Used to record match duration for profile stats.
+  matchStartedAt?: number;
 }
 
 export interface Room {
@@ -550,7 +562,12 @@ class RoomManager {
     code: string,
     playerName: string,
     playerSocketId: string,
-    secret?: string
+    secret?: string,
+    // Verified persistent-profile identity, attached to the seated Player when the
+    // client presented a profile whose secret checked out (verification happens in
+    // the socket/REST layer — this method trusts what it is handed). Never carries
+    // the profile's private secret.
+    profile?: { profileId: string; tag?: string; avatar?: string | null }
   ): { room: Room; player: Player | null; isSpectator: boolean; spectator?: Spectator } {
     const upperCode = code.toUpperCase();
     const room = this.rooms.get(upperCode);
@@ -592,10 +609,18 @@ class RoomManager {
       }
 
       const oldSocketId = existingPlayerByName.id;
-      
+
       // Update player socket ID
       existingPlayerByName.id = playerSocketId;
-      
+
+      // Refresh the attached persistent-profile identity on reconnect (the player
+      // may have renamed/changed avatar between sessions). Cleared if none presented.
+      if (profile) {
+        existingPlayerByName.profileId = profile.profileId;
+        existingPlayerByName.tag = profile.tag;
+        existingPlayerByName.avatar = profile.avatar ?? null;
+      }
+
       // Update host ID if applicable
       if (room.hostId === oldSocketId) {
         room.hostId = playerSocketId;
@@ -626,6 +651,13 @@ class RoomManager {
           if (game.unoCalled[oldSocketId] !== undefined) {
             game.unoCalled[playerSocketId] = game.unoCalled[oldSocketId];
             delete game.unoCalled[oldSocketId];
+          }
+
+          // Carry over the reconnecting player's accumulated round stats so a
+          // mid-round disconnect never orphans (or double-counts) their capture.
+          if (game.roundStats && game.roundStats[oldSocketId]) {
+            game.roundStats[playerSocketId] = game.roundStats[oldSocketId];
+            delete game.roundStats[oldSocketId];
           }
 
           // Remap lastAction playerId if it references the old socket
@@ -727,6 +759,9 @@ class RoomManager {
       seatNumber,
       isHost,
       secret: randomUUID(),
+      ...(profile
+        ? { profileId: profile.profileId, tag: profile.tag, avatar: profile.avatar ?? null }
+        : {}),
     };
 
     room.players.push(newPlayer);
@@ -959,6 +994,7 @@ class RoomManager {
         round: 1,
         lastRound: null,
         matchWinnerName: null,
+        matchStartedAt: Date.now(),
       };
       // Seed every current player at 0 so the scoreboard shows everyone.
       room.players.forEach((p) => { room.match!.scores[p.name.toLowerCase()] = 0; });
@@ -1010,8 +1046,127 @@ class RoomManager {
       logger.info(`[MATCH_WON] ${winnerName} reached ${room.match.scores[key]} in room ${code}`);
     }
 
+    // Server-authoritative stat capture. Fold this round (and, if decided, the
+    // whole match) into every seated human's persistent profile. Isolated in a
+    // try/catch so a profile-layer hiccup can never disrupt gameplay/banking.
+    try {
+      this.commitStats(room, game, result, matchWon);
+    } catch (err: any) {
+      logger.error(`[PROFILE_STATS] Failed to commit stats for room ${code}:`, err?.message);
+    }
+
     this.markDirty(code);
     return { result, matchWon };
+  }
+
+  /**
+   * Fold a just-banked round (and, when the match is decided, the whole match)
+   * into each seated human player's persistent profile. Server-authoritative:
+   * every counter is derived here from live game/match state, never from clients.
+   *
+   * Guardrails ignore insignificant games — only rounds with at least
+   * PROFILE_CONFIG.minHumansForStats human participants count, and only humans
+   * who presented a verified profile are committed (bots and profile-less guests
+   * are silently skipped). finalizeRound's idempotency guard means this runs at
+   * most once per round, so there is no double-counting across reconnects/retries.
+   */
+  private commitStats(
+    room: Room,
+    game: UnoGameState,
+    result: RoundResult,
+    matchWon: boolean
+  ): void {
+    const match = room.match;
+    if (!match) return;
+
+    // Significance gate: solo-vs-bots practice (fewer than N humans) never counts.
+    const humans = room.players.filter((p) => !p.isBot);
+    if (humans.length < PROFILE_CONFIG.minHumansForStats) return;
+
+    // Only humans carrying a persistent profile are tracked.
+    const tracked = humans.filter((p) => p.profileId);
+    if (tracked.length === 0) return;
+
+    // ---- Per-round placement, derived from remaining hand points --------------
+    // Winner (empty hand) is forced to 1st; everyone else ranks by ascending
+    // remaining points (fewer left = better finish).
+    const ranked = room.players
+      .filter((p) => game.hands[p.id])
+      .map((p) => ({
+        id: p.id,
+        pts: p.id === game.winnerId ? -1 : handPoints(game.hands[p.id]),
+      }))
+      .sort((a, b) => a.pts - b.pts);
+    const roundPlacement = new Map<string, number>();
+    ranked.forEach((r, i) => roundPlacement.set(r.id, i + 1));
+
+    for (const p of tracked) {
+      const won = p.id === game.winnerId;
+      profileManager.applyRoundResult(p.profileId!, {
+        delta: (game.roundStats && game.roundStats[p.id]) || emptyRoundDelta(),
+        won,
+        placement: roundPlacement.get(p.id) ?? 0,
+        // Only the round winner banks points in UNO scoring.
+        points: won ? result.pointsAwarded : 0,
+      });
+    }
+
+    if (!matchWon) return;
+
+    // ---- Match-level commit ---------------------------------------------------
+    // Final standings by cumulative score (higher = better; winner hit target).
+    const scores = match.scores;
+    const standings = [...room.players]
+      .map((p) => ({ name: p.name, score: scores[p.name.toLowerCase()] ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+    const matchPlacement = new Map<string, number>();
+    standings.forEach((s, i) => matchPlacement.set(s.name.toLowerCase(), i + 1));
+
+    const winnerName = match.matchWinnerName ?? result.winnerName;
+    const winnerScore = scores[winnerName.toLowerCase()] ?? 0;
+    const durationMs = match.matchStartedAt ? Math.max(0, Date.now() - match.matchStartedAt) : 0;
+    const players: MatchPlayerRecord[] = standings.map((s) => ({
+      name: s.name,
+      placement: matchPlacement.get(s.name.toLowerCase()) ?? 0,
+    }));
+    const houseRulesSummary = this.summarizeHouseRules(room.houseRules);
+
+    for (const p of tracked) {
+      const lname = p.name.toLowerCase();
+      const placement = matchPlacement.get(lname) ?? 0;
+      const won = winnerName.toLowerCase() === lname;
+      const myScore = scores[lname] ?? 0;
+      const record: MatchRecord = {
+        date: Date.now(),
+        players,
+        winnerName,
+        placement,
+        durationMs,
+        rounds: match.round,
+        settings: { targetScore: match.targetScore, houseRulesSummary },
+      };
+      profileManager.applyMatchResult(p.profileId!, {
+        won,
+        placement,
+        record,
+        playTimeMs: durationMs,
+        lossMargin: won ? null : Math.max(0, winnerScore - myScore),
+      });
+    }
+  }
+
+  /** Short, human-readable summary of the notable house rules in effect, stored
+   *  on each match-history record for the profile UI. */
+  private summarizeHouseRules(rules: HouseRules): string {
+    if (!rules) return 'Classic';
+    const flags: string[] = [];
+    if (rules.stacking) flags.push('Stacking');
+    if (rules.jumpIn) flags.push('Jump-In');
+    if (rules.sevenSwap || rules.zeroRotate) flags.push('Seven-O');
+    if (rules.drawUntilPlayable) flags.push('Draw to Match');
+    if (rules.challengeWildDrawFour) flags.push('Challenges');
+    if (rules.forcePlayDrawnCard) flags.push('Force Play');
+    return flags.length ? flags.join(', ') : 'Classic';
   }
 }
 

@@ -1,5 +1,6 @@
 import { CardItem, CardColor } from './deck';
 import { HouseRules } from './houseRules';
+import { RoundStatDelta } from '../profiles/profileTypes';
 
 export interface UnoGameState {
   deck: CardItem[];
@@ -50,4 +51,10 @@ export interface UnoGameState {
     targetId?: string; // for swap: the opponent whose hand was taken
     challengeSuccess?: boolean; // for challenge: whether the bluff was caught
   };
+  // Epoch ms this round started. Used to record round/match duration for stats.
+  startedAt?: number;
+  // Per-player accumulation of gameplay actions this round, keyed by socketId.
+  // Folded into each player's persistent profile at round end (server-authoritative
+  // stat capture). Transient game data — never sent to clients or trusted from them.
+  roundStats?: Record<string, RoundStatDelta>;
 }

@@ -7,6 +7,12 @@ export interface Player {
   isHost: boolean;
   secret?: string; // Private per-session token — only present on your own player.
   isBot?: boolean; // Server-side AI player — no socket, no voice, no chat.
+  // Persistent-profile identity, carried alongside the ephemeral socket id (never
+  // replacing it). Broadcast-safe: the durable profile id keys server-side stats,
+  // while tag/avatar are display-only. The profile secret is NEVER sent here.
+  profileId?: string;
+  tag?: string; // short discriminator (e.g. "5LHL")
+  avatar?: string | null; // preset avatar key, or null for the procedural fallback
 }
 
 export interface Spectator {

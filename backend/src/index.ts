@@ -5,6 +5,8 @@ import cors from 'cors';
 import compression from 'compression';
 import { roomManager, Room } from './rooms/roomManager';
 import { createRoomStore } from './rooms/roomStore';
+import { profileManager } from './profiles/profileManager';
+import { createProfileStore } from './profiles/profileStore';
 import {
   drawCardAction,
   playCardAction,
@@ -448,6 +450,10 @@ function rateLimit(opts: { windowMs: number; max: number }) {
 // Max 20 room creations per IP per minute.
 const createRoomLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 
+// Profile creation is cheap but should not be a spam vector (each creates a
+// durable file). Reads/edits are looser; a single limiter keeps it simple.
+const profileWriteLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+
 // --- REST APIs ---
 
 // Health check — used by container orchestrators / load balancers to verify the
@@ -561,6 +567,81 @@ app.post('/api/rooms/join', (req, res) => {
   });
 });
 
+// --- Player Profile APIs ---
+// Server-authoritative identity + stats. Clients may CREATE a profile and EDIT
+// their own (display name / avatar) or RESET stats, each gated by the profile's
+// private secret. Clients can never write stat values — those are computed
+// server-side at round/match end (see roomManager.finalizeRound).
+
+// Create a brand-new guest profile. Returns the FULL profile INCLUDING its private
+// secret — the only time the secret is disclosed. The client stores it locally and
+// presents it to authenticate future edits.
+app.post('/api/profiles', profileWriteLimiter, (req, res) => {
+  try {
+    const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName : '';
+    const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar : null;
+    if (!displayName.trim()) {
+      res.status(400).json({ error: 'A display name is required' });
+      return;
+    }
+    const profile = profileManager.createProfile({ displayName, avatar });
+    // The creator receives the secret; everyone else only ever sees publicProfile.
+    res.status(201).json({ profile: profileManager.getPublicProfile(profile.id), secret: profile.secret });
+  } catch (error: any) {
+    logger.error('[REST] Error creating profile:', error);
+    res.status(500).json({ error: error.message || 'Failed to create profile' });
+  }
+});
+
+// Public view of a profile (stats, history, dates) for the profile UI. No secret.
+app.get('/api/profiles/:id', (req, res) => {
+  const profile = profileManager.getPublicProfile(req.params.id);
+  if (!profile) {
+    res.status(404).json({ error: 'Profile not found' });
+    return;
+  }
+  res.status(200).json({ profile });
+});
+
+// Edit a profile's display name and/or avatar. Secret-authenticated.
+app.patch('/api/profiles/:id', profileWriteLimiter, (req, res) => {
+  try {
+    const secret = typeof req.body?.secret === 'string' ? req.body.secret : '';
+    if (!profileManager.verify(req.params.id, secret)) {
+      res.status(403).json({ error: 'Not authorized to edit this profile' });
+      return;
+    }
+    let profile = profileManager.getPublicProfile(req.params.id);
+    if (typeof req.body?.displayName === 'string' && req.body.displayName.trim()) {
+      profile = profileManager.renameProfile(req.params.id, secret, req.body.displayName);
+    }
+    if (req.body?.avatar !== undefined) {
+      const avatar = typeof req.body.avatar === 'string' ? req.body.avatar : null;
+      profile = profileManager.setAvatar(req.params.id, secret, avatar);
+    }
+    res.status(200).json({ profile });
+  } catch (error: any) {
+    logger.error('[REST] Error editing profile:', error);
+    res.status(400).json({ error: error.message || 'Failed to edit profile' });
+  }
+});
+
+// Reset all lifetime stats / history. Keeps the same Player ID and tag. Secret-authenticated.
+app.post('/api/profiles/:id/reset', profileWriteLimiter, (req, res) => {
+  try {
+    const secret = typeof req.body?.secret === 'string' ? req.body.secret : '';
+    if (!profileManager.verify(req.params.id, secret)) {
+      res.status(403).json({ error: 'Not authorized to reset this profile' });
+      return;
+    }
+    const profile = profileManager.resetProfile(req.params.id, secret);
+    res.status(200).json({ profile });
+  } catch (error: any) {
+    logger.error('[REST] Error resetting profile:', error);
+    res.status(400).json({ error: error.message || 'Failed to reset profile' });
+  }
+});
+
 // --- Socket.IO Server Setup ---
 // Transports are left at the Socket.IO default (`['polling', 'websocket']`) on
 // purpose. Clients open on HTTP long-polling and upgrade to WebSocket once the
@@ -609,6 +690,25 @@ async function attachRedisAdapter(): Promise<void> {
   } catch (err: any) {
     logger.error('[REDIS_ADAPTER] Failed to enable adapter, continuing single-instance:', err?.message);
   }
+}
+
+/**
+ * Resolve a client-presented persistent-profile identity into the trusted, public
+ * fields the room layer attaches to a seated Player. Returns undefined unless BOTH
+ * ids are present, the secret verifies against the stored profile (constant-time),
+ * and the profile exists — so an unverified or spoofed profileId is never trusted.
+ * Also bumps last-seen. The profile's private secret is never propagated.
+ */
+function resolveProfileIdentity(
+  profileId?: string,
+  profileSecret?: string
+): { profileId: string; tag?: string; avatar?: string | null } | undefined {
+  if (!profileId || !profileSecret) return undefined;
+  if (!profileManager.verify(profileId, profileSecret)) return undefined;
+  const p = profileManager.getProfile(profileId);
+  if (!p) return undefined;
+  profileManager.touchLastSeen(profileId);
+  return { profileId: p.id, tag: p.tag, avatar: p.avatarUrl };
 }
 
 io.on('connection', (socket) => {
@@ -671,10 +771,11 @@ io.on('connection', (socket) => {
   }
 
   // Create room event (alternative pathway)
-  on('create-room', guard(createRoomSchema, ({ name }) => {
+  on('create-room', guard(createRoomSchema, ({ name, profileId, profileSecret }) => {
     try {
+      const identity = resolveProfileIdentity(profileId, profileSecret);
       const room = roomManager.createRoom();
-      const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id);
+      const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id, undefined, identity);
 
       currentRoomCode = room.code;
       currentName = name;
@@ -692,7 +793,7 @@ io.on('connection', (socket) => {
   }));
 
   // Join room socket handler
-  on('join-room', guard(joinRoomSchema, ({ code, name, secret }) => {
+  on('join-room', guard(joinRoomSchema, ({ code, name, secret, profileId, profileSecret }) => {
     if (currentRoomCode) {
       logger.debug(`[Socket] Duplicate join-room blocked for socket ${socket.id}. Already in room ${currentRoomCode}`);
       return;
@@ -700,7 +801,8 @@ io.on('connection', (socket) => {
 
     try {
       const upperCode = code.toUpperCase();
-      const { room, player, isSpectator, spectator } = roomManager.joinRoom(upperCode, name, socket.id, secret);
+      const identity = resolveProfileIdentity(profileId, profileSecret);
+      const { room, player, isSpectator, spectator } = roomManager.joinRoom(upperCode, name, socket.id, secret, identity);
 
       currentRoomCode = upperCode;
       currentName = name;
@@ -1223,6 +1325,17 @@ async function start() {
     logger.error('[STORE] Hydration failed (starting with no restored rooms):', err?.message);
   }
 
+  // Build the durable profile store and rehydrate persistent player profiles +
+  // lifetime stats. Independent of the room store (its own STORE/PROFILE_DIR),
+  // so a profile-layer failure never blocks the game from starting.
+  const profileStore = await createProfileStore();
+  profileManager.setStore(profileStore);
+  try {
+    await profileManager.hydrate();
+  } catch (err: any) {
+    logger.error('[PROFILE_STORE] Hydration failed (starting with no restored profiles):', err?.message);
+  }
+
   // Re-arm turn timers for any game that was in progress when the server stopped.
   // Rehydration restores room STATE but not the live setTimeout handles, so an
   // active game would otherwise sit with a stale/absent deadline until a client
@@ -1275,7 +1388,8 @@ async function shutdown(signal: string) {
   try {
     io.close();                       // stop Socket.IO, disconnect clients
     await new Promise<void>((resolve) => server.close(() => resolve())); // stop HTTP
-    await roomManager.shutdown();     // flush pending writes + close store
+    await roomManager.shutdown();     // flush pending room writes + close store
+    await profileManager.shutdown();  // flush pending profile writes + close store
     logger.info('[SHUTDOWN] Clean shutdown complete.');
     clearTimeout(forceExit);
     process.exit(0);

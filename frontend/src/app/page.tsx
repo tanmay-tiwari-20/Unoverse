@@ -6,6 +6,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertCircle, Eye as EyeIcon, Zap } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useSocket } from "../hooks/useSocket";
+import { useProfileStore } from "../store/useProfileStore";
+import { CreateProfileModal } from "../components/profile/CreateProfileModal";
+import { ProfileModal } from "../components/profile/ProfileModal";
+import { PresetAvatar } from "../components/profile/PresetAvatar";
 
 const LandingScene = dynamic(
   () =>
@@ -22,11 +26,25 @@ export default function LandingPage() {
   useSocket();
   const requestInProgress = useRef(false);
 
+  // Persistent profile identity. A returning player is loaded from localStorage;
+  // a first-time visitor is prompted to create one (once) and never re-prompted.
+  const profileHydrated = useProfileStore((s) => s.hydrated);
+  const profileId = useProfileStore((s) => s.profileId);
+  const profileName = useProfileStore((s) => s.displayName);
+  const profileAvatar = useProfileStore((s) => s.avatar);
+  const setIsProfileOpen = useProfileStore((s) => s.setIsProfileOpen);
+
   // State variables
   const [displayName, setDisplayName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Prefill the name field from the persistent profile once it hydrates, so the
+  // player never retypes their name. They can still override it per-session.
+  useEffect(() => {
+    if (profileName) setDisplayName((prev) => prev || profileName);
+  }, [profileName]);
 
   // Set when the target room's player slots are all full: the user is informed
   // BEFORE entering that they will join as a spectator, and must confirm. (A room
@@ -207,6 +225,24 @@ export default function LandingPage() {
       <div className="absolute inset-0 z-[1] arcade-bg opacity-50 pointer-events-none mix-blend-screen" />
       <div className="absolute inset-0 z-[1] arcade-dots pointer-events-none" />
 
+      {/* Profile chip — opens the persistent player profile. Only shown once a
+          profile exists (first-time visitors see the create flow instead). */}
+      {profileHydrated && profileId && (
+        <motion.button
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, type: "spring", damping: 20, stiffness: 260 }}
+          onClick={() => setIsProfileOpen(true)}
+          className="absolute top-4 right-4 z-20 panel-arcade bg-gradient-to-b from-neutral-900/90 to-black/90 backdrop-blur-md pl-2 pr-3.5 py-2 flex items-center gap-2.5 pointer-events-auto cursor-pointer hover:scale-[1.03] transition-transform"
+          aria-label="Open your player profile"
+        >
+          <PresetAvatar avatarKey={profileAvatar} size={36} />
+          <span className="font-arcade text-sm text-white uppercase tracking-wide max-w-[7rem] truncate">
+            {profileName ?? "Profile"}
+          </span>
+        </motion.button>
+      )}
+
       {/* Foreground UI */}
       <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
         {/* Centerpiece Hero */}
@@ -386,6 +422,17 @@ export default function LandingPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* First-visit identity: prompt to create a profile once localStorage has
+          been read and no profile exists. Prefills whatever name was typed. */}
+      <CreateProfileModal
+        isOpen={profileHydrated && !profileId}
+        initialName={displayName}
+        onCreated={(name) => setDisplayName(name)}
+      />
+
+      {/* Persistent player profile viewer/editor (opened from the profile chip). */}
+      <ProfileModal />
     </main>
   );
 }
