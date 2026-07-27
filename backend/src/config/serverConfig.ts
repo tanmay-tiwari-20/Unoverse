@@ -181,7 +181,7 @@ export interface ProfileConfig {
 
 export const PROFILE_CONFIG: ProfileConfig = {
   recentMatchesMax: num(process.env.RECENT_MATCHES_MAX, 20),
-  minHumansForStats: num(process.env.PROFILE_MIN_HUMANS, 2),
+  minHumansForStats: num(process.env.PROFILE_MIN_HUMANS, 1),
 };
 
 // ---------------------------------------------------------------------------

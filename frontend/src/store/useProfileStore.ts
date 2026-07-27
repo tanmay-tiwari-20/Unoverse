@@ -41,6 +41,7 @@ interface ProfileState {
   isProfileOpen: boolean;
 
   // ---- Actions --------------------------------------------------------------
+  setHydrated: () => void;
   setIsProfileOpen: (open: boolean) => void;
   createProfile: (displayName: string, avatar?: string | null) => Promise<PublicProfile | null>;
   refreshProfile: () => Promise<PublicProfile | null>;
@@ -73,6 +74,7 @@ export const useProfileStore = create<ProfileState>()(
       error: null,
       isProfileOpen: false,
 
+      setHydrated: () => set({ hydrated: true }),
       setIsProfileOpen: (open) => set({ isProfileOpen: open }),
 
       createProfile: async (displayName, avatar) => {
@@ -169,7 +171,7 @@ export const useProfileStore = create<ProfileState>()(
       // distinguish "no profile yet" from "not loaded yet" and avoid flashing the
       // create-profile modal for returning players.
       onRehydrateStorage: () => (state) => {
-        if (state) state.hydrated = true;
+        if (state) state.setHydrated();
       },
     },
   ),

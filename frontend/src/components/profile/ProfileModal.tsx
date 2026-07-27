@@ -159,10 +159,10 @@ export function ProfileModal() {
             exit={{ opacity: 0, scale: 0.95, y: 12 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[90dvh]"
+            className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[90dvh]"
           >
             {/* ── Header bar ─────────────────────────────────────────── */}
-            <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b-2 border-white/15 bg-red-600/20 shrink-0">
               <h2 id="profile-modal-title" className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
                 {mode === "edit" ? <><Pencil size={18} className="text-white" /> Edit Profile</> : <><Trophy size={18} className="text-white" /> Player Profile</>}
               </h2>
@@ -175,7 +175,7 @@ export function ProfileModal() {
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 flex flex-col gap-5">
+            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 flex flex-col gap-5">
               <AnimatePresence mode="wait">
                 {storeError && (
                   <motion.div
@@ -290,7 +290,7 @@ export function ProfileModal() {
                   {/* Headline record */}
                   <div>
                     <SectionTitle icon={Trophy}>Record</SectionTitle>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <Stat label="Played" value={stats?.matchesPlayed ?? 0} />
                       <Stat label="Won" value={stats?.matchesWon ?? 0} accent="text-lime-400" />
                       <Stat label="Lost" value={matchesLost} accent="text-rose-400" />
@@ -301,7 +301,7 @@ export function ProfileModal() {
                   {/* Streaks + rounds */}
                   <div>
                     <SectionTitle icon={Flame}>Rounds &amp; Streaks</SectionTitle>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <Stat label="Rounds" value={stats?.roundsPlayed ?? 0} icon={Layers} />
                       <Stat label="R. Won" value={stats?.roundsWon ?? 0} icon={Layers} accent="text-lime-400" />
                       <Stat label="Streak" value={stats?.currentStreak ?? 0} icon={Flame} accent="text-orange-400" />
@@ -314,7 +314,7 @@ export function ProfileModal() {
                   {/* Card play breakdown */}
                   <div>
                     <SectionTitle icon={Hand}>Cards</SectionTitle>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <Stat label="Played" value={stats?.cardsPlayed ?? 0} />
                       <Stat label="Drawn" value={stats?.cardsDrawn ?? 0} />
                       <Stat label="Reverse" value={stats?.reverseCardsPlayed ?? 0} />
@@ -329,7 +329,7 @@ export function ProfileModal() {
                   {/* Calls + challenges */}
                   <div>
                     <SectionTitle icon={ShieldCheck}>Calls &amp; Challenges</SectionTitle>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <Stat label="UNO!" value={stats?.unoCalls ?? 0} icon={Zap} accent="text-yellow-400" />
                       <Stat label="Last Card" value={stats?.lastCardCalls ?? 0} icon={Hand} />
                       <Stat label="Ch. Won" value={stats?.challengesWon ?? 0} icon={ShieldCheck} accent="text-lime-400" />
