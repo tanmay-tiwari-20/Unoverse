@@ -41,6 +41,7 @@ import {
   playCardSchema,
   chooseColorSchema,
   updateHouseRulesSchema,
+  updateArenaSchema,
   jumpInSchema,
   swapTargetSchema,
   addBotsSchema,
@@ -473,9 +474,12 @@ app.post('/api/rooms', createRoomLimiter, (req, res) => {
     // Optional visibility: 'public' rooms are discoverable by Quick Play.
     // Anything else (including absence — every existing client) stays private.
     const visibility = req.body?.visibility === 'public' ? 'public' : 'private';
-    const room = roomManager.createRoom(visibility);
-    logger.debug(`[REST] Created room: ${room.code} (${visibility})`);
-    res.status(201).json({ code: room.code, visibility });
+    // Optional themed arena. Any value (including `random` or absence) is
+    // resolved to a concrete id inside createRoom, so it's safe to pass through.
+    const arena = typeof req.body?.arena === 'string' ? req.body.arena : undefined;
+    const room = roomManager.createRoom(visibility, arena);
+    logger.debug(`[REST] Created room: ${room.code} (${visibility}, arena: ${room.arena})`);
+    res.status(201).json({ code: room.code, visibility, arena: room.arena });
   } catch (error: any) {
     logger.error('[REST] Error creating room:', error);
     res.status(500).json({ error: error.message || 'Failed to create room' });
@@ -771,10 +775,10 @@ io.on('connection', (socket) => {
   }
 
   // Create room event (alternative pathway)
-  on('create-room', guard(createRoomSchema, ({ name, profileId, profileSecret }) => {
+  on('create-room', guard(createRoomSchema, ({ name, arena, profileId, profileSecret }) => {
     try {
       const identity = resolveProfileIdentity(profileId, profileSecret);
-      const room = roomManager.createRoom();
+      const room = roomManager.createRoom('private', arena);
       const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id, undefined, identity);
 
       currentRoomCode = room.code;
@@ -934,6 +938,21 @@ io.on('connection', (socket) => {
     } catch (error: any) {
       logger.error(`[Socket] Update house rules error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to update house rules' });
+    }
+  }));
+
+  // Update themed arena (host only, lobby only). Purely cosmetic; the whole room
+  // (arena included) is broadcast so every player and spectator re-themes in sync.
+  on('update-arena', guard(updateArenaSchema, ({ arena }) => {
+    if (!currentRoomCode) return;
+    try {
+      const room = roomManager.updateArena(currentRoomCode, socket.id, arena);
+      logger.debug(`[ARENA] Room ${currentRoomCode} arena set to ${room.arena} by host ${socket.id}`);
+      io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(room));
+      io.to(currentRoomCode).emit('arena-updated', { arena: room.arena });
+    } catch (error: any) {
+      logger.error(`[Socket] Update arena error:`, error.message);
+      socket.emit('error', { message: error.message || 'Failed to update arena' });
     }
   }));
 

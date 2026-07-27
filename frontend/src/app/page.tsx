@@ -10,6 +10,8 @@ import { useProfileStore } from "../store/useProfileStore";
 import { CreateProfileModal } from "../components/profile/CreateProfileModal";
 import { ProfileModal } from "../components/profile/ProfileModal";
 import { PresetAvatar } from "../components/profile/PresetAvatar";
+import { CreateRoomModal } from "../components/lobby/CreateRoomModal";
+import { ArenaSelection } from "../lib/arenas/types";
 
 const LandingScene = dynamic(
   () =>
@@ -39,6 +41,9 @@ export default function LandingPage() {
   const [roomCode, setRoomCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Landing "Create" opens an arena picker; the actual room POST happens once
+  // the host confirms a world (or Random) in the modal.
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Prefill the name field from the persistent profile once it hydrates, so the
   // player never retypes their name. They can still override it per-session.
@@ -71,11 +76,26 @@ export default function LandingPage() {
     }
   }, []);
 
-  const handleCreateRoom = async (e: React.MouseEvent) => {
+  // Step 1 — the landing "Create" button. Validate the name, then open the
+  // arena picker. The room isn't created until the host confirms a world.
+  const openCreateModal = (e: React.MouseEvent) => {
     e.preventDefault();
+    if (!displayName.trim()) {
+      setError("Please enter a display name first.");
+      return;
+    }
+    setError(null);
+    setCreateOpen(true);
+  };
+
+  // Step 2 — confirmed from CreateRoomModal with the chosen arena selection
+  // (a concrete id or 'random'). POST it; the server resolves 'random' and
+  // echoes the concrete arena back on the room.
+  const handleCreateRoom = async (arena: ArenaSelection) => {
     if (requestInProgress.current) return;
     if (!displayName.trim()) {
       setError("Please enter a display name first.");
+      setCreateOpen(false);
       return;
     }
 
@@ -89,6 +109,7 @@ export default function LandingPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({ arena }),
       });
 
       if (!response.ok) {
@@ -106,6 +127,7 @@ export default function LandingPage() {
       console.error(err);
       setError(err.message || "Something went wrong. Is the server running?");
       setLoading(false);
+      setCreateOpen(false);
     } finally {
       requestInProgress.current = false;
     }
@@ -336,7 +358,7 @@ export default function LandingPage() {
 
                   <button
                     type="button"
-                    onClick={handleCreateRoom}
+                    onClick={openCreateModal}
                     disabled={loading}
                     className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
                   >
@@ -433,6 +455,15 @@ export default function LandingPage() {
 
       {/* Persistent player profile viewer/editor (opened from the profile chip). */}
       <ProfileModal />
+
+      {/* Arena picker shown when creating a room — the room is POSTed with the
+          chosen world once the host confirms. */}
+      <CreateRoomModal
+        isOpen={createOpen}
+        loading={loading}
+        onClose={() => setCreateOpen(false)}
+        onConfirm={handleCreateRoom}
+      />
     </main>
   );
 }

@@ -30,8 +30,21 @@ const profileSecret = z.string().min(1).max(200);
 
 export const cardColor = z.enum(['red', 'blue', 'green', 'yellow']);
 
+// Themed 3D arena selection. Concrete ids plus `random` (resolved server-side at
+// creation). Kept in sync with `rooms/arenas.ts` / the frontend arena registry.
+export const arenaSelection = z.enum([
+  'classic',
+  'space',
+  'jungle',
+  'glacier',
+  'cyber',
+  'volcano',
+  'random',
+]);
+
 export const createRoomSchema = z.object({
   name: nonEmptyName,
+  arena: arenaSelection.optional(),
   profileId: profileId.optional(),
   profileSecret: profileSecret.optional(),
 });
@@ -178,6 +191,11 @@ export const updateHouseRulesSchema = z.object({
   rules: houseRulesSchema,
 });
 
+/** Arena change (host only, lobby only). `random` resolves server-side. */
+export const updateArenaSchema = z.object({
+  arena: arenaSelection,
+});
+
 export const jumpInSchema = z.object({
   cardId,
 });
@@ -215,6 +233,7 @@ export type PlayCardPayload = z.infer<typeof playCardSchema>;
 export type ChooseColorPayload = z.infer<typeof chooseColorSchema>;
 export type HouseRulesPayload = z.infer<typeof houseRulesSchema>;
 export type UpdateHouseRulesPayload = z.infer<typeof updateHouseRulesSchema>;
+export type UpdateArenaPayload = z.infer<typeof updateArenaSchema>;
 export type JumpInPayload = z.infer<typeof jumpInSchema>;
 export type SwapTargetPayload = z.infer<typeof swapTargetSchema>;
 export type AddBotsPayload = z.infer<typeof addBotsSchema>;

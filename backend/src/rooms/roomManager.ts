@@ -4,6 +4,7 @@ import { startGameState } from '../game/actions';
 import { getNextActivePlayerId } from '../game/turnManager';
 import { calculateRoundPoints, handPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
 import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../game/houseRules';
+import { ArenaId, resolveSelection, resolveArena } from './arenas';
 import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
 import { pickBotName } from '../bots/botNames';
@@ -76,6 +77,12 @@ export interface Room {
   // Discoverability for Quick Play matchmaking. Optional for backward
   // compatibility with persisted rooms — absent means 'private'.
   visibility?: RoomVisibility;
+  // Themed 3D world the room is played in. Chosen by the host at creation and
+  // editable only while status is 'lobby'; purely presentational (never affects
+  // gameplay), it rides `publicRoom` to all players and spectators. Optional for
+  // backward compatibility with rooms persisted before arenas existed — absent
+  // is treated as the default arena on the client.
+  arena?: ArenaId;
   // Epoch ms of room creation; used by matchmaking to prefer older waiting rooms
   // and by cleanup to expire abandoned public rooms.
   createdAt?: number;
@@ -113,6 +120,8 @@ class RoomManager {
       // Backward compatibility: rooms persisted before House Rules existed (or with
       // a partial rule set) are normalized against current defaults on load.
       room.houseRules = normalizeHouseRules(room.houseRules);
+      // Rooms persisted before arenas existed default to the classic world.
+      room.arena = resolveArena(room.arena);
       this.rooms.set(room.code.toUpperCase(), room);
     }
     if (rooms.length) {
@@ -198,9 +207,12 @@ class RoomManager {
     return code;
   }
 
-  // Create a new room in memory (pre-socket binding)
-  public createRoom(visibility: RoomVisibility = 'private'): Room {
+  // Create a new room in memory (pre-socket binding). `arena` is the host's
+  // themed-world selection; `'random'` (or any unknown value) is resolved to a
+  // concrete id HERE, once, so every client that later receives the room agrees.
+  public createRoom(visibility: RoomVisibility = 'private', arena?: string): Room {
     const code = this.generateRoomCode();
+    const resolvedArena = resolveSelection(arena);
     const newRoom: Room = {
       code,
       hostId: '',
@@ -208,10 +220,11 @@ class RoomManager {
       status: 'lobby',
       houseRules: { ...DEFAULT_HOUSE_RULES },
       visibility,
+      arena: resolvedArena,
       createdAt: Date.now(),
     };
     this.rooms.set(code, newRoom);
-    logger.debug(`[ROOM_CREATED] Code: ${code} (${visibility})`);
+    logger.debug(`[ROOM_CREATED] Code: ${code} (${visibility}, arena: ${resolvedArena})`);
     this.markDirty(code);
     return newRoom;
   }
@@ -951,6 +964,28 @@ class RoomManager {
     }
 
     room.houseRules = normalizeHouseRules({ ...room.houseRules, ...partial });
+    this.markDirty(code);
+    return room;
+  }
+
+  /**
+   * Change the room's themed arena (host only, lobby only). Purely cosmetic; the
+   * `random` selection resolves to a concrete id here so all clients agree.
+   * Locked once the game is playing so the world can't change mid-match.
+   */
+  public updateArena(code: string, hostSocketId: string, arena: string): Room {
+    const room = this.rooms.get(code.toUpperCase());
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.hostId !== hostSocketId) {
+      throw new Error('Only the host can change the arena');
+    }
+    if (room.status !== 'lobby') {
+      throw new Error('The arena is locked once the game has started');
+    }
+
+    room.arena = resolveSelection(arena);
     this.markDirty(code);
     return room;
   }

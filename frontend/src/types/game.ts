@@ -1,4 +1,5 @@
 import { HouseRules } from '../lib/houseRules';
+import { ArenaId } from '../lib/arenas/types';
 
 export interface Player {
   id: string; // Socket ID (or a synthetic bot id for server-side bots)
@@ -29,4 +30,5 @@ export interface Room {
   status: 'lobby' | 'playing';
   houseRules?: HouseRules; // present on all rooms; optional for backward compatibility
   visibility?: 'public' | 'private'; // public rooms are discoverable by Quick Play
+  arena?: ArenaId; // themed 3D world; absent → default (classic). Purely cosmetic.
 }

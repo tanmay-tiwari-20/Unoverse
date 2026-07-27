@@ -463,6 +463,15 @@ export const useSocket = () => {
     }
   };
 
+  // Host-only, lobby-only. `arena` may be a concrete id or 'random' (the server
+  // resolves 'random' to a concrete id and broadcasts the whole room back).
+  const updateArena = (arena: string) => {
+    const currentSocket = useGameStore.getState().socket;
+    if (currentSocket) {
+      currentSocket.emit('update-arena', { arena });
+    }
+  };
+
   const jumpIn = (cardId: string) => {
     const state = useGameStore.getState();
     const currentSocket = state.socket;
@@ -516,6 +525,7 @@ export const useSocket = () => {
     chooseColor,
     callUno,
     updateHouseRules,
+    updateArena,
     jumpIn,
     chooseSwapTarget,
     challengeWildFour,

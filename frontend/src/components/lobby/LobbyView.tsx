@@ -1,11 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Bot, Eye, Minus, Play, Plus, ScrollText } from 'lucide-react';
+import { Bot, Eye, Globe2, Minus, Play, Plus, ScrollText } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useSocket } from '../../hooks/useSocket';
 import { summarizeActiveRules } from '../../lib/houseRules';
+import { getArenaMeta } from '../../lib/arenas/registry';
+import { ArenaPickerModal } from './ArenaPickerModal';
 import {
   getMaxPlayers,
   getMaxSpectators,
@@ -32,6 +34,8 @@ export const LobbyView: React.FC = () => {
   const { setIsHouseRulesOpen } = useSettingsStore();
   const { startGame, addBots, removeBot } = useSocket();
 
+  const [isArenaOpen, setIsArenaOpen] = React.useState(false);
+
   const isHost = player?.isHost || false;
   const totalPlayers = room?.players.length || 0;
   const humanPlayers = room?.players.filter((p) => !p.isBot) ?? [];
@@ -46,6 +50,7 @@ export const LobbyView: React.FC = () => {
   const roomCompletelyFull = isRoomCompletelyFull(room, houseRules);
 
   const activeRules = houseRules ? summarizeActiveRules(houseRules) : [];
+  const arenaMeta = getArenaMeta(room?.arena);
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -95,6 +100,13 @@ export const LobbyView: React.FC = () => {
               title="Configure House Rules"
             >
               <ScrollText size={15} /> House Rules
+            </button>
+            <button
+              onClick={() => setIsArenaOpen(true)}
+              className="btn-arcade bg-gradient-to-b from-cyan-400 to-blue-600 text-white py-2.5 px-5 text-sm uppercase inline-flex items-center gap-1.5 cursor-pointer"
+              title={`Arena: ${arenaMeta.name} — click to change`}
+            >
+              <Globe2 size={15} /> Arena
             </button>
           </div>
 
@@ -159,8 +171,27 @@ export const LobbyView: React.FC = () => {
           >
             <ScrollText size={14} /> View Rules
           </button>
+          <button
+            onClick={() => setIsArenaOpen(true)}
+            className="btn-arcade bg-gradient-to-b from-cyan-400 to-blue-600 text-white py-2 px-5 text-xs uppercase inline-flex items-center gap-1.5"
+            title={`Arena: ${arenaMeta.name}`}
+          >
+            <Globe2 size={14} /> View Arena
+          </button>
         </div>
       )}
+
+      {/* Current arena chip — the world everyone will play in */}
+      <span
+        className="font-rounded font-bold text-[9px] uppercase tracking-wider px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5"
+        style={{
+          background: `${arenaMeta.accent}1f`,
+          border: `1px solid ${arenaMeta.accent}66`,
+          color: arenaMeta.accent,
+        }}
+      >
+        <Globe2 size={11} /> {arenaMeta.name}
+      </span>
 
       {/* Compact summary of the notable active house rules */}
       {activeRules.length > 0 && (
@@ -180,6 +211,8 @@ export const LobbyView: React.FC = () => {
           )}
         </div>
       )}
+
+      <ArenaPickerModal isOpen={isArenaOpen} onClose={() => setIsArenaOpen(false)} />
     </div>
   );
 };
