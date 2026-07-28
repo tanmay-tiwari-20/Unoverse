@@ -142,7 +142,7 @@ function Billboards({ reducedMotion }: { reducedMotion?: boolean }) {
   );
 }
 
-/** Drones + flying vehicles: emissive bodies with point lights on orbits. */
+/** Drones + flying vehicles: detailed cross-frame drones and sleek vehicles. */
 function FlyingTraffic({ count, reducedMotion }: { count: number; reducedMotion?: boolean }) {
   const group = useRef<THREE.Group>(null);
   const specs = useMemo(() => {
@@ -156,6 +156,23 @@ function FlyingTraffic({ count, reducedMotion }: { count: number; reducedMotion?
       vehicle: r() > 0.5,
     }));
   }, [count]);
+
+  // Shared drone geometry: cross-frame arms + rotor disc
+  const droneArmGeo = useDisposable(() => new THREE.BoxGeometry(0.28, 0.025, 0.04), []);
+  const rotorGeo = useDisposable(() => new THREE.CylinderGeometry(0.07, 0.07, 0.008, 8), []);
+  const vehicleGeo = useDisposable(() => {
+    // Sleek wedge-shaped vehicle body
+    const g = new THREE.BoxGeometry(0.5, 0.1, 0.18);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      // Taper the nose
+      if (x > 0) pos.setZ(i, pos.getZ(i) * (1 - x * 0.6));
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, []);
 
   useFrame(({ clock }) => {
     if (reducedMotion || !group.current) return;
@@ -173,17 +190,41 @@ function FlyingTraffic({ count, reducedMotion }: { count: number; reducedMotion?
     <group ref={group}>
       {specs.map((s, i) => (
         <group key={i}>
-          <mesh>
-            {s.vehicle
-              ? <boxGeometry args={[0.5, 0.12, 0.2]} />
-              : <boxGeometry args={[0.24, 0.08, 0.24]} />}
-            <meshStandardMaterial color="#111" emissive={s.color} emissiveIntensity={1.2} />
-          </mesh>
-          {/* neon trail */}
-          <mesh position={[s.vehicle ? -0.6 : 0, 0, 0]}>
-            <boxGeometry args={[s.vehicle ? 1.0 : 0.05, 0.03, 0.05]} />
-            <meshBasicMaterial color={s.color} transparent opacity={0.5} blending={THREE.AdditiveBlending} depthWrite={false} />
-          </mesh>
+          {s.vehicle ? (
+            // Sleek flying car
+            <>
+              <mesh geometry={vehicleGeo}>
+                <meshStandardMaterial color="#111" emissive={s.color} emissiveIntensity={1.2} roughness={0.3} metalness={0.8} />
+              </mesh>
+              {/* Undercarriage glow */}
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 0]}>
+                <planeGeometry args={[0.3, 0.12]} />
+                <meshBasicMaterial color={s.color} transparent opacity={0.5} blending={THREE.AdditiveBlending} depthWrite={false} />
+              </mesh>
+            </>
+          ) : (
+            // Cross-frame quadcopter drone
+            <>
+              {/* Cross arms */}
+              <mesh geometry={droneArmGeo}>
+                <meshStandardMaterial color="#1a1a1a" roughness={0.5} metalness={0.7} />
+              </mesh>
+              <mesh geometry={droneArmGeo} rotation={[0, Math.PI / 2, 0]}>
+                <meshStandardMaterial color="#1a1a1a" roughness={0.5} metalness={0.7} />
+              </mesh>
+              {/* Central body */}
+              <mesh>
+                <boxGeometry args={[0.06, 0.04, 0.06]} />
+                <meshStandardMaterial color="#111" emissive={s.color} emissiveIntensity={1.5} />
+              </mesh>
+              {/* 4 rotor discs */}
+              {[[-0.13, 0, 0], [0.13, 0, 0], [0, 0, -0.13], [0, 0, 0.13]].map((p, j) => (
+                <mesh key={j} geometry={rotorGeo} position={p as [number, number, number]}>
+                  <meshBasicMaterial color={s.color} transparent opacity={0.55} blending={THREE.AdditiveBlending} depthWrite={false} />
+                </mesh>
+              ))}
+            </>
+          )}
           <pointLight color={s.color} intensity={2} distance={4} decay={2} />
         </group>
       ))}

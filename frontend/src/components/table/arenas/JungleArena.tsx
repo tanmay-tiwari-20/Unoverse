@@ -81,17 +81,43 @@ function VegetationLayer({
   return <Instances transforms={transforms} geometry={geometry} material={mat} castShadow={castShadow} />;
 }
 
-/** Hanging vine: a thin drooping strip with a subtle sway. */
+/** Hanging vine: a thin drooping strip with leaf clusters and a subtle sway. */
 function Vines({ count, reducedMotion }: { count: number; reducedMotion?: boolean }) {
-  const geo = useDisposable(() => new THREE.CylinderGeometry(0.03, 0.015, 3.4, 5), []);
-  const mat = useDisposable(() => new THREE.MeshStandardMaterial({ color: '#2f5d2a', roughness: 1 }), []);
+  const stemGeo = useDisposable(() => {
+    const g = new THREE.CylinderGeometry(0.025, 0.012, 3.4, 5, 4);
+    // Slight taper curve — displace only the upper half
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i);
+      const t = Math.max(0, y / 1.7);
+      pos.setX(i, pos.getX(i) + Math.sin(i * 1.3) * 0.015 * t);
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, []);
+  // Small leaf: a rounded diamond shape
+  const leafGeo = useDisposable(() => {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0.06); shape.quadraticCurveTo(0.04, 0.03, 0, -0.06);
+    shape.quadraticCurveTo(-0.04, 0.03, 0, 0.06);
+    return new THREE.ShapeGeometry(shape, 4);
+  }, []);
+  const stemMat = useDisposable(() => new THREE.MeshStandardMaterial({ color: '#2f5d2a', roughness: 1 }), []);
+  const leafMat = useDisposable(() => new THREE.MeshBasicMaterial({ color: '#4a8a3a', side: THREE.DoubleSide, transparent: true, opacity: 0.88 }), []);
   const group = useRef<THREE.Group>(null);
   const vines = useMemo(() => {
     const r = mulberry32(31);
     return Array.from({ length: count }, () => {
       const a = r() * Math.PI * 2;
       const rad = 6 + r() * 8;
-      return { pos: [Math.cos(a) * rad, 5 + r() * 2, Math.sin(a) * rad] as [number, number, number], phase: r() * Math.PI * 2, tilt: (r() - 0.5) * 0.3 };
+      const leafCount = 3 + Math.floor(r() * 4);
+      const leaves = Array.from({ length: leafCount }, () => ({
+        y: -0.4 - r() * 2.4,
+        angle: r() * Math.PI * 2,
+        scale: 0.7 + r() * 0.6,
+      }));
+      return { pos: [Math.cos(a) * rad, 5 + r() * 2, Math.sin(a) * rad] as [number, number, number], phase: r() * Math.PI * 2, tilt: (r() - 0.5) * 0.3, leaves };
     });
   }, [count]);
   useFrame(({ clock }) => {
@@ -104,19 +130,36 @@ function Vines({ count, reducedMotion }: { count: number; reducedMotion?: boolea
   return (
     <group ref={group}>
       {vines.map((v, i) => (
-        <mesh key={i} geometry={geo} material={mat} position={v.pos} rotation={[0, 0, v.tilt]} />
+        <group key={i} position={v.pos} rotation={[0, 0, v.tilt]}>
+          <mesh geometry={stemGeo} material={stemMat} />
+          {v.leaves.map((l, j) => (
+            <mesh key={j} geometry={leafGeo} material={leafMat}
+              position={[0, l.y, 0]}
+              rotation={[0, l.angle, Math.PI / 4]}
+              scale={[l.scale, l.scale, 1]}
+            />
+          ))}
+        </group>
       ))}
     </group>
   );
 }
 
-/** Butterflies: small additive wings on lazy looping paths near the clearing. */
+/** Butterflies: wing-shaped geometry on lazy looping paths near the clearing. */
 function Butterflies({ count, reducedMotion }: { count: number; reducedMotion?: boolean }) {
-  const geo = useDisposable(() => new THREE.PlaneGeometry(0.16, 0.12), []);
+  // Wing shape: two lobes forming a realistic butterfly wing silhouette.
+  const geo = useDisposable(() => {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.bezierCurveTo(0.04, 0.06, 0.12, 0.07, 0.13, 0.02);
+    shape.bezierCurveTo(0.14, -0.02, 0.1, -0.06, 0.06, -0.05);
+    shape.bezierCurveTo(0.03, -0.04, 0.01, -0.02, 0, 0);
+    return new THREE.ShapeGeometry(shape, 6);
+  }, []);
   const mats = useDisposable(() => [
-    new THREE.MeshBasicMaterial({ color: '#ff9a4d', side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
-    new THREE.MeshBasicMaterial({ color: '#67d6ff', side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
-    new THREE.MeshBasicMaterial({ color: '#ffe066', side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
+    new THREE.MeshBasicMaterial({ color: '#ff9a4d', side: THREE.DoubleSide, transparent: true, opacity: 0.92 }),
+    new THREE.MeshBasicMaterial({ color: '#67d6ff', side: THREE.DoubleSide, transparent: true, opacity: 0.92 }),
+    new THREE.MeshBasicMaterial({ color: '#ffe066', side: THREE.DoubleSide, transparent: true, opacity: 0.92 }),
   ], []);
   const flies = useMemo(() => {
     const r = mulberry32(41);
@@ -126,6 +169,7 @@ function Butterflies({ count, reducedMotion }: { count: number; reducedMotion?: 
       speed: 0.4 + r() * 0.5,
       phase: r() * Math.PI * 2,
       mat: Math.floor(r() * 3),
+      wingScale: 0.9 + r() * 0.3,
     }));
   }, [count]);
   const refs = useRef<(THREE.Group | null)[]>([]);
@@ -138,7 +182,8 @@ function Butterflies({ count, reducedMotion }: { count: number; reducedMotion?: 
       const a = t * f.speed + f.phase;
       g.position.set(Math.cos(a) * f.radius, f.y + Math.sin(a * 2) * 0.3, Math.sin(a) * f.radius);
       g.rotation.y = -a + Math.PI / 2;
-      const flap = Math.sin(t * 14 + f.phase) * 0.9;
+      // Realistic flap: wings fold up (y-rotation) with slight body bob
+      const flap = Math.abs(Math.sin(t * 12 + f.phase)) * 1.1;
       (g.children[0] as THREE.Mesh).rotation.y = flap;
       (g.children[1] as THREE.Mesh).rotation.y = -flap;
     });
@@ -147,8 +192,10 @@ function Butterflies({ count, reducedMotion }: { count: number; reducedMotion?: 
     <>
       {flies.map((f, i) => (
         <group key={i} ref={(el) => { refs.current[i] = el; }}>
-          <mesh geometry={geo} material={mats[f.mat]} position={[0.08, 0, 0]} />
-          <mesh geometry={geo} material={mats[f.mat]} position={[-0.08, 0, 0]} />
+          {/* Right wing */}
+          <mesh geometry={geo} material={mats[f.mat]} position={[0.07, 0, 0]} scale={[f.wingScale, f.wingScale, 1]} />
+          {/* Left wing — mirrored on X */}
+          <mesh geometry={geo} material={mats[f.mat]} position={[-0.07, 0, 0]} scale={[-f.wingScale, f.wingScale, 1]} />
         </group>
       ))}
     </>
@@ -314,7 +361,7 @@ export default function JungleArena({ numPlayers, localIndex, quality, tableGrou
         <DriftField count={tier === 'high' ? 90 : 45} quality={quality} area={[18, 8, 18]} center={[0, 4, 0]} size={0.045} color="#fff4c0" velocity={[0.06, -0.05, 0.02]} sway={0.35} opacity={0.5} reducedMotion={reducedMotion} seed={5} />
       )}
       {/* Fireflies close to the table. */}
-      <DriftField count={tier === 'high' ? 40 : tier === 'medium' ? 20 : 6} quality={quality} area={[6, 2.5, 6]} center={[0, 1.4, 0]} size={0.06} color="#c8ff6a" velocity={[0.02, 0.03, 0.02]} sway={0.5} opacity={0.9} reducedMotion={reducedMotion} seed={8} />
+      <DriftField count={tier === 'high' ? 40 : tier === 'medium' ? 20 : 6} quality={quality} area={[6, 2.5, 6]} center={[0, 1.4, 0]} size={0.09} color="#c8ff6a" velocity={[0.02, 0.03, 0.02]} sway={0.5} opacity={0.9} softSprites reducedMotion={reducedMotion} seed={8} />
 
       {/* Butterflies. */}
       {tier !== 'low' && <Butterflies count={tier === 'high' ? 6 : 3} reducedMotion={reducedMotion} />}

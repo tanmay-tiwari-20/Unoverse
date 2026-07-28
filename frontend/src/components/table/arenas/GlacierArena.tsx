@@ -270,10 +270,24 @@ function IceSlab({ tableGroupScale }: { tableGroupScale: [number, number, number
 }
 
 function IceBlock() {
+  const geo = useDisposable(() => {
+    const g = new THREE.BoxGeometry(0.6, 0.6, 0.6, 2, 2, 2);
+    // Slightly displace vertices for a natural ice-chunk look
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setXYZ(i,
+        pos.getX(i) + (Math.sin(i * 7.3) * 0.025),
+        pos.getY(i) + (Math.sin(i * 3.1) * 0.02),
+        pos.getZ(i) + (Math.sin(i * 5.7) * 0.025),
+      );
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, []);
   return (
-    <mesh position={[0, 0.3, 0]} rotation={[0, 0.3, 0]} castShadow receiveShadow>
-      <boxGeometry args={[0.6, 0.6, 0.6]} />
-      <meshPhysicalMaterial color="#cdeeff" roughness={0.12} transmission={0.45} thickness={0.4} transparent opacity={0.9} clearcoat={0.6} />
+    <mesh geometry={geo} position={[0, 0.3, 0]} rotation={[0, 0.3, 0]} castShadow receiveShadow>
+      <meshPhysicalMaterial color="#cdeeff" roughness={0.08} transmission={0.5} thickness={0.5} transparent opacity={0.92} clearcoat={0.9} clearcoatRoughness={0.05} />
     </mesh>
   );
 }
@@ -331,14 +345,14 @@ export default function GlacierArena({ numPlayers, localIndex, quality, tableGro
       <CrystalField count={crystals} />
 
       {/* Snowfall. */}
-      <DriftField count={tier === 'high' ? 160 : tier === 'medium' ? 80 : 35} quality={quality} area={[22, 14, 22]} center={[0, 7, 0]} size={0.05} color="#ffffff" velocity={[0.12, -0.55, 0.06]} sway={0.45} glow={false} opacity={0.9} reducedMotion={reducedMotion} seed={6} />
+      <DriftField count={tier === 'high' ? 160 : tier === 'medium' ? 80 : 35} quality={quality} area={[22, 14, 22]} center={[0, 7, 0]} size={0.07} color="#ffffff" velocity={[0.12, -0.55, 0.06]} sway={0.45} glow={false} opacity={0.9} softSprites reducedMotion={reducedMotion} seed={6} />
       {/* Wind-blown ice particles. */}
       {tier !== 'low' && (
         <DriftField count={tier === 'high' ? 60 : 30} quality={quality} area={[18, 4, 18]} center={[0, 2, 0]} size={0.04} color="#c8e8ff" velocity={[0.3, 0.0, 0.1]} sway={0.15} opacity={0.7} reducedMotion={reducedMotion} seed={14} />
       )}
       {/* Cold ground mist. */}
       {tier !== 'low' && (
-        <DriftField count={tier === 'high' ? 40 : 20} quality={quality} area={[14, 3, 14]} center={[0, 1.5, 0]} size={0.14} color="#cfe8f5" velocity={[0.05, 0.0, 0.03]} sway={0.2} opacity={0.22} reducedMotion={reducedMotion} seed={12} />
+        <DriftField count={tier === 'high' ? 40 : 20} quality={quality} area={[14, 3, 14]} center={[0, 1.5, 0]} size={0.32} color="#cfe8f5" velocity={[0.05, 0.0, 0.03]} sway={0.2} opacity={0.18} glow={false} softSprites reducedMotion={reducedMotion} seed={12} />
       )}
 
       <IceSlab tableGroupScale={tableGroupScale} />

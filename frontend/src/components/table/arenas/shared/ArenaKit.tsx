@@ -385,6 +385,7 @@ export function DriftField({
   sway = 0.3,
   glow = true,
   opacity = 0.9,
+  softSprites = false,
   reducedMotion,
   seed = 7,
 }: {
@@ -398,6 +399,8 @@ export function DriftField({
   sway?: number;
   glow?: boolean;
   opacity?: number;
+  /** Use a soft radial-gradient sprite instead of a hard square dot. */
+  softSprites?: boolean;
   reducedMotion?: boolean;
   seed?: number;
 }) {
@@ -426,15 +429,17 @@ export function DriftField({
     return g;
   }, [base]);
 
+  const spriteTex = useGlowTexture();
   const mat = useDisposable(() => new THREE.PointsMaterial({
     size,
     color: new THREE.Color(color),
+    map: softSprites ? spriteTex : null,
     transparent: true,
     opacity,
     depthWrite: false,
     sizeAttenuation: true,
     blending: glow ? THREE.AdditiveBlending : THREE.NormalBlending,
-  }), [size, color, opacity, glow]);
+  }), [size, color, opacity, glow, softSprites, spriteTex]);
 
   const ref = useRef<THREE.Points>(null);
   useFrame(({ clock }) => {

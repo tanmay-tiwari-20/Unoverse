@@ -174,15 +174,52 @@ function ObsidianSpikes({ count }: { count: number }) {
 }
 
 function Torch({ position }: { position: [number, number, number] }) {
+  const flameMat = useDisposable(() => new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uHot: { value: new THREE.Color('#fff4a0') },
+      uMid: { value: new THREE.Color('#ff8a3a') },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv; varying vec3 vPos;
+      void main(){ vUv = uv; vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+    `,
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      varying vec2 vUv; varying vec3 vPos;
+      uniform float uTime; uniform vec3 uHot, uMid;
+      ${GLSL_NOISE}
+      void main(){
+        // Flame rises upward — sample noise scrolling up
+        float n = fbm(vec3(vPos.x*6.0, vPos.y*4.0 - uTime*2.5, vPos.z*6.0));
+        // Taper toward tip
+        float taper = 1.0 - vUv.y;
+        float flame = smoothstep(0.0, 0.6, n * taper);
+        vec3 col = mix(uMid, uHot, smoothstep(0.3, 0.8, n));
+        float a = flame * (0.5 + 0.5 * n) * smoothstep(1.0, 0.4, vUv.y);
+        gl_FragColor = vec4(col, a);
+      }
+    `,
+  }), []);
+  useShaderClock(flameMat);
   return (
     <group position={position}>
       <mesh position={[0, 0.6, 0]} castShadow>
         <cylinderGeometry args={[0.05, 0.07, 1.2, 6]} />
         <meshStandardMaterial color="#241109" roughness={1} />
       </mesh>
-      <mesh position={[0, 1.3, 0]}>
-        <sphereGeometry args={[0.14, 8, 8]} />
-        <meshBasicMaterial color="#ffb347" />
+      {/* Flame cone */}
+      <mesh material={flameMat} position={[0, 1.42, 0]}>
+        <coneGeometry args={[0.12, 0.38, 8, 4, true]} />
+      </mesh>
+      {/* Ember glow disc at base of flame */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 1.28, 0]}>
+        <circleGeometry args={[0.1, 12]} />
+        <meshBasicMaterial color="#ffb347" transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
       <pointLight position={[0, 1.38, 0]} color="#ff8a3a" intensity={8} distance={6} decay={2} />
     </group>
