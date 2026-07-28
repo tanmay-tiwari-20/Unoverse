@@ -15,7 +15,7 @@
 
 **Create a room. Share the code. Play UNO with anyone, anywhere.**
 
-[✨ Features](#-features) • [🏗️ Architecture](#-architecture) • [🚀 Getting Started](#-getting-started) • [🃏 House Rules](#-house-rules) • [📁 Project Structure](#-project-structure) • [🚢 Deployment](#-deployment)
+[✨ Features](#-features) • [🏟️ Arenas](#-themed-arenas) • [🤖 Bots](#-ai-opponents) • [👤 Profiles](#-player-profiles--stats) • [🏗️ Architecture](#-architecture) • [🚀 Getting Started](#-getting-started) • [🃏 House Rules](#-house-rules) • [📁 Project Structure](#-project-structure) • [🚢 Deployment](#-deployment)
 
 </div>
 
@@ -32,6 +32,12 @@
 * **Turn Deadline Timers**: Turn timers automatically resolve or draw/pass when a player times out.
 * **Seamless Spectator Mode**: Full tables overflow into spectator seats, enabling real-time watching.
 
+### 🤖 AI Opponents
+* **Play Solo or Fill the Table**: Add CPU opponents from the lobby with simple `+`/`−` controls, or hit **"Fill & Play vs Bots"** to top up empty seats and start instantly — no waiting for friends.
+* **Provably Fair**: Bots have no socket and no special access. Every bot move is routed through the *exact same* server-authoritative action functions as human players, so a bot **literally cannot cheat** — a bad decision is rejected just like a bad human request.
+* **A Real Strategy Brain**: A pure, stateless decision engine scores every legal card — dumping cheap numbers, saving Wilds for the endgame, unloading action cards when the next player is close to winning, avoiding challengeable +4 bluffs, and calling UNO before its second-to-last card.
+* **Human-ish Timing**: Bots "think" for 1.2–2.6s before acting and occasionally **jump in** out of turn, so tables feel natural rather than robotic.
+
 ### 🌐 Multiplayer & Social
 * **Instant Room Creation**: Launch a room instantly and obtain a shareable 6-character room code.
 * **Invite & Sharing Modal**: Invite friends using the interactive lobby panel to copy invite links or share directly via the native Web Share API.
@@ -43,11 +49,17 @@
 
 ### 🎨 Immersive 3D Experience
 * **Interactive 3D Table**: Fully responsive 3D table environment powered by React Three Fiber.
+* **Six Themed Arenas**: Play in the Classic Tavern, Space Station, Amazon Jungle, Frozen Glacier, Cyber City, or Volcano Temple — each a fully procedural, code-split 3D world. The host picks one (or "Random") in the lobby; it syncs to everyone and locks once the match starts.
 * **Adaptive Camera & Seating**: Table structure, camera views, and seat positioning dynamically scale based on active player count.
 * **Cinematic Card Physics**: Beautiful animations for drawing cards, playing cards, and deck shuffling.
 * **Dynamic 3D Action Effects**: Visually rich effects for Skips, Reverses, and card draw actions.
 * **Glow Turn Indicators**: Glowing table seats and active deck rings point to whose turn it is.
-* **Arcade Aesthetic**: Immersive arcade-style environment with neon glows and table themes.
+* **Adaptive Quality Engine**: An FPS-driven quality manager (high/medium/low tiers) auto-tunes resolution, shadows, particles, and post-processing — plus high-tier selective **bloom** — so the scene stays smooth on everything from a phone to a desktop GPU. Honors `prefers-reduced-motion`.
+
+### 👤 Profiles & Progression
+* **Guest Player Profiles**: A one-time profile (display name, `#tag` discriminator, and a choice of 16 preset avatars) identifies you across sessions — persisted locally, authenticated by a private secret.
+* **Server-Authoritative Lifetime Stats**: Matches, rounds, win rate, points, best/current win streaks, and detailed card/call/challenge counters are computed on the backend from live game state — never trusted from the client.
+* **Match History**: Your recent matches (placement, opponents, winner, duration, rules) are recorded and viewable in the profile modal.
 
 ### ⚡ Performance & Technical Stack
 * **State Selector Optimization**: Selective Zustand subscriptions ensure components only re-render when their specific slices of state change.
@@ -55,7 +67,83 @@
 * **Express Response Compression**: Gzip/deflate compression middleware (`compression`) minimizes backend API response payloads.
 * **Landing Page Optimization**: Connection pre-warming on land and submission throttling/debounce to prevent double room creations.
 * **Zod Schemas**: Strict schema validation on every Socket.IO payload.
+* **Layered Error Resilience**: Section-level React error boundaries isolate every HUD region and the entire 3D layer, so a crash in one area never takes down the game. Explicit WebGL context-loss recovery keeps the canvas alive through GPU resets, and a connection overlay covers automatic Socket.IO reconnection — you can always keep playing via the 2D hand even if 3D fails.
 * **Dockerized Setup**: Multi-container Docker Compose setup configured with Redis persistence out-of-the-box.
+
+---
+
+## 🏟️ Themed Arenas
+
+Every room is played inside a fully **procedural 3D world** — no binary assets, no
+textures to download, just code. The host chooses an arena in the lobby (or picks
+**Random**); the choice is synced to everyone over Socket.IO and **locked once the
+match starts**, so the whole table always shares the same world. Arenas are purely
+cosmetic — they never touch gameplay, seating, or card logic.
+
+| ID | Arena | Vibe |
+| :--- | :--- | :--- |
+| `classic` | **Classic Tavern** | The original cozy table under a warm hanging lamp. |
+| `space` | **Space Station** | A command deck adrift among nebulae, planets and stars. |
+| `jungle` | **Amazon Jungle** | An ancient moss-covered rock deep in a sunlit rainforest. |
+| `glacier` | **Frozen Glacier** | A carved ice arena beneath shimmering northern lights. |
+| `cyber` | **Cyber City** | A floating holo-platform above a rain-soaked neon megacity. |
+| `volcano` | **Volcano Temple** | An obsidian altar ringed by rivers of molten lava. |
+
+* **Code-split on demand** — each themed world is a `React.lazy` chunk, so a room
+  only ever downloads and compiles the shaders and meshes for the arena in use.
+  `classic` renders synchronously and doubles as the `<Suspense>` fallback, so the
+  table is never empty for a frame while a themed world loads.
+* **"Random" always themed** — the `random` selection is resolved to a concrete
+  arena **once on the server** at room creation (excluding `classic`) and the result
+  is synced, so every client agrees on the same world.
+* **Quality-aware** — geometry detail, particle counts, shadows, and post-processing
+  all scale with the adaptive quality tier (see below); high-tier rooms get selective
+  **bloom** tuned per arena (neon, lava, aurora, and starfields glow).
+
+---
+
+## 👤 Player Profiles & Stats
+
+Unoverse ships a lightweight, **server-authoritative** profile system so casual play
+still builds a persistent identity and a lifetime record — no account or password
+required.
+
+### Identity
+* A one-time **guest profile** stores a `displayName`, a short `#tag` discriminator
+  (e.g. `#5LHL`) that keeps identical names distinct, and one of **16 preset avatars**.
+* The profile id lives in the browser and is authenticated by a private `secret` that
+  is **never broadcast** to other players — only the derived `PublicProfile`
+  (everything except the secret, plus a computed win rate) is ever shared.
+
+### Tracked lifetime stats
+All stats are computed **on the backend from live game state** and never trusted from
+the client:
+
+* **Match & round record** — matches played/won, rounds played/won, total points, and
+  average placement.
+* **Streaks** — current and best win streaks, plus closest-loss margin.
+* **Card play breakdown** — cards played/drawn, wilds, Wild Draw Fours, draw cards,
+  reverses, and skips.
+* **UNO & challenges** — UNO calls, last-card calls, UNO penalties, jump-ins, and
+  bluff challenges won/lost.
+* **Win rate** is *derived* at read time (`matchesWon / matchesPlayed`) — never stored.
+
+### Match history
+Each finished match records its date, final placements, the winner, duration, round
+count, and a house-rules summary. The most recent **N** matches (capped via
+`RECENT_MATCHES_MAX`) are viewable in the in-app profile modal.
+
+### Persistence
+Profiles use the same storage abstraction as rooms (governed by `STORE`): an in-memory
+map for development, one JSON file per profile under `PROFILE_DIR` (default), or Redis.
+They are exposed over a small REST surface:
+
+| Method | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| `POST` | `/api/profiles` | Create a new guest profile. |
+| `GET` | `/api/profiles/:id` | Fetch a public profile (no secret). |
+| `PATCH` | `/api/profiles/:id` | Update display name / avatar (secret-authenticated). |
+| `POST` | `/api/profiles/:id/reset` | Reset lifetime stats (secret-authenticated). |
 
 ---
 
@@ -98,7 +186,8 @@
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | Next.js 16 (App Router), React 19, React Three Fiber, drei, Tailwind CSS v4, Zustand, Framer Motion, Lucide Icons |
+| **Frontend** | Next.js 16 (App Router), React 19, React Three Fiber, drei, @react-three/postprocessing (bloom), Tailwind CSS v4, Zustand, Framer Motion, Lucide Icons |
+| **3D / Perf** | Procedural code-split arenas • FPS-driven adaptive quality (high/medium/low) • selective bloom • `prefers-reduced-motion` aware |
 | **Backend** | Node.js 20+, Express 4, Socket.IO 4, TypeScript 5, Zod 4, compression |
 | **Realtime** | Socket.IO (game state + chat) • WebRTC (peer-to-peer voice, fallback TURN) |
 | **Data** | Redis 7 (persistence + Socket.IO adapter) • In-memory (development fallback) |
@@ -145,6 +234,9 @@ npm run dev                    # Starts on http://localhost:3000
 2. Enter your display name and click **Create Room**.
 3. Share the 6-character code (or click **Invite** to copy/share the invitation link) with your friends.
 4. Have your friends input their name, the lobby code, and click **Join Room**.
+
+> [!TIP]
+> Don't want to wait? Add CPU opponents in the lobby with the `+` control, or click **"Fill & Play vs Bots"** to fill the empty seats and start a match instantly.
 
 > [!TIP]
 > You can launch the full-stack app (including Redis persistence) locally in a single command using Docker Compose:
@@ -251,7 +343,12 @@ unoverse/
 │   │   │   ├── 📄 gameState.ts    # Game state model initialization
 │   │   │   ├── 📄 scoring.ts      # End-of-round point calculations
 │   │   │   └── 📄 turnManager.ts  # Turn rotations & skipping logic
-│   │   ├── 📂 rooms/              # Room state & lifecycle management
+│   │   ├── 📂 bots/               # CPU opponents — pure brain, turn runner & names
+│   │   │   ├── 📄 botBrain.ts     # Stateless card-scoring decision engine
+│   │   │   ├── 📄 botRunner.ts     # Server-side turn scheduler & thinking delays
+│   │   │   └── 📄 botNames.ts     # Human-ish bot name pool
+│   │   ├── 📂 rooms/              # Room state, lifecycle & arena selection
+│   │   ├── 📂 profiles/           # Guest profiles, lifetime stats & storage
 │   │   ├── 📂 validation/         # Zod payload validation schemas
 │   │   └── 📂 test/               # Vitest rules and mechanics test suites
 │   ├── 📄 Dockerfile
@@ -264,12 +361,16 @@ unoverse/
 │   │   │   └── 📂 lobby/          # Pre-game lobby & settings config
 │   │   ├── 📂 components/
 │   │   │   ├── 📂 table/          # 3D R3F table, cards, seats, and meshes
+│   │   │   │   └── 📂 arenas/     # Six code-split themed 3D worlds + shared kit
 │   │   │   ├── 📂 cards/          # HUD card indicators & hand layouts
+│   │   │   ├── 📂 profile/        # Profile & stats modals
 │   │   │   ├── 📂 social/         # Text chat panels & reactions
 │   │   │   ├── 📂 landing/        # 3D landing page scene
+│   │   │   ├── 📂 providers/      # Error boundaries & app-level providers
 │   │   │   └── 📂 ui/             # Settings, rules, and alert overlays
 │   │   ├── 📂 hooks/              # Socket connections, WebRTC, and viewports
-│   │   ├── 📂 store/              # Zustand game and audio state stores
+│   │   ├── 📂 lib/                # Arena registry, quality tiers & profile client
+│   │   ├── 📂 store/              # Zustand game, audio, and profile stores
 │   │   ├── 📂 utils/              # R3F geometry math & seating calculations
 │   │   └── 📂 types/              # Unified TypeScript definitions
 │   └── 📄 package.json
