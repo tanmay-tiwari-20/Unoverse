@@ -27,6 +27,7 @@ import {
   PlaySurface,
   ScrollSurface,
   SeatRing,
+  GroundFog,
   useDisposable,
   useShaderClock,
   PLAY_SURFACE_Y,
@@ -34,6 +35,7 @@ import {
   BASE_TABLE_RZ,
 } from './shared/ArenaKit';
 import { mulberry32 } from './shared/proceduralGeometry';
+import { ArenaModel } from './shared/gltf';
 import { getSeatRingRadii } from '../../../utils/tableLayout';
 
 const PALETTE = ['#ff4fd8', '#4ff0ff', '#a24bff', '#ff7a2f', '#5affc0'];
@@ -340,6 +342,60 @@ function WetDeck() {
   );
 }
 
+/**
+ * A close "hero" landmark tower: a tapered lit slab crowned with neon trim and a
+ * beacon — the procedural fallback for the `cyberTower` GLTF slot. Built at the
+ * origin, unit-ish scaled; the caller places it. Reuses the lit-window texture so
+ * it matches the skyline instantly.
+ */
+function HeroTower() {
+  const winTex = useWindowTexture();
+  const bodyMat = useDisposable(
+    () => new THREE.MeshStandardMaterial({ color: '#0a0a16', roughness: 0.4, metalness: 0.7, emissive: '#ffffff', emissiveMap: winTex, emissiveIntensity: 1.0 }),
+    [winTex],
+  );
+  return (
+    <group>
+      <mesh material={bodyMat} position={[0, 6, 0]} castShadow>
+        <boxGeometry args={[2.2, 12, 2.2]} />
+      </mesh>
+      <mesh material={bodyMat} position={[0, 13, 0]} castShadow>
+        <boxGeometry args={[1.4, 2.4, 1.4]} />
+      </mesh>
+      {/* Neon crown trim */}
+      <mesh position={[0, 12.1, 0]}>
+        <boxGeometry args={[2.3, 0.3, 2.3]} />
+        <meshBasicMaterial color="#4ff0ff" transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      {/* Beacon */}
+      <mesh position={[0, 14.4, 0]}>
+        <sphereGeometry args={[0.16, 12, 12]} />
+        <meshBasicMaterial color="#ff4fd8" />
+      </mesh>
+      <pointLight position={[0, 14.4, 0]} color="#ff4fd8" intensity={3} distance={8} decay={2} />
+    </group>
+  );
+}
+
+/**
+ * A ground-level neon light-trail plane: a scrolling shader disc that reads as
+ * streaking traffic / road light trails reflected on the wet deck. High/medium
+ * only — pure atmosphere over the reflective floor.
+ */
+function LightTrails({ reducedMotion }: { reducedMotion?: boolean }) {
+  const geo = useDisposable(() => new THREE.CircleGeometry(13, 64), []);
+  return (
+    <ScrollSurface
+      geometry={geo}
+      colorLow="#05010f" colorMid="#2a0a4a" colorHigh="#4ff0ff"
+      scale={3.5} speed={0.4} direction={[1, 0.2]} emissive={0.7} warp={0.3}
+      transparent opacity={0.35}
+      rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}
+      reducedMotion={reducedMotion}
+    />
+  );
+}
+
 export default function CyberCityArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
   const tier = quality.tier;
   const seat = getSeatRingRadii(numPlayers);
@@ -378,7 +434,20 @@ export default function CyberCityArena({ numPlayers, localIndex, quality, tableG
       />
 
       <WetDeck />
+      {tier !== 'low' && <LightTrails reducedMotion={reducedMotion} />}
       <Skyscrapers count={towers} />
+
+      {/* Hero landmark tower: optimized GLTF when present, else procedural. */}
+      <ArenaModel
+        model="cyberTower"
+        enabled={tier !== 'low'}
+        position={[-13, 0, -11]}
+        rotation={[0, 0.5, 0]}
+        scale={1.2}
+        castShadow
+        fallback={<HeroTower />}
+      />
+
       {tier !== 'low' && <Billboards reducedMotion={reducedMotion} />}
       {tier !== 'low' && <HoverTrain reducedMotion={reducedMotion} />}
       {traffic > 0 && <FlyingTraffic count={traffic} reducedMotion={reducedMotion} />}
@@ -388,6 +457,8 @@ export default function CyberCityArena({ numPlayers, localIndex, quality, tableG
       {tier !== 'low' && (
         <DriftField count={tier === 'high' ? 50 : 24} quality={quality} area={[20, 2, 20]} center={[0, 0.6, 0]} size={0.14} color="#ff4fd8" velocity={[0.06, 0.0, 0.04]} sway={0.2} opacity={0.18} reducedMotion={reducedMotion} seed={13} />
       )}
+      {/* Low neon ground haze for depth (non-low). */}
+      {tier !== 'low' && <GroundFog color="#ff4fd8" radius={22} y={0.5} opacity={0.16} scale={1.8} speed={0.02} reducedMotion={reducedMotion} />}
 
       <HoloPlatform tableGroupScale={tableGroupScale} reducedMotion={reducedMotion} />
 

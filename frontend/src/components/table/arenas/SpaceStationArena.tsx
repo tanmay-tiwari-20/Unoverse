@@ -39,7 +39,8 @@ import {
   BASE_TABLE_RX,
   BASE_TABLE_RZ,
 } from './shared/ArenaKit';
-import { displaceGeometry, mulberry32 } from './shared/proceduralGeometry';
+import { displaceGeometry, mulberry32, buildStationModule } from './shared/proceduralGeometry';
+import { ArenaModel } from './shared/gltf';
 import { getSeatRingRadii } from '../../../utils/tableLayout';
 
 const ACCENT = '#5fd0ff';
@@ -152,12 +153,16 @@ function Satellite({ position }: { position: [number, number, number] }) {
   );
 }
 
-/** A distant modular space station: a spine, rings and glowing modules. */
-function SpaceStation({ position }: { position: [number, number, number] }) {
+/**
+ * A distant modular space station: a spine, rings and glowing modules. Built at
+ * the origin, unit-scaled — the caller (or `ArenaModel`) positions/scales it, so
+ * it drops in as a GLTF fallback with matching placement.
+ */
+function SpaceStation({ position = [0, 0, 0] }: { position?: [number, number, number] }) {
   const mat = useDisposable(() => new THREE.MeshStandardMaterial({ color: '#aeb6c4', roughness: 0.45, metalness: 0.8 }), []);
   const glow = useDisposable(() => new THREE.MeshBasicMaterial({ color: '#8fe6ff' }), []);
   return (
-    <group position={position} rotation={[0.3, -0.5, 0.15]} scale={2.2}>
+    <group position={position}>
       <mesh material={mat}>
         <cylinderGeometry args={[0.12, 0.12, 3, 12]} />
       </mesh>
@@ -169,6 +174,69 @@ function SpaceStation({ position }: { position: [number, number, number] }) {
       {[-1, 1].map((s) => (
         <mesh key={s} position={[s * 0.8, 0, 0]} material={mat}>
           <boxGeometry args={[0.9, 0.5, 0.05]} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * A field of distant modular station segments (fBm-free, welded procedural
+ * geometry) instanced in one draw call — gives the deep background a real sense
+ * of scale and industry. High/medium only (caller gates count to 0 on low).
+ */
+function StationModuleField({ count }: { count: number }) {
+  const geo = useDisposable(() => buildStationModule(23, '#9aa4b6', '#5a6478'), []);
+  const mat = useDisposable(
+    () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.85, flatShading: true }),
+    [],
+  );
+  const transforms = useMemo<InstanceTransform[]>(() => {
+    const r = mulberry32(23);
+    const out: InstanceTransform[] = [];
+    for (let i = 0; i < count; i++) {
+      const a = r() * Math.PI * 2;
+      const rad = 42 + r() * 22;
+      const y = 6 + r() * 30;
+      out.push({
+        position: [Math.cos(a) * rad, y, Math.sin(a) * rad],
+        rotation: [r() * 0.6, r() * Math.PI * 2, r() * 0.4],
+        scale: 1.4 + r() * 2.6,
+      });
+    }
+    return out;
+  }, [count]);
+  if (count <= 0) return null;
+  return <Instances transforms={transforms} geometry={geo} material={mat} />;
+}
+
+/**
+ * A ring of animated running lights on a thin gantry around the deck — small
+ * emissive dots whose brightness chases around the circle, reading as a live
+ * powered structure. One shared material; the chase is a cheap uniform-free
+ * per-frame opacity write on a handful of meshes.
+ */
+function RunningLights({ reducedMotion }: { reducedMotion?: boolean }) {
+  const n = 24;
+  const radius = 3.4;
+  const refs = useRef<(THREE.Mesh | null)[]>([]);
+  const dots = useMemo(() => Array.from({ length: n }, (_, i) => (i / n) * Math.PI * 2), []);
+  useFrame(({ clock }) => {
+    if (reducedMotion) return;
+    const t = clock.elapsedTime;
+    for (let i = 0; i < n; i++) {
+      const m = refs.current[i];
+      if (!m) continue;
+      const chase = 0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(t * 2 - (i / n) * Math.PI * 2 * 2), 4);
+      (m.material as THREE.MeshBasicMaterial).opacity = chase;
+    }
+  });
+  return (
+    <group position={[0, 0.12, 0]}>
+      {dots.map((a, i) => (
+        <mesh key={i} ref={(el) => { refs.current[i] = el; }} position={[Math.cos(a) * radius, 0, Math.sin(a) * radius]}>
+          <sphereGeometry args={[0.05, 8, 8]} />
+          <meshBasicMaterial color={ACCENT} transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
         </mesh>
       ))}
     </group>
@@ -394,9 +462,20 @@ export default function SpaceStationArena({ numPlayers, localIndex, quality, tab
       <Planet position={[-28, 20, -34]} radius={7} color="#3a5a8a" emissive="#12203a" emissiveIntensity={0.2} seed={2} spin={0.015} reducedMotion={reducedMotion} />
       <Planet position={[34, 13, -28]} radius={3.6} color="#b0663c" emissive="#3a1c0c" ring="#d8a066" seed={7} spin={0.03} reducedMotion={reducedMotion} />
       <Planet position={[18, 26, -20]} radius={1.5} color="#c8cdd6" seed={13} spin={0.05} reducedMotion={reducedMotion} />
-      <SpaceStation position={[-16, 10, -18]} />
+      {/* Hero station: an optimized GLTF when present, else the procedural one. */}
+      <ArenaModel
+        model="spaceStation"
+        enabled={tier !== 'low'}
+        position={[-16, 10, -18]}
+        rotation={[0.3, -0.5, 0.15]}
+        scale={2.2}
+        fallback={<SpaceStation position={[0, 0, 0]} />}
+      />
       <Satellite position={[11, 9, -13]} />
       <Satellite position={[-13, 6, -9]} />
+
+      {/* Distant instanced station modules for a sense of scale (non-low). */}
+      <StationModuleField count={tier === 'high' ? 14 : tier === 'medium' ? 7 : 0} />
 
       <AsteroidBelt count={asteroids} />
 
@@ -415,7 +494,7 @@ export default function SpaceStationArena({ numPlayers, localIndex, quality, tab
 
       <CommandPlatform tableGroupScale={tableGroupScale} />
       <HoloCore reducedMotion={reducedMotion} />
-
+      {tier !== 'low' && <RunningLights reducedMotion={reducedMotion} />}
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.18} rZ={seat.rZ + 0.18}>
         {() => <ConsolePod />}
       </SeatRing>

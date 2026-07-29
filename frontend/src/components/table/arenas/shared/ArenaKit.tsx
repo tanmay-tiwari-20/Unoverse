@@ -944,3 +944,141 @@ export function SeatRing({
     </group>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Ground fog — a soft, slowly scrolling horizontal fog band for depth.
+// ---------------------------------------------------------------------------
+
+/**
+ * A large horizontal plane carrying a soft, scrolling fbm alpha mask that fades
+ * at the edges — a cheap volumetric-looking ground mist that sits low over the
+ * terrain and reads as atmospheric depth. One transparent draw call, no
+ * per-particle cost. Colour + height are per-arena; motion pauses under reduced
+ * motion. High/medium only (callers gate on tier) since it's an atmosphere
+ * luxury, not structure.
+ */
+export function GroundFog({
+  color = '#8090a0',
+  radius = 40,
+  y = 0.6,
+  opacity = 0.28,
+  scale = 1.4,
+  speed = 0.02,
+  reducedMotion,
+}: {
+  color?: string;
+  radius?: number;
+  y?: number;
+  opacity?: number;
+  scale?: number;
+  speed?: number;
+  reducedMotion?: boolean;
+}) {
+  const geo = useDisposable(() => new THREE.CircleGeometry(radius, 64), [radius]);
+  const mat = useDisposable(
+    () => new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color(color) },
+        uScale: { value: scale },
+        uSpeed: { value: speed },
+        uOpacity: { value: opacity },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv; varying vec2 vLocal;
+        void main(){ vUv = uv; vLocal = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        varying vec2 vUv; varying vec2 vLocal;
+        uniform float uTime, uScale, uSpeed, uOpacity; uniform vec3 uColor;
+        ${GLSL_NOISE}
+        void main(){
+          vec2 uv = vUv * uScale;
+          float n = fbm(vec3(uv + vec2(uTime*uSpeed, uTime*uSpeed*0.6), uTime*uSpeed*0.3));
+          n = smoothstep(0.25, 0.85, n);
+          // Radial fade so the band dissolves toward the edges (and centre stays clear-ish).
+          float r = length(vUv - 0.5) * 2.0;
+          float edge = smoothstep(1.0, 0.55, r) * smoothstep(0.05, 0.35, r);
+          gl_FragColor = vec4(uColor, n * edge * uOpacity);
+        }
+      `,
+    }),
+    [color, scale, speed, opacity],
+  );
+  useShaderClock(mat, reducedMotion);
+  return <mesh geometry={geo} material={mat} rotation={[-Math.PI / 2, 0, 0]} position={[0, y, 0]} frustumCulled={false} />;
+}
+
+// ---------------------------------------------------------------------------
+// Volumetric light — cheap fake god-rays from stacked additive cones.
+// ---------------------------------------------------------------------------
+
+/**
+ * A soft shaft of light: a few nested, additively-blended cones with a vertical
+ * alpha falloff, giving the impression of a volumetric god-ray / spotlight beam
+ * without any raymarch. Points down by default (apex up). Great for jungle sun
+ * shafts, space beacon beams and temple light wells. Static (no per-frame cost);
+ * bloom-friendly on the high tier. Caller gates by quality tier.
+ */
+export function VolumetricLight({
+  color = '#fff2c0',
+  height = 12,
+  topRadius = 0.4,
+  bottomRadius = 4.5,
+  opacity = 0.12,
+  layers = 3,
+  ...groupProps
+}: {
+  color?: string;
+  height?: number;
+  topRadius?: number;
+  bottomRadius?: number;
+  opacity?: number;
+  layers?: number;
+} & Omit<React.ComponentProps<'group'>, 'children'>) {
+  const geo = useDisposable(() => {
+    const g = new THREE.CylinderGeometry(topRadius, bottomRadius, height, 20, 1, true);
+    // Vertical alpha via vertex colours consumed by a custom-ish basic material.
+    return g;
+  }, [height, topRadius, bottomRadius]);
+  const mat = useDisposable(
+    () => new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uColor: { value: new THREE.Color(color) },
+        uOpacity: { value: opacity },
+        uHeight: { value: height },
+      },
+      vertexShader: /* glsl */ `
+        varying float vY;
+        uniform float uHeight;
+        void main(){ vY = position.y / uHeight + 0.5; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        varying float vY;
+        uniform vec3 uColor; uniform float uOpacity;
+        void main(){
+          // Bright at the top (source), fading to nothing at the floor.
+          float a = smoothstep(0.0, 0.35, vY) * smoothstep(1.0, 0.6, vY);
+          gl_FragColor = vec4(uColor, a * uOpacity);
+        }
+      `,
+    }),
+    [color, opacity, height],
+  );
+  return (
+    <group {...groupProps}>
+      {Array.from({ length: layers }).map((_, i) => (
+        <mesh key={i} geometry={geo} material={mat} scale={[1 - i * 0.18, 1, 1 - i * 0.18]} frustumCulled={false} />
+      ))}
+    </group>
+  );
+}

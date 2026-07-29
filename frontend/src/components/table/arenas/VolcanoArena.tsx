@@ -28,6 +28,7 @@ import {
   ScrollSurface,
   TerrainPlane,
   SeatRing,
+  GroundFog,
   useDisposable,
   useShaderClock,
   GLSL_NOISE,
@@ -35,7 +36,8 @@ import {
   BASE_TABLE_RX,
   BASE_TABLE_RZ,
 } from './shared/ArenaKit';
-import { displaceGeometry, buildRockCluster, mulberry32 } from './shared/proceduralGeometry';
+import { displaceGeometry, buildTempleArch, buildObsidianSpikes, mulberry32 } from './shared/proceduralGeometry';
+import { ArenaModel } from './shared/gltf';
 import { getSeatRingRadii } from '../../../utils/tableLayout';
 
 // ---------------------------------------------------------------------------
@@ -158,10 +160,10 @@ function Pillars({ count }: { count: number }) {
   return <Instances transforms={transforms} geometry={geo} material={mat} castShadow />;
 }
 
-/** Obsidian spike formations — displaced cones, instanced. */
+/** Obsidian spike formations — sharp glassy faceted shards, instanced. */
 function ObsidianSpikes({ count }: { count: number }) {
-  const geo = useDisposable(() => buildRockCluster(88, ['#0d0808', '#160e0a', '#0a0605']), []);
-  const mat = useDisposable(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.5, flatShading: true }), []);
+  const geo = useDisposable(() => buildObsidianSpikes(88, ['#0d0808', '#160e0a', '#1c0f14']), []);
+  const mat = useDisposable(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.18, metalness: 0.6, flatShading: true, emissive: '#2a0a05', emissiveIntensity: 0.12 }), []);
   const transforms = useMemo<InstanceTransform[]>(() => {
     const r = mulberry32(88);
     return Array.from({ length: count }, () => {
@@ -171,6 +173,64 @@ function ObsidianSpikes({ count }: { count: number }) {
     });
   }, [count]);
   return <Instances transforms={transforms} geometry={geo} material={mat} castShadow />;
+}
+
+/** Eroded temple arches ringing the altar — welded procedural geometry, instanced. */
+function TempleArches({ count }: { count: number }) {
+  const geo = useDisposable(() => buildTempleArch(94, '#1a0f0a'), []);
+  const mat = useDisposable(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.1, flatShading: true }), []);
+  const transforms = useMemo<InstanceTransform[]>(() => {
+    const r = mulberry32(94);
+    const out: InstanceTransform[] = [];
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + r() * 0.2;
+      const rad = 10 + r() * 5;
+      const s = 1.4 + r() * 1.2;
+      out.push({ position: [Math.cos(a) * rad, 0, Math.sin(a) * rad], rotation: [0, -a + Math.PI / 2 + (r() - 0.5) * 0.3, 0], scale: s });
+    }
+    return out;
+  }, [count]);
+  if (count <= 0) return null;
+  return <Instances transforms={transforms} geometry={geo} material={mat} castShadow />;
+}
+
+/** A glowing molten-crack network baked into the obsidian ground near the altar. */
+function MoltenCracks({ reducedMotion }: { reducedMotion?: boolean }) {
+  const geo = useDisposable(() => new THREE.RingGeometry(4.6, 16, 64, 1), []);
+  const mat = useDisposable(
+    () => new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uHot: { value: new THREE.Color('#ff6a1e') },
+        uGlow: { value: new THREE.Color('#ffd34d') },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vP;
+        void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        varying vec2 vP;
+        uniform float uTime; uniform vec3 uHot, uGlow;
+        ${GLSL_NOISE}
+        void main(){
+          float n = fbm(vec3(vP * 0.5, uTime * 0.08));
+          // Thin bright seams where the noise crosses a threshold — a crack network.
+          float seam = smoothstep(0.03, 0.0, abs(n - 0.5));
+          float pulse = 0.6 + 0.4 * sin(uTime * 1.5 + n * 10.0);
+          vec3 col = mix(uHot, uGlow, seam) * seam * pulse;
+          gl_FragColor = vec4(col, seam * 0.8);
+        }
+      `,
+    }),
+    [],
+  );
+  useShaderClock(mat, reducedMotion);
+  return <mesh geometry={geo} material={mat} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} frustumCulled={false} />;
 }
 
 function Torch({ position }: { position: [number, number, number] }) {
@@ -322,6 +382,9 @@ export default function VolcanoArena({ numPlayers, localIndex, quality, tableGro
   const seat = getSeatRingRadii(numPlayers);
   const pillars = tier === 'high' ? 14 : tier === 'medium' ? 8 : 4;
   const spikes = tier === 'high' ? 18 : tier === 'medium' ? 10 : 5;
+  const arches = tier === 'high' ? 6 : tier === 'medium' ? 3 : 0;
+  // Hero temple fallback geometry (an eroded arch), built once.
+  const heroArchGeo = useDisposable(() => buildTempleArch(96, '#1a0f0a'), []);
 
   return (
     <>
@@ -363,6 +426,23 @@ export default function VolcanoArena({ numPlayers, localIndex, quality, tableGro
       <VolcanoCone reducedMotion={reducedMotion} />
       <Pillars count={pillars} />
       <ObsidianSpikes count={spikes} />
+      <TempleArches count={arches} />
+
+      {/* Hero temple structure: optimized GLTF when present, else procedural arch. */}
+      <ArenaModel
+        model="volcanoTemple"
+        enabled={tier !== 'low'}
+        position={[-12, 0, -10]}
+        rotation={[0, 0.7, 0]}
+        scale={3}
+        castShadow
+        fallback={
+          <mesh geometry={heroArchGeo}>
+            <meshStandardMaterial vertexColors roughness={0.9} metalness={0.1} flatShading />
+          </mesh>
+        }
+      />
+      {tier !== 'low' && <MoltenCracks reducedMotion={reducedMotion} />}
 
       <Torch position={[-3.4, 0, 1.6]} />
       <Torch position={[3.4, 0, 1.6]} />
@@ -386,6 +466,8 @@ export default function VolcanoArena({ numPlayers, localIndex, quality, tableGro
       )}
       {/* Drifting embers close to the table. */}
       <DriftField count={tier === 'high' ? 60 : tier === 'medium' ? 30 : 10} quality={quality} area={[10, 6, 10]} center={[0, 2, 0]} size={0.06} color="#ff8a3a" velocity={[0.05, 0.5, 0.02]} sway={0.35} opacity={0.9} reducedMotion={reducedMotion} seed={2} />
+      {/* Hot, smoky ground haze for depth (non-low). */}
+      {tier !== 'low' && <GroundFog color="#5a1a0a" radius={28} y={0.6} opacity={0.24} scale={1.6} speed={0.016} reducedMotion={reducedMotion} />}
 
       <ObsidianAltar tableGroupScale={tableGroupScale} />
 

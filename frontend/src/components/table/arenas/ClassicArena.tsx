@@ -153,11 +153,13 @@ function GameTable({ groupScale = [1, 1, 1] }: { groupScale?: [number, number, n
     <group scale={groupScale}>
       <mesh geometry={tabletopGeo} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.83, 0]} castShadow receiveShadow>
         <meshPhysicalMaterial
-          color="#1a0a03"
-          roughness={0.65}
-          metalness={0.1}
-          clearcoat={0.3}
-          clearcoatRoughness={0.4}
+          color="#241005"
+          roughness={0.5}
+          metalness={0.12}
+          clearcoat={0.5}
+          clearcoatRoughness={0.35}
+          sheen={0.3}
+          sheenColor="#5a2a10"
         />
       </mesh>
 
@@ -293,6 +295,137 @@ function HangingLamp({
       <pointLight position={[0, 1.58, 0]} intensity={2.0} color="#ffb040" distance={2.5} decay={2} />
 
       <pointLight position={[0, 1.8, 2.8]} intensity={15.0} color="#ffffff" distance={8} decay={1.5} />
+    </group>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Fireplace hearth — a stone hearth with a flickering fire. Purely additive
+// tavern warmth against the back wall; the existing floor/table/lamp are left
+// byte-for-byte untouched so this stays a zero-regression baseline.
+// ---------------------------------------------------------------------------
+
+function Fireplace({ tier }: { tier: 'high' | 'medium' | 'low' }) {
+  const prefersReduced = useReducedMotion();
+  const lightRef = useRef<THREE.PointLight>(null);
+  const flamesRef = useRef<THREE.Group>(null);
+
+  const tongues = useMemo(() => {
+    const n = tier === 'low' ? 2 : 3;
+    return Array.from({ length: n }, (_, i) => ({
+      x: (i - (n - 1) / 2) * 0.14,
+      h: 0.3 + (i % 2 === 0 ? 0.1 : 0),
+      phase: i * 1.9,
+      color: i % 2 === 0 ? '#ff9a3c' : '#ffd070',
+    }));
+  }, [tier]);
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    // Firelight flicker: layered sines read as a restless flame; steady if reduced.
+    if (lightRef.current) {
+      const flicker = prefersReduced
+        ? 1
+        : 0.82 + 0.14 * Math.sin(t * 11.0) * Math.sin(t * 6.7) + 0.06 * Math.sin(t * 23.0);
+      lightRef.current.intensity = 14 * flicker;
+    }
+    if (prefersReduced || !flamesRef.current) return;
+    flamesRef.current.children.forEach((c, i) => {
+      const p = tongues[i]?.phase ?? 0;
+      const sx = 0.82 + 0.16 * Math.sin(t * 9.0 + p) + 0.06 * Math.sin(t * 19.0 + p);
+      c.scale.set(sx, 0.9 + 0.22 * Math.sin(t * 7.0 + p), sx);
+    });
+  });
+
+  return (
+    <group position={[3.1, 0, -4.2]}>
+      {/* Stone hearth base */}
+      <mesh position={[0, 0.1, 0.12]} castShadow receiveShadow>
+        <boxGeometry args={[1.5, 0.2, 0.7]} />
+        <meshStandardMaterial color="#2b2622" roughness={1} />
+      </mesh>
+      {/* Side pillars */}
+      <mesh position={[-0.6, 0.85, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.26, 1.7, 0.5]} />
+        <meshStandardMaterial color="#332c26" roughness={1} />
+      </mesh>
+      <mesh position={[0.6, 0.85, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.26, 1.7, 0.5]} />
+        <meshStandardMaterial color="#332c26" roughness={1} />
+      </mesh>
+      {/* Mantel lintel */}
+      <mesh position={[0, 1.6, 0.02]} castShadow receiveShadow>
+        <boxGeometry args={[1.5, 0.28, 0.56]} />
+        <meshStandardMaterial color="#3a322b" roughness={0.95} />
+      </mesh>
+      {/* Sooty firebox back */}
+      <mesh position={[0, 0.75, -0.18]}>
+        <planeGeometry args={[1.0, 1.3]} />
+        <meshStandardMaterial color="#0a0705" roughness={1} />
+      </mesh>
+      {/* Logs */}
+      <mesh position={[-0.12, 0.26, 0.08]} rotation={[0, 0.3, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.06, 0.06, 0.6, 8]} />
+        <meshStandardMaterial color="#20140c" roughness={0.9} />
+      </mesh>
+      <mesh position={[0.14, 0.26, 0.02]} rotation={[0, -0.2, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.055, 0.055, 0.55, 8]} />
+        <meshStandardMaterial color="#1a1009" roughness={0.9} />
+      </mesh>
+      {/* Ember bed glow */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.22, 0.05]}>
+        <circleGeometry args={[0.28, 20]} />
+        <meshBasicMaterial color="#ff6a1e" transparent opacity={0.7} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      {/* Flame tongues */}
+      <group ref={flamesRef} position={[0, 0.34, 0.05]}>
+        {tongues.map((tg, i) => (
+          <mesh key={i} position={[tg.x, tg.h / 2, 0]}>
+            <coneGeometry args={[0.09, tg.h, 8, 1, true]} />
+            <meshBasicMaterial color={tg.color} transparent opacity={0.55} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+      </group>
+      {/* Flickering firelight + steady ember bounce */}
+      <pointLight ref={lightRef} position={[0, 0.55, 0.35]} color="#ff8a3a" intensity={14} distance={7} decay={2} />
+      <pointLight position={[0, 0.3, 0.1]} color="#ff5a1e" intensity={2} distance={2.5} decay={2} />
+    </group>
+  );
+}
+
+/** A wall-mounted candle sconce with a small flickering flame + warm glow. */
+function WallSconce({ position, rotation }: { position: [number, number, number]; rotation?: [number, number, number] }) {
+  const prefersReduced = useReducedMotion();
+  const lightRef = useRef<THREE.PointLight>(null);
+  const flameRef = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    if (prefersReduced) return;
+    const t = clock.getElapsedTime();
+    const flicker = 0.75 + 0.2 * Math.sin(t * 13 + position[0]) + 0.08 * Math.sin(t * 27);
+    if (lightRef.current) lightRef.current.intensity = 3.2 * flicker;
+    if (flameRef.current) {
+      const s = 0.85 + 0.2 * Math.sin(t * 15 + position[0]);
+      flameRef.current.scale.set(s, 0.9 + 0.2 * Math.sin(t * 11), s);
+    }
+  });
+  return (
+    <group position={position} rotation={rotation}>
+      {/* Iron bracket */}
+      <mesh castShadow>
+        <boxGeometry args={[0.08, 0.16, 0.08]} />
+        <meshStandardMaterial color="#161310" roughness={0.6} metalness={0.6} />
+      </mesh>
+      {/* Candle */}
+      <mesh position={[0, 0.14, 0.02]}>
+        <cylinderGeometry args={[0.02, 0.022, 0.12, 8]} />
+        <meshStandardMaterial color="#e8dcc0" roughness={0.8} emissive="#3a2a10" emissiveIntensity={0.3} />
+      </mesh>
+      {/* Flame */}
+      <mesh ref={flameRef} position={[0, 0.24, 0.02]}>
+        <coneGeometry args={[0.025, 0.09, 8]} />
+        <meshBasicMaterial color="#ffcf6a" transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      <pointLight ref={lightRef} position={[0, 0.24, 0.05]} color="#ffb04a" intensity={3.2} distance={3} decay={2} />
     </group>
   );
 }
@@ -455,6 +588,7 @@ function RoomProps() {
  */
 export default function ClassicArena({ quality, tableGroupScale, isLandingPage }: ArenaProps) {
   const performanceMode = useSettingsStore((s) => s.performanceMode);
+  const tier = quality.tier;
 
   return (
     <>
@@ -483,6 +617,15 @@ export default function ClassicArena({ quality, tableGroupScale, isLandingPage }
         particleScale={quality.particleScale}
       />
       <RoomProps />
+
+      {/* Tavern warmth: a flickering stone hearth against the back wall and a
+          pair of candle sconces on the side walls. Purely additive atmosphere. */}
+      <Fireplace tier={tier} />
+      <WallSconce position={[-4.42, 1.7, -1.4]} rotation={[0, Math.PI / 2, 0]} />
+      <WallSconce position={[-4.42, 1.7, 1.4]} rotation={[0, Math.PI / 2, 0]} />
+      {tier !== 'low' && (
+        <WallSconce position={[4.42, 1.7, -1.4]} rotation={[0, -Math.PI / 2, 0]} />
+      )}
     </>
   );
 }

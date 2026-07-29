@@ -213,6 +213,191 @@ export function buildCrystalCluster(seed: number, colors = ['#bfe9ff', '#9fd6ff'
 }
 
 /**
+ * A leafy fern frond: a central stem with paired leaflets fanning off it, welded
+ * into one geometry. Origin at the base; ~0.5 units tall. Great as dense
+ * understory ground cover instanced in one draw call.
+ */
+export function buildFernFrond(seed: number, colors = ['#3c8a34', '#4fa83f', '#2f7a2c']): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const parts: ColoredPart[] = [];
+  const blades = 4 + Math.floor(r() * 3);
+  for (let b = 0; b < blades; b++) {
+    const yaw = (b / blades) * Math.PI * 2 + r() * 0.4;
+    const arch = 0.35 + r() * 0.25;
+    const len = 0.4 + r() * 0.3;
+    // Central rib
+    const rib = new THREE.CylinderGeometry(0.006, 0.012, len, 4, 3);
+    rib.translate(0, len / 2, 0);
+    // Bend the rib into an arch by shifting upper vertices outward
+    const rp = rib.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < rp.count; i++) {
+      const t = Math.max(0, rp.getY(i) / len);
+      rp.setZ(i, rp.getZ(i) + t * t * arch);
+      rp.setY(i, rp.getY(i) - t * t * arch * 0.4);
+    }
+    rp.needsUpdate = true;
+    rib.computeVertexNormals();
+    const m = new THREE.Matrix4().makeRotationY(yaw);
+    rib.applyMatrix4(m);
+    parts.push({ geometry: rib, color: colors[Math.floor(r() * colors.length)] });
+    // A blade (flat rounded leaflet) along the rib
+    const leafShape = new THREE.Shape();
+    leafShape.moveTo(0, 0);
+    leafShape.quadraticCurveTo(0.05, len * 0.5, 0, len);
+    leafShape.quadraticCurveTo(-0.05, len * 0.5, 0, 0);
+    const blade = new THREE.ShapeGeometry(leafShape, 5);
+    blade.rotateX(-Math.PI / 2 + 0.5);
+    const bm = new THREE.Matrix4().makeRotationY(yaw);
+    bm.setPosition(0, 0.02, 0);
+    blade.applyMatrix4(bm);
+    parts.push({ geometry: blade, color: colors[Math.floor(r() * colors.length)] });
+  }
+  return mergeColored(parts);
+}
+
+/**
+ * A flared root buttress: several curved wedges radiating from a trunk base, the
+ * signature look of giant rainforest trees. Origin at y=0; ~1 unit footprint.
+ */
+export function buildRootButtress(seed: number, color = '#43301c'): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const parts: ColoredPart[] = [];
+  const trunkH = 1.1 + r() * 0.4;
+  const trunk = new THREE.CylinderGeometry(0.22, 0.34, trunkH, 8, 4);
+  trunk.translate(0, trunkH / 2, 0);
+  displaceGeometry(trunk, { amp: 0.03, freq: 5, seed: seed + 2, octaves: 2 });
+  parts.push({ geometry: trunk, color });
+  const roots = 4 + Math.floor(r() * 3);
+  for (let i = 0; i < roots; i++) {
+    const yaw = (i / roots) * Math.PI * 2 + r() * 0.3;
+    const h = 0.45 + r() * 0.4;
+    const reach = 0.4 + r() * 0.3;
+    // A thin triangular fin: tall at the trunk, tapering out to the ground.
+    const fin = new THREE.BufferGeometry();
+    const verts = new Float32Array([
+      0, 0, 0.28,
+      0, h, 0.2,
+      0, 0, 0.28 + reach,
+    ]);
+    fin.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    fin.computeVertexNormals();
+    const solid = new THREE.ExtrudeGeometry(
+      (() => { const s = new THREE.Shape(); s.moveTo(0.28, 0); s.lineTo(0.2, h); s.lineTo(0.28 + reach, 0); s.closePath(); return s; })(),
+      { depth: 0.08, bevelEnabled: false, curveSegments: 1 },
+    );
+    solid.translate(0, 0, -0.04);
+    solid.rotateY(-Math.PI / 2);
+    solid.rotateY(yaw);
+    fin.dispose();
+    parts.push({ geometry: solid, color });
+  }
+  return mergeColored(parts);
+}
+
+/**
+ * A blocky ice cliff / glacier chunk: a displaced, faceted column with a subtle
+ * blue-white vertical gradient baked in. Origin at y=0; unit-scaled.
+ */
+export function buildIceCliff(seed: number, low = '#7fb8dd', high = '#e8f6ff'): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const w = 0.7 + r() * 0.6, d = 0.6 + r() * 0.5, h = 1.4 + r() * 1.4;
+  const g = new THREE.BoxGeometry(w, h, d, 3, 5, 3);
+  g.translate(0, h / 2, 0);
+  displaceGeometry(g, { amp: 0.18, freq: 1.6, seed, octaves: 3, yInfluence: (y) => 0.5 + (y / h) * 0.8 });
+  const src = g.index ? g.toNonIndexed() : g;
+  if (src !== g) g.dispose();
+  const p = src.attributes.position as THREE.BufferAttribute;
+  const cLow = new THREE.Color(low), cHigh = new THREE.Color(high), tmp = new THREE.Color();
+  const arr = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    const t = THREE.MathUtils.clamp(p.getY(i) / h, 0, 1);
+    tmp.copy(cLow).lerp(cHigh, t * t);
+    arr[i * 3] = tmp.r; arr[i * 3 + 1] = tmp.g; arr[i * 3 + 2] = tmp.b;
+  }
+  src.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  src.computeVertexNormals();
+  src.computeBoundingSphere();
+  return src;
+}
+
+/** A sharp glassy obsidian shard cluster — faceted spikes fanning up from a base. */
+export function buildObsidianSpikes(seed: number, colors = ['#0d0808', '#160e0a', '#1c0f14']): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const parts: ColoredPart[] = [];
+  const n = 3 + Math.floor(r() * 4);
+  for (let i = 0; i < n; i++) {
+    const h = 0.5 + r() * 1.4;
+    const rad = 0.1 + r() * 0.16;
+    const spike = new THREE.ConeGeometry(rad, h, 4);
+    spike.translate(0, h / 2, 0);
+    const tilt = (r() - 0.5) * 0.5;
+    const yaw = r() * Math.PI * 2;
+    const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(tilt, yaw, (r() - 0.5) * 0.3));
+    m.setPosition((r() - 0.5) * 0.35, 0, (r() - 0.5) * 0.35);
+    spike.applyMatrix4(m);
+    parts.push({ geometry: spike, color: colors[Math.floor(r() * colors.length)] });
+  }
+  return mergeColored(parts);
+}
+
+/**
+ * A weathered temple arch: two pillars joined by a lintel, lightly eroded. Origin
+ * at y=0, opening facing ±Z. ~2 units tall, welded to one geometry.
+ */
+export function buildTempleArch(seed: number, color = '#1a0f0a'): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const parts: ColoredPart[] = [];
+  const h = 1.8 + r() * 0.5;
+  const span = 1.0 + r() * 0.4;
+  for (const sx of [-1, 1]) {
+    const pillar = new THREE.CylinderGeometry(0.16, 0.2, h, 7, 3);
+    pillar.translate(sx * span * 0.5, h / 2, 0);
+    displaceGeometry(pillar, { amp: 0.03, freq: 4, seed: seed + (sx > 0 ? 3 : 7), octaves: 2 });
+    parts.push({ geometry: pillar, color });
+  }
+  const lintel = new THREE.BoxGeometry(span + 0.5, 0.3, 0.4, 4, 2, 2);
+  lintel.translate(0, h + 0.1, 0);
+  displaceGeometry(lintel, { amp: 0.03, freq: 4, seed: seed + 11, octaves: 2 });
+  parts.push({ geometry: lintel, color });
+  return mergeColored(parts);
+}
+
+/**
+ * A modular space-station segment: a central hull cylinder with radial fins and
+ * end caps, welded to one geometry. Origin centred; unit-scaled. Instanceable as
+ * distant background structures for a sense of scale.
+ */
+export function buildStationModule(seed: number, hull = '#aeb6c4', trim = '#6a7486'): THREE.BufferGeometry {
+  const r = mulberry32(seed);
+  const parts: ColoredPart[] = [];
+  const len = 1.6 + r() * 1.2;
+  const body = new THREE.CylinderGeometry(0.4, 0.4, len, 12, 2);
+  body.rotateZ(Math.PI / 2);
+  parts.push({ geometry: body, color: hull });
+  for (const sx of [-1, 1]) {
+    const cap = new THREE.SphereGeometry(0.4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    cap.rotateZ((sx * Math.PI) / 2);
+    cap.translate((sx * len) / 2, 0, 0);
+    parts.push({ geometry: cap, color: trim });
+  }
+  const rings = 2 + Math.floor(r() * 2);
+  for (let i = 0; i < rings; i++) {
+    const x = -len / 2 + ((i + 1) / (rings + 1)) * len;
+    const ring = new THREE.TorusGeometry(0.44, 0.05, 8, 20);
+    ring.rotateY(Math.PI / 2);
+    ring.translate(x, 0, 0);
+    parts.push({ geometry: ring, color: trim });
+  }
+  // Solar fins
+  for (const sz of [-1, 1]) {
+    const fin = new THREE.BoxGeometry(len * 0.5, 0.02, 0.5);
+    fin.translate(0, 0, sz * 0.7);
+    parts.push({ geometry: fin, color: trim });
+  }
+  return mergeColored(parts);
+}
+
+/**
  * A jagged mountain/peak: a displaced cone with its base at y=0 and an optional
  * lighter snow-cap colour blended toward the summit.
  */

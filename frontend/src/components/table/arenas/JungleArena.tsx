@@ -28,12 +28,16 @@ import {
   ScrollSurface,
   TerrainPlane,
   SeatRing,
+  GroundFog,
+  VolumetricLight,
+  useGlowTexture,
   useDisposable,
   PLAY_SURFACE_Y,
   BASE_TABLE_RX,
   BASE_TABLE_RZ,
 } from './shared/ArenaKit';
-import { buildTree, buildRockCluster, mulberry32 } from './shared/proceduralGeometry';
+import { buildTree, buildRockCluster, buildFernFrond, buildRootButtress, mulberry32 } from './shared/proceduralGeometry';
+import { ArenaModel } from './shared/gltf';
 import { getSeatRingRadii } from '../../../utils/tableLayout';
 
 // ---------------------------------------------------------------------------
@@ -145,8 +149,62 @@ function Vines({ count, reducedMotion }: { count: number; reducedMotion?: boolea
   );
 }
 
-/** Butterflies: wing-shaped geometry on lazy looping paths near the clearing. */
-function Butterflies({ count, reducedMotion }: { count: number; reducedMotion?: boolean }) {
+/**
+ * A single butterfly on a lazy looping path. The visual is an optional GLTF
+ * (`jungleButterfly`) that gracefully falls back to procedural flapping wings —
+ * two shaped lobes that fold with a wingbeat. The animated path/orientation is
+ * applied to the outer group either way; the wing flap only runs on the
+ * procedural fallback (its meshes are ref'd directly, so when a GLTF replaces
+ * them the flap safely no-ops). Kept to a handful of instances, so per-instance
+ * GLTF/geometry stays cheap.
+ */
+function Butterfly({
+  wingGeo,
+  wingMat,
+  fly,
+  enabled,
+  reducedMotion,
+}: {
+  wingGeo: THREE.BufferGeometry;
+  wingMat: THREE.Material;
+  fly: { radius: number; y: number; speed: number; phase: number; wingScale: number };
+  enabled: boolean;
+  reducedMotion?: boolean;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const rWing = useRef<THREE.Mesh>(null);
+  const lWing = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    const g = group.current;
+    if (!g) return;
+    if (reducedMotion) return;
+    const t = clock.elapsedTime;
+    const a = t * fly.speed + fly.phase;
+    g.position.set(Math.cos(a) * fly.radius, fly.y + Math.sin(a * 2) * 0.3, Math.sin(a) * fly.radius);
+    g.rotation.y = -a + Math.PI / 2;
+    const flap = Math.abs(Math.sin(t * 12 + fly.phase)) * 1.1;
+    if (rWing.current) rWing.current.rotation.y = flap;
+    if (lWing.current) lWing.current.rotation.y = -flap;
+  });
+  return (
+    <group ref={group}>
+      <ArenaModel
+        model="jungleButterfly"
+        enabled={enabled}
+        scale={fly.wingScale}
+        fallback={
+          <>
+            <mesh ref={rWing} geometry={wingGeo} material={wingMat} position={[0.07, 0, 0]} scale={[fly.wingScale, fly.wingScale, 1]} />
+            <mesh ref={lWing} geometry={wingGeo} material={wingMat} position={[-0.07, 0, 0]} scale={[-fly.wingScale, fly.wingScale, 1]} />
+          </>
+        }
+      />
+    </group>
+  );
+}
+
+/** Butterflies: a few GLTF-or-procedural butterflies on looping clearing paths. */
+function Butterflies({ count, enabled, reducedMotion }: { count: number; enabled: boolean; reducedMotion?: boolean }) {
   // Wing shape: two lobes forming a realistic butterfly wing silhouette.
   const geo = useDisposable(() => {
     const shape = new THREE.Shape();
@@ -172,31 +230,87 @@ function Butterflies({ count, reducedMotion }: { count: number; reducedMotion?: 
       wingScale: 0.9 + r() * 0.3,
     }));
   }, [count]);
-  const refs = useRef<(THREE.Group | null)[]>([]);
-  useFrame(({ clock }) => {
-    if (reducedMotion) return;
-    const t = clock.elapsedTime;
-    flies.forEach((f, i) => {
-      const g = refs.current[i];
-      if (!g) return;
-      const a = t * f.speed + f.phase;
-      g.position.set(Math.cos(a) * f.radius, f.y + Math.sin(a * 2) * 0.3, Math.sin(a) * f.radius);
-      g.rotation.y = -a + Math.PI / 2;
-      // Realistic flap: wings fold up (y-rotation) with slight body bob
-      const flap = Math.abs(Math.sin(t * 12 + f.phase)) * 1.1;
-      (g.children[0] as THREE.Mesh).rotation.y = flap;
-      (g.children[1] as THREE.Mesh).rotation.y = -flap;
-    });
-  });
   return (
     <>
       {flies.map((f, i) => (
-        <group key={i} ref={(el) => { refs.current[i] = el; }}>
-          {/* Right wing */}
-          <mesh geometry={geo} material={mats[f.mat]} position={[0.07, 0, 0]} scale={[f.wingScale, f.wingScale, 1]} />
-          {/* Left wing — mirrored on X */}
-          <mesh geometry={geo} material={mats[f.mat]} position={[-0.07, 0, 0]} scale={[-f.wingScale, f.wingScale, 1]} />
-        </group>
+        <Butterfly key={i} wingGeo={geo} wingMat={mats[f.mat]} fly={f} enabled={enabled} reducedMotion={reducedMotion} />
+      ))}
+    </>
+  );
+}
+
+/**
+ * A single "hero" firefly on a slow wandering path: an optional GLTF
+ * (`jungleFirefly`) with a glowing soft-sprite fallback and a warm point light,
+ * so a few close fireflies read as real 3D glow bugs above the ambient sprite
+ * swarm. Its brightness pulses gently. Only a handful are placed (each is a
+ * light + optional model), so cost stays bounded.
+ */
+function HeroFirefly({
+  spriteTex,
+  fly,
+  enabled,
+  reducedMotion,
+}: {
+  spriteTex: THREE.Texture;
+  fly: { radius: number; y: number; speed: number; phase: number; scale: number };
+  enabled: boolean;
+  reducedMotion?: boolean;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const light = useRef<THREE.PointLight>(null);
+  const spriteRef = useRef<THREE.Sprite>(null);
+  const spriteMat = useDisposable(
+    () => new THREE.SpriteMaterial({ map: spriteTex, color: '#c8ff6a', transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }),
+    [spriteTex],
+  );
+  useFrame(({ clock }) => {
+    const g = group.current;
+    if (!g) return;
+    const t = clock.elapsedTime;
+    if (!reducedMotion) {
+      const a = t * fly.speed + fly.phase;
+      g.position.set(
+        Math.cos(a) * fly.radius + Math.sin(t * 0.7 + fly.phase) * 0.4,
+        fly.y + Math.sin(a * 1.7) * 0.4,
+        Math.sin(a) * fly.radius + Math.cos(t * 0.6 + fly.phase) * 0.4,
+      );
+    }
+    const pulse = 0.5 + 0.5 * Math.pow(0.5 + 0.5 * Math.sin(t * 3 + fly.phase), 2);
+    if (light.current) light.current.intensity = 1.2 * pulse;
+    // Pulse the glow via the mounted sprite's material (ref, not the hook binding).
+    const m = spriteRef.current?.material as THREE.SpriteMaterial | undefined;
+    if (m) m.opacity = 0.5 + 0.5 * pulse;
+  });
+  return (
+    <group ref={group}>
+      <pointLight ref={light} color="#c8ff6a" intensity={1.2} distance={2.2} decay={2} />
+      <ArenaModel
+        model="jungleFirefly"
+        enabled={enabled}
+        scale={fly.scale}
+        fallback={<sprite ref={spriteRef} material={spriteMat} scale={[0.22 * fly.scale, 0.22 * fly.scale, 1]} />}
+      />
+    </group>
+  );
+}
+
+function HeroFireflies({ count, enabled, reducedMotion }: { count: number; enabled: boolean; reducedMotion?: boolean }) {
+  const tex = useGlowTexture();
+  const flies = useMemo(() => {
+    const r = mulberry32(88);
+    return Array.from({ length: count }, () => ({
+      radius: 1.6 + r() * 2.8,
+      y: 1.1 + r() * 1.2,
+      speed: 0.25 + r() * 0.35,
+      phase: r() * Math.PI * 2,
+      scale: 0.8 + r() * 0.6,
+    }));
+  }, [count]);
+  return (
+    <>
+      {flies.map((f, i) => (
+        <HeroFirefly key={i} spriteTex={tex} fly={f} enabled={enabled} reducedMotion={reducedMotion} />
       ))}
     </>
   );
@@ -278,10 +392,14 @@ export default function JungleArena({ numPlayers, localIndex, quality, tableGrou
   const mid = tier === 'high' ? 22 : tier === 'medium' ? 12 : 6;
   const ferns = tier === 'high' ? 40 : tier === 'medium' ? 20 : 0;
 
-  // Three merged plant geometries (canopy tree, mid tree, fern/bush).
+  const buttresses = tier === 'high' ? 7 : tier === 'medium' ? 4 : 0;
+
+  // Merged plant geometries (canopy tree, mid tree, bush, fern frond understory).
   const canopyGeo = useDisposable(() => buildTree(101, '#3a2a18', ['#2f7a2c', '#1f5c20', '#3f8a34']), []);
   const midGeo = useDisposable(() => buildTree(202, '#43301c', ['#3c8a34', '#4fa040', '#2f7a2c']), []);
   const fernGeo = useDisposable(() => buildTree(303, '#2f5d2a', ['#4fa83f', '#6ec44a', '#3c8a34']), []);
+  const frondGeo = useDisposable(() => buildFernFrond(404, ['#3c8a34', '#4fa83f', '#2f7a2c']), []);
+  const buttressGeo = useDisposable(() => buildRootButtress(505, '#43301c'), []);
 
   // River + waterfall plane geometries.
   const riverGeo = useDisposable(() => new THREE.PlaneGeometry(6, 40, 1, 1), []);
@@ -346,6 +464,29 @@ export default function JungleArena({ numPlayers, localIndex, quality, tableGrou
       <VegetationLayer geometry={canopyGeo} count={canopy} radiusMin={11} radiusMax={20} scaleMin={4.5} scaleMax={7} seed={21} />
       <VegetationLayer geometry={midGeo} count={mid} radiusMin={7} radiusMax={13} scaleMin={2.5} scaleMax={4} seed={22} />
       {ferns > 0 && <VegetationLayer geometry={fernGeo} count={ferns} radiusMin={4.5} radiusMax={11} scaleMin={0.7} scaleMax={1.4} seed={23} castShadow={false} />}
+      {/* Dense fern-frond ground cover + flared root buttresses (non-low). */}
+      {ferns > 0 && <VegetationLayer geometry={frondGeo} count={ferns} radiusMin={4} radiusMax={12} scaleMin={0.8} scaleMax={1.8} seed={26} castShadow={false} />}
+      {buttresses > 0 && <VegetationLayer geometry={buttressGeo} count={buttresses} radiusMin={9} radiusMax={17} scaleMin={1.6} scaleMax={3} seed={27} />}
+
+      {/* Hero canopy tree: optimized GLTF when present, else procedural. */}
+      <ArenaModel
+        model="jungleTree"
+        enabled={tier !== 'low'}
+        position={[-13, 0, -12]}
+        rotation={[0, 0.6, 0]}
+        scale={6.5}
+        castShadow
+        fallback={<mesh geometry={canopyGeo}><meshStandardMaterial vertexColors roughness={1} /></mesh>}
+      />
+
+      {/* Atmospheric ground mist + shafts of sunlight (high/medium). */}
+      {tier !== 'low' && <GroundFog color="#9ad46a" radius={34} y={0.7} opacity={0.2} scale={1.6} speed={0.015} reducedMotion={reducedMotion} />}
+      {tier === 'high' && (
+        <>
+          <VolumetricLight position={[7, 8, 4]} rotation={[0, 0, -0.25]} color="#fff2c0" height={13} topRadius={0.6} bottomRadius={4} opacity={0.1} layers={3} />
+          <VolumetricLight position={[-8, 8, -3]} rotation={[0.1, 0, 0.2]} color="#eaffc0" height={13} topRadius={0.5} bottomRadius={3.5} opacity={0.08} layers={2} />
+        </>
+      )}
 
       {/* Ancient ruins. */}
       <Pillar position={[-6.5, 0, -3]} rotation={0.4} tilt={0.06} />
@@ -360,11 +501,13 @@ export default function JungleArena({ numPlayers, localIndex, quality, tableGrou
       {tier !== 'low' && (
         <DriftField count={tier === 'high' ? 90 : 45} quality={quality} area={[18, 8, 18]} center={[0, 4, 0]} size={0.045} color="#fff4c0" velocity={[0.06, -0.05, 0.02]} sway={0.35} opacity={0.5} reducedMotion={reducedMotion} seed={5} />
       )}
-      {/* Fireflies close to the table. */}
+      {/* Ambient firefly swarm (cheap soft sprites) close to the table. */}
       <DriftField count={tier === 'high' ? 40 : tier === 'medium' ? 20 : 6} quality={quality} area={[6, 2.5, 6]} center={[0, 1.4, 0]} size={0.09} color="#c8ff6a" velocity={[0.02, 0.03, 0.02]} sway={0.5} opacity={0.9} softSprites reducedMotion={reducedMotion} seed={8} />
+      {/* A few hero fireflies (GLTF-or-glow with their own light) on top (non-low). */}
+      {tier !== 'low' && <HeroFireflies count={tier === 'high' ? 6 : 3} enabled reducedMotion={reducedMotion} />}
 
-      {/* Butterflies. */}
-      {tier !== 'low' && <Butterflies count={tier === 'high' ? 6 : 3} reducedMotion={reducedMotion} />}
+      {/* Butterflies (GLTF-or-procedural wings). */}
+      {tier !== 'low' && <Butterflies count={tier === 'high' ? 6 : 3} enabled reducedMotion={reducedMotion} />}
 
       <MossyRock tableGroupScale={tableGroupScale} />
 

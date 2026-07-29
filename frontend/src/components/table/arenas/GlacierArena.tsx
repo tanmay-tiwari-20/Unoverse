@@ -25,6 +25,7 @@ import {
   PlaySurface,
   TerrainPlane,
   SeatRing,
+  GroundFog,
   useDisposable,
   useShaderClock,
   GLSL_NOISE,
@@ -32,7 +33,8 @@ import {
   BASE_TABLE_RX,
   BASE_TABLE_RZ,
 } from './shared/ArenaKit';
-import { displaceGeometry, buildCrystalCluster, buildMountain, mulberry32 } from './shared/proceduralGeometry';
+import { displaceGeometry, buildCrystalCluster, buildMountain, buildIceCliff, mulberry32 } from './shared/proceduralGeometry';
+import { ArenaModel } from './shared/gltf';
 import { getSeatRingRadii } from '../../../utils/tableLayout';
 
 // ---------------------------------------------------------------------------
@@ -180,8 +182,42 @@ function MountainRing() {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen lake — a large flat disc with a fresnel-ish ice shader
+// Ice cliffs — blocky faceted glacier masses ringing the mid-ground
 // ---------------------------------------------------------------------------
+
+function IceCliffRing({ count }: { count: number }) {
+  const geo = useDisposable(() => buildIceCliff(52, '#7fb8dd', '#eaf6ff'), []);
+  const mat = useDisposable(
+    () => new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.35,
+      metalness: 0.05,
+      flatShading: true,
+      transparent: true,
+      opacity: 0.95,
+      emissive: '#183a52',
+      emissiveIntensity: 0.15,
+    }),
+    [],
+  );
+  const transforms = useMemo<InstanceTransform[]>(() => {
+    const r = mulberry32(52);
+    const out: InstanceTransform[] = [];
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + r() * 0.5;
+      const rad = 20 + r() * 8;
+      const s = 2.2 + r() * 3.4;
+      out.push({
+        position: [Math.cos(a) * rad, -0.4, Math.sin(a) * rad],
+        rotation: [0, r() * Math.PI * 2, 0],
+        scale: [s * (0.7 + r() * 0.5), s * (0.9 + r() * 0.8), s * (0.7 + r() * 0.5)],
+      });
+    }
+    return out;
+  }, [count]);
+  if (count <= 0) return null;
+  return <Instances transforms={transforms} geometry={geo} material={mat} castShadow />;
+}
 
 function FrozenLake({ reducedMotion }: { reducedMotion?: boolean }) {
   const geo = useDisposable(() => new THREE.CircleGeometry(28, 64), []);
@@ -300,6 +336,8 @@ export default function GlacierArena({ numPlayers, localIndex, quality, tableGro
   const tier = quality.tier;
   const seat = getSeatRingRadii(numPlayers);
   const crystals = tier === 'high' ? 36 : tier === 'medium' ? 20 : 10;
+  // Hero-formation fallback geometry (procedural crystal cluster), built once.
+  const heroFallbackGeo = useDisposable(() => buildCrystalCluster(77, ['#bfe9ff', '#9fd6ff', '#d8f2ff']), []);
 
   return (
     <>
@@ -342,7 +380,26 @@ export default function GlacierArena({ numPlayers, localIndex, quality, tableGro
       <FrozenLake reducedMotion={reducedMotion} />
 
       <MountainRing />
+      <IceCliffRing count={tier === 'high' ? 12 : tier === 'medium' ? 7 : 0} />
       <CrystalField count={crystals} />
+
+      {/* Hero ice formation: optimized GLTF when present, else procedural crystals. */}
+      <ArenaModel
+        model="glacierFormation"
+        enabled={tier !== 'low'}
+        position={[-11, 0, -9]}
+        rotation={[0, 0.5, 0]}
+        scale={3.2}
+        castShadow
+        fallback={
+          <mesh geometry={heroFallbackGeo}>
+            <meshStandardMaterial vertexColors roughness={0.12} metalness={0.05} transparent opacity={0.9} emissive="#2a6aa0" emissiveIntensity={0.3} />
+          </mesh>
+        }
+      />
+
+      {/* Low cold ground fog drifting over the ice (non-low). */}
+      {tier !== 'low' && <GroundFog color="#cfe8f5" radius={30} y={0.5} opacity={0.22} scale={1.5} speed={0.012} reducedMotion={reducedMotion} />}
 
       {/* Snowfall. */}
       <DriftField count={tier === 'high' ? 160 : tier === 'medium' ? 80 : 35} quality={quality} area={[22, 14, 22]} center={[0, 7, 0]} size={0.07} color="#ffffff" velocity={[0.12, -0.55, 0.06]} sway={0.45} glow={false} opacity={0.9} softSprites reducedMotion={reducedMotion} seed={6} />
