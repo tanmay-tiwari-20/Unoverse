@@ -38,12 +38,12 @@ export const TurnTimer: React.FC<{ className?: string }> = ({ className = '' }) 
 
   return (
     <span
-      className={`inline-flex items-center gap-1 font-rounded font-bold tabular-nums ${
-        urgent ? 'text-red-300 animate-pulse' : 'text-white/90'
+      className={`inline-flex items-center gap-1 pl-1.5 ml-0.5 border-l border-white/15 font-rounded font-bold tabular-nums ${
+        urgent ? 'text-red-300 animate-pulse' : 'text-white/85'
       } ${className}`}
       title="Time left before your turn is auto-played"
     >
-      <Timer size={12} className={urgent ? 'text-red-300' : 'text-white/70'} />
+      <Timer size={12} className={urgent ? 'text-red-300' : 'text-white/60'} />
       {secondsLeft}s
     </span>
   );

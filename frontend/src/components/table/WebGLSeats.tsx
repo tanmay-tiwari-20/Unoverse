@@ -90,7 +90,7 @@ const HumanSilhouette: React.FC<HumanSilhouetteProps> = ({ angle, rX, rZ, isActi
         or render a glowing dot/badge. Let's use a subtle glowing dot for now.
       */}
       {isActiveTurn && (
-        <pointLight position={[0, 1.2, 0]} intensity={0.5} distance={2} color="#10b981" />
+        <pointLight position={[0, 1.2, 0]} intensity={0.7} distance={2.4} color="#10b981" />
       )}
     </group>
   );

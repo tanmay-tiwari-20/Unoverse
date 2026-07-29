@@ -10,7 +10,6 @@ import { useGameStore } from "../../../store/useGameStore";
 import { ErrorBoundary } from "../../../components/providers/ErrorBoundary";
 import { ReactionsHandler } from "../../../components/social/ReactionsHandler";
 import { ChatPanel } from "../../../components/social/ChatPanel";
-import { PlayerNameplates } from "../../../components/table/PlayerNameplates";
 import { TurnGlowIndicator } from "../../../components/table/TurnGlowIndicator";
 import { SettingsModal } from "../../../components/ui/SettingsModal";
 import { HouseRulesModal } from "../../../components/ui/HouseRulesModal";
@@ -138,10 +137,8 @@ export default function LobbyPage() {
       {/* Connection Status Banner/Overlay */}
       <ConnectionOverlay />
 
-      {/* Voice Chat Player Nameplates */}
-      <ErrorBoundary section="Voice Nameplates" fallback={null}>
-        <PlayerNameplates />
-      </ErrorBoundary>
+      {/* Opponent name + voice status now live on the world-anchored SeatBadge
+          inside WebGLCards, so the separate 2D nameplate overlay is retired. */}
 
       {/* Premium Settings + House Rules Configuration modals. Grouped: both are
           optional menus, and neither is on the path to playing a card. */}

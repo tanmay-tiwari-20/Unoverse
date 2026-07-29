@@ -8,6 +8,9 @@ import { PhysicalCard } from '../cards/PhysicalCard';
 import { CinematicSharedTopCard } from './CinematicSharedTopCard';
 import { getHandRingRadii } from '../../utils/tableLayout';
 import { getLayoutSeatCount } from '../../utils/capacity';
+import { useViewport } from '../../hooks/useViewport';
+import { SeatBadge } from './SeatBadge';
+import { DeckTapIndicator } from './DeckTapIndicator';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 
@@ -74,8 +77,13 @@ export const WebGLCards: React.FC = () => {
   const wildColor = useGameStore((state) => state.wildColor);
   const drawnCardId = useGameStore((state) => state.drawnCardId);
   const lastAction = useGameStore((state) => state.lastAction);
+  const unoCalled = useGameStore((state) => state.unoCalled);
   const showLastPlayedBy = useSettingsStore((s) => s.showLastPlayedBy);
   const { playCard, drawCard } = useSocket();
+
+  // Coarse device bucket drives the touch-only deck affordance and compact badge
+  // sizing. Read once here so no child inside the R3F frame loop subscribes.
+  const { isTouch, isMobile } = useViewport();
 
   const isMyTurn = currentPlayerId === player?.id && (gameStatus === 'playing' || gameStatus === 'awaiting_color_selection') && !isProcessing;
   // Once a playable card has been drawn, a second draw is not allowed — the player
@@ -182,11 +190,30 @@ export const WebGLCards: React.FC = () => {
           <DrawPileHitbox stackHeight={Math.min(15, Math.max(1, drawPileCount)) * 0.002} onDraw={() => drawCard()} />
         )}
 
-        {/* Draw Pile Count Badge */}
+        {/* Touch-only "Tap to draw" affordance — mirrors the desktop hover ring so
+            the deck is discoverably tappable on phones. Prominent on your turn,
+            quiet otherwise; never covers the cards. */}
+        <DeckTapIndicator
+          stackHeight={Math.min(15, Math.max(1, drawPileCount)) * 0.002}
+          isTouch={isTouch}
+          canDraw={canDraw}
+        />
+
+        {/* Draw-pile count — a compact frosted-glass chip (number + tiny label),
+            consistent with the opponent SeatBadge, instead of the old shouty
+            black "N CARDS" pill. */}
         {drawPileCount > 0 && (
           <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>
-            <div className="bg-black/80 backdrop-blur-md px-2.5 py-1.5 flex items-center justify-center rounded-full text-white font-bold text-[13px] sm:text-[12px] border border-white/20 shadow-lg select-none whitespace-nowrap">
-              {drawPileCount} CARDS
+            <div className="pointer-events-none select-none whitespace-nowrap flex items-center gap-1.5 rounded-full bg-slate-950/55 backdrop-blur-md border border-white/10 shadow-lg px-2 py-1">
+              <span
+                key={drawPileCount}
+                className="hud-count-bump inline-flex items-center justify-center rounded-full bg-white/15 text-white font-bold tabular-nums leading-none min-w-[20px] h-5 text-[11px] px-1"
+              >
+                {drawPileCount}
+              </span>
+              <span className="text-white/70 font-semibold text-[10px] uppercase tracking-wide">
+                Deck
+              </span>
             </div>
           </Html>
         )}
@@ -202,7 +229,6 @@ export const WebGLCards: React.FC = () => {
         
         const hand = playerCards[occupant.seatNumber] || [];
         const cardCount = hand.length;
-        if (cardCount === 0) return null;
 
         const rX = handRX;
         const rZ = handRZ;
@@ -212,23 +238,28 @@ export const WebGLCards: React.FC = () => {
           Math.cos(baseAngle) * rZ
         ];
 
+        const isActiveTurn = occupant.id === currentPlayerId && gameStatus === 'playing';
+
         return (
           <group key={`player-${occupant.id}`} position={groupPosition}>
-            {/* Card Count Badge above opponent hand */}
-            {/* position is lowered to prevent overlapping the hanging lamp shade at y=1.5 */}
+            {/* Single, world-anchored opponent badge — name + count chip +
+                context-aware turn/UNO/voice cues. Rendered even at 0 cards so it
+                doesn't blink out mid card-play animation; only the hand fan below
+                is gated on cardCount. */}
             <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>
-              <div className="flex flex-col items-center gap-1 select-none pointer-events-none">
-                <div className="bg-black/60 backdrop-blur-md px-2.5 py-1.5 flex items-center justify-center rounded-full text-white font-bold text-[15px] sm:text-[14px] border border-white/10 whitespace-nowrap max-w-[38vw] truncate">
-                  {occupant.name}
-                </div>
-                <div className="bg-red-500 text-white font-black text-[13px] sm:text-[12px] px-2.5 py-1.5 flex items-center justify-center rounded-full shadow-lg whitespace-nowrap">
-                  {cardCount} CARDS
-                </div>
-              </div>
+              <SeatBadge
+                playerId={occupant.id}
+                name={occupant.name}
+                cardCount={cardCount}
+                isActiveTurn={isActiveTurn}
+                isBot={occupant.isBot}
+                hasCalledUno={!!unoCalled[occupant.id]}
+                compact={isMobile}
+              />
             </Html>
 
             {/* Hand Fan */}
-            {hand.map((card, cIdx) => {
+            {cardCount > 0 && hand.map((card, cIdx) => {
               const spreadAngle = 0.10; // Increased spread angle for 25% wider fan
               const totalSpread = (cardCount - 1) * spreadAngle;
               const startAngle = -totalSpread / 2;

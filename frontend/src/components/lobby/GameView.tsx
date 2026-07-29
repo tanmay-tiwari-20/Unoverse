@@ -20,15 +20,28 @@ export const GameView: React.FC = () => {
   const swapChooserId = useGameStore((s) => s.swapChooserId);
   const isMyTurn = useIsMyTurn();
 
+  // Shared frosted-glass shell so every state reads as one calm banner; the
+  // accent (ring + text tint + dot) is the only thing that changes between
+  // states, keeping the hierarchy quiet until it's your turn.
+  const shell =
+    'font-rounded font-bold text-[11px] sm:text-[10px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full ' +
+    'bg-slate-950/55 backdrop-blur-md border shadow-lg select-none whitespace-nowrap';
+
   if (gameStatus === 'playing') {
     return isMyTurn ? (
-      <span className="font-arcade text-xs bg-gradient-to-b from-lime-400 to-green-600 border-[3px] border-white text-white px-4 py-1.5 rounded-full shadow-[0_4px_0_0_rgba(0,0,0,0.3)] uppercase tracking-wide animate-pulse inline-flex items-center gap-1.5">
-        <Star size={14} className="fill-white" /> Your Turn!
-        <TurnTimer className="ml-1 text-[11px] no-underline normal-case not-italic" />
+      // Your turn: the one moment worth emphasising — brighter glass, emerald
+      // accent ring and a soft pulse. Still glass, not a loud solid gradient.
+      <span className={`${shell} border-emerald-300/50 ring-1 ring-emerald-300/30 text-emerald-50 hud-pop-in`}>
+        <Star size={13} className="fill-emerald-300 text-emerald-300" />
+        <span className="font-arcade uppercase tracking-wide text-emerald-50">Your Turn</span>
+        <TurnTimer className="ml-0.5 text-[10px]" />
       </span>
     ) : (
-      <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-blue-300 px-3 py-1 rounded-full shadow-md inline-flex items-center gap-1.5">
-        Waiting for {room?.players.find((p) => p.id === currentPlayerId)?.name || `Seat ${currentPlayerSeat}`}...
+      <span className={`${shell} border-white/12 text-slate-200`}>
+        <span className="w-1.5 h-1.5 rounded-full bg-sky-400/80 shrink-0" aria-hidden="true" />
+        <span className="truncate max-w-[42vw]">
+          {room?.players.find((p) => p.id === currentPlayerId)?.name || `Seat ${currentPlayerSeat}`}&rsquo;s turn
+        </span>
         <TurnTimer className="text-[10px]" />
       </span>
     );
@@ -36,8 +49,9 @@ export const GameView: React.FC = () => {
 
   if (gameStatus === 'awaiting_color_selection') {
     return (
-      <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-yellow-300 px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1.5">
-        Waiting for color selection...
+      <span className={`${shell} border-amber-300/35 text-amber-100`}>
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-300/90 shrink-0" aria-hidden="true" />
+        Choosing a color&hellip;
         <TurnTimer className="text-[10px]" />
       </span>
     );
@@ -45,9 +59,9 @@ export const GameView: React.FC = () => {
 
   if (gameStatus === 'awaiting_swap_target') {
     return (
-      <span className="font-rounded font-bold text-[10px] bg-black/85 border-2 border-white/30 text-fuchsia-300 px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1.5">
-        <ArrowLeftRight size={12} />
-        {swapChooserId === player?.id ? 'Choose a player to swap hands with...' : 'Waiting for Seven-Swap...'}
+      <span className={`${shell} border-fuchsia-300/35 text-fuchsia-100`}>
+        <ArrowLeftRight size={12} className="text-fuchsia-200" />
+        {swapChooserId === player?.id ? 'Pick a player to swap hands' : 'Waiting for Seven-Swap…'}
         <TurnTimer className="text-[10px]" />
       </span>
     );

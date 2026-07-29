@@ -308,6 +308,52 @@ select:focus-visible {
 }
 
 /* ------------------------------------------------------------------ */
+/* In-game HUD micro-animations (seat badges + deck hint)              */
+/* Kept as plain CSS so they work inside drei <Html> portals (which    */
+/* live in the R3F Canvas subtree) without depending on Framer's       */
+/* MotionConfig context. All of these are automatically disabled by    */
+/* the prefers-reduced-motion block further down.                      */
+/* ------------------------------------------------------------------ */
+
+/* Gentle entrance for a seat badge appearing (player joins / round starts) */
+@keyframes hud-pop-in {
+  0% { opacity: 0; transform: translateY(4px) scale(0.9); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.hud-pop-in {
+  animation: hud-pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* One-shot bump when a card-count chip changes value (keyed remount) */
+@keyframes hud-count-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+.hud-count-bump {
+  animation: hud-count-bump 0.4s ease-out;
+}
+
+/* Soft attention pulse for the mobile "tap to draw" deck hint */
+@keyframes deck-hint-pulse {
+  0%, 100% { opacity: 0.9; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+.deck-hint-pulse {
+  animation: deck-hint-pulse 1.4s ease-in-out infinite;
+}
+
+/* Expanding ripple ring behind the deck hint (single reusable layer) */
+@keyframes deck-hint-ripple {
+  0% { transform: scale(0.7); opacity: 0.55; }
+  70% { opacity: 0; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.deck-hint-ripple {
+  animation: deck-hint-ripple 1.6s ease-out infinite;
+}
+
+/* ------------------------------------------------------------------ */
 /* Accessibility: Reduced Motion                                       */
 /* When the OS has prefers-reduced-motion: reduce, kill all CSS         */
 /* animations and transitions globally. Framer Motion is handled        */
