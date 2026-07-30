@@ -315,19 +315,43 @@ function HoloPlatform({ tableGroupScale, reducedMotion }: { tableGroupScale: [nu
 function HoverChair() {
   return (
     <group>
+      {/* Floating seat pad — no legs; it hovers */}
       <mesh position={[0, 0.5, 0]} castShadow>
         <boxGeometry args={[0.5, 0.08, 0.5]} />
         <meshStandardMaterial color="#12101f" roughness={0.4} metalness={0.7} emissive="#3a1a5a" emissiveIntensity={0.5} />
       </mesh>
-      <mesh position={[0, 0.8, -0.2]} castShadow>
+      {/* Bevelled cushion with neon piping */}
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <boxGeometry args={[0.42, 0.05, 0.42]} />
+        <meshStandardMaterial color="#1a1630" roughness={0.5} metalness={0.5} />
+      </mesh>
+      <mesh position={[0, 0.575, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.2, 0.23, 4]} />
+        <meshBasicMaterial color="#ff2bd6" transparent opacity={0.8} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      {/* Floating backrest (detached slab) */}
+      <mesh position={[0, 0.82, -0.2]} rotation={[-0.12, 0, 0]} castShadow>
         <boxGeometry args={[0.48, 0.5, 0.06]} />
         <meshStandardMaterial color="#16132a" roughness={0.4} metalness={0.7} emissive="#1a3a5a" emissiveIntensity={0.5} />
       </mesh>
-      {/* hover glow */}
+      {/* Neon edge strips on the backrest */}
+      {[-0.22, 0.22].map((x) => (
+        <mesh key={`edge${x}`} position={[x, 0.82, -0.168]} rotation={[-0.12, 0, 0]}>
+          <boxGeometry args={[0.02, 0.48, 0.01]} />
+          <meshBasicMaterial color="#4ff0ff" transparent opacity={0.85} blending={THREE.AdditiveBlending} depthWrite={false} />
+        </mesh>
+      ))}
+      {/* Hover emitter glow + repulsor rings under the pad */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.36, 0]}>
         <ringGeometry args={[0.22, 0.3, 24]} />
         <meshBasicMaterial color="#4ff0ff" transparent opacity={0.5} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.28, 0]}>
+        <ringGeometry args={[0.1, 0.16, 20]} />
+        <meshBasicMaterial color="#ff2bd6" transparent opacity={0.4} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      {/* Downward hover light pooling on the deck */}
+      <pointLight position={[0, 0.32, 0]} color="#4ff0ff" intensity={0.6} distance={1.2} decay={2} />
     </group>
   );
 }
@@ -396,9 +420,20 @@ function LightTrails({ reducedMotion }: { reducedMotion?: boolean }) {
   );
 }
 
-export default function CyberCityArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+// ---------------------------------------------------------------------------
+//  World / Table memo split (perf) — see ClassicArena. The neon city world +
+//  billboards + traffic + rain never reconcile on a player-count change; only
+//  the holo platform + hover-chair seat ring do.
+// ---------------------------------------------------------------------------
+
+const CyberWorld = React.memo(function CyberWorld({
+  quality,
+  reducedMotion,
+}: {
+  quality: ArenaProps['quality'];
+  reducedMotion?: boolean;
+}) {
   const tier = quality.tier;
-  const seat = getSeatRingRadii(numPlayers);
   const towers = tier === 'high' ? 50 : tier === 'medium' ? 30 : 14;
   const traffic = tier === 'high' ? 10 : tier === 'medium' ? 5 : 0;
 
@@ -459,12 +494,38 @@ export default function CyberCityArena({ numPlayers, localIndex, quality, tableG
       )}
       {/* Low neon ground haze for depth (non-low). */}
       {tier !== 'low' && <GroundFog color="#ff4fd8" radius={22} y={0.5} opacity={0.16} scale={1.8} speed={0.02} reducedMotion={reducedMotion} />}
+    </>
+  );
+});
 
+const CyberTable = React.memo(function CyberTable({
+  numPlayers,
+  localIndex,
+  tableGroupScale,
+  reducedMotion,
+}: {
+  numPlayers: number;
+  localIndex: number;
+  tableGroupScale: [number, number, number];
+  reducedMotion?: boolean;
+}) {
+  const seat = getSeatRingRadii(numPlayers);
+  return (
+    <>
       <HoloPlatform tableGroupScale={tableGroupScale} reducedMotion={reducedMotion} />
 
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.15} rZ={seat.rZ + 0.15}>
         {() => <HoverChair />}
       </SeatRing>
+    </>
+  );
+});
+
+export default function CyberCityArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+  return (
+    <>
+      <CyberWorld quality={quality} reducedMotion={reducedMotion} />
+      <CyberTable numPlayers={numPlayers} localIndex={localIndex} tableGroupScale={tableGroupScale} reducedMotion={reducedMotion} />
     </>
   );
 }

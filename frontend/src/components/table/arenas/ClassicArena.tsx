@@ -18,7 +18,8 @@ import * as THREE from 'three';
 import { useSettingsStore } from '../../../store/useSettingsStore';
 import { useReducedMotion } from '../../../hooks/useReducedMotion';
 import { scaleParticles } from '../../../lib/quality/qualityTiers';
-import { ArenaProps } from './shared/ArenaKit';
+import { ArenaProps, SeatRing } from './shared/ArenaKit';
+import { getSeatRingRadii } from '../../../utils/tableLayout';
 
 function FlyModel({ flyRef, wingsRef, scale }: {
   flyRef: React.RefObject<THREE.Group | null>;
@@ -583,10 +584,85 @@ function RoomProps() {
 }
 
 /**
- * The classic tavern world. Owns its own fog + lights (moved here from the old
- * `Scene`) so it is a fully self-contained arena like every other.
+ * A sturdy wooden tavern chair with a cushioned seat: four turned legs, a
+ * slatted back and a leather-look cushion. Built at the origin facing the table
+ * (+Z toward centre) and placed by SeatRing. Purely decorative — matches the
+ * dark stained wood of the table so it reads as part of the same set.
  */
-export default function ClassicArena({ quality, tableGroupScale, isLandingPage }: ArenaProps) {
+function TavernChair() {
+  const woodDark = '#160a03';
+  const woodMid = '#2a160a';
+  return (
+    <group>
+      {/* Seat frame */}
+      <mesh position={[0, 0.44, 0.04]} castShadow receiveShadow>
+        <boxGeometry args={[0.46, 0.06, 0.44]} />
+        <meshStandardMaterial color={woodMid} roughness={0.75} metalness={0.05} />
+      </mesh>
+      {/* Cushion */}
+      <mesh position={[0, 0.49, 0.04]} castShadow>
+        <boxGeometry args={[0.4, 0.05, 0.38]} />
+        <meshPhysicalMaterial color="#5a2016" roughness={0.85} sheen={0.4} sheenColor="#7a3020" />
+      </mesh>
+      {/* Back posts */}
+      {[-0.2, 0.2].map((x) => (
+        <mesh key={`post${x}`} position={[x, 0.72, -0.19]} castShadow>
+          <cylinderGeometry args={[0.028, 0.032, 0.62, 8]} />
+          <meshStandardMaterial color={woodDark} roughness={0.8} />
+        </mesh>
+      ))}
+      {/* Back slats */}
+      {[0.66, 0.82, 0.98].map((y) => (
+        <mesh key={`slat${y}`} position={[0, y, -0.19]} castShadow>
+          <boxGeometry args={[0.38, 0.07, 0.03]} />
+          <meshStandardMaterial color={woodMid} roughness={0.8} />
+        </mesh>
+      ))}
+      {/* Four legs */}
+      {[
+        [-0.19, -0.17],
+        [0.19, -0.17],
+        [-0.19, 0.23],
+        [0.19, 0.23],
+      ].map(([x, z], i) => (
+        <mesh key={`leg${i}`} position={[x, 0.21, z]} castShadow>
+          <cylinderGeometry args={[0.03, 0.038, 0.42, 8]} />
+          <meshStandardMaterial color={woodDark} roughness={0.8} />
+        </mesh>
+      ))}
+      {/* Stretcher bar between front legs */}
+      <mesh position={[0, 0.12, 0.23]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.02, 0.02, 0.38, 6]} />
+        <meshStandardMaterial color={woodDark} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+// ---------------------------------------------------------------------------
+//  World / Table memo split (perf)
+// ---------------------------------------------------------------------------
+//
+//  The arena is split into two `React.memo` boundaries so a player-count change
+//  (the bot-add case) reconciles ONLY the small count-dependent subtree:
+//
+//   - `ClassicWorld` — fog, lights, floor, lamp, room props, hearth, sconces.
+//     It is NOT given `numPlayers`, so adding a bot never reconciles the heavy
+//     world or recompiles its shaders. Its props are the module-stable `quality`
+//     object + the `isLandingPage` flag, so it bails on every non-quality swap.
+//   - `ClassicTable` — the felt table slab + the tavern-chair seat ring. This is
+//     the only subtree that reconciles on a count change (radii + chair count).
+//
+//  Play-surface geometry (table ellipse, felt height, seat radii) is byte-for-
+//  byte what it was — only the component boundary changed.
+
+const ClassicWorld = React.memo(function ClassicWorld({
+  quality,
+  isLandingPage,
+}: {
+  quality: ArenaProps['quality'];
+  isLandingPage?: boolean;
+}) {
   const performanceMode = useSettingsStore((s) => s.performanceMode);
   const tier = quality.tier;
 
@@ -609,7 +685,6 @@ export default function ClassicArena({ quality, tableGroupScale, isLandingPage }
       />
 
       <Floor />
-      <GameTable groupScale={tableGroupScale} />
       <HangingLamp
         isLandingPage={isLandingPage}
         shadows={quality.shadows}
@@ -626,6 +701,44 @@ export default function ClassicArena({ quality, tableGroupScale, isLandingPage }
       {tier !== 'low' && (
         <WallSconce position={[4.42, 1.7, -1.4]} rotation={[0, -Math.PI / 2, 0]} />
       )}
+    </>
+  );
+});
+
+const ClassicTable = React.memo(function ClassicTable({
+  numPlayers,
+  localIndex,
+  tableGroupScale,
+}: {
+  numPlayers: number;
+  localIndex: number;
+  tableGroupScale: [number, number, number];
+}) {
+  const seat = getSeatRingRadii(numPlayers);
+  return (
+    <>
+      <GameTable groupScale={tableGroupScale} />
+
+      {/* Wooden tavern chairs at every remote seat. Placed with the shared
+          SeatRing so seat math matches the players rendered by WebGLSeats. */}
+      <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.15} rZ={seat.rZ + 0.15}>
+        {() => <TavernChair />}
+      </SeatRing>
+    </>
+  );
+});
+
+/**
+ * The classic tavern world. Owns its own fog + lights (moved here from the old
+ * `Scene`) so it is a fully self-contained arena like every other. Composed from
+ * a memoized world subtree (count-independent) and a memoized table subtree (the
+ * only part that reconciles when the player count changes).
+ */
+export default function ClassicArena({ numPlayers, localIndex, quality, tableGroupScale, isLandingPage }: ArenaProps) {
+  return (
+    <>
+      <ClassicWorld quality={quality} isLandingPage={isLandingPage} />
+      <ClassicTable numPlayers={numPlayers} localIndex={localIndex} tableGroupScale={tableGroupScale} />
     </>
   );
 }

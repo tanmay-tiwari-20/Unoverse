@@ -29,6 +29,9 @@ export interface Player {
   profileId?: string;
   tag?: string;
   avatar?: string | null;
+  // Cosmetic outfit (skin) key — purely visual, broadcast to all clients so
+  // everyone sees the same look. Carried on the profile identity like `avatar`.
+  outfit?: string | null;
 }
 
 /** Room discoverability. Public rooms are matched by Quick Play; private rooms
@@ -580,7 +583,7 @@ class RoomManager {
     // client presented a profile whose secret checked out (verification happens in
     // the socket/REST layer — this method trusts what it is handed). Never carries
     // the profile's private secret.
-    profile?: { profileId: string; tag?: string; avatar?: string | null }
+    profile?: { profileId: string; tag?: string; avatar?: string | null; outfit?: string | null }
   ): { room: Room; player: Player | null; isSpectator: boolean; spectator?: Spectator } {
     const upperCode = code.toUpperCase();
     const room = this.rooms.get(upperCode);
@@ -632,6 +635,7 @@ class RoomManager {
         existingPlayerByName.profileId = profile.profileId;
         existingPlayerByName.tag = profile.tag;
         existingPlayerByName.avatar = profile.avatar ?? null;
+        existingPlayerByName.outfit = profile.outfit ?? null;
       }
 
       // Update host ID if applicable
@@ -773,7 +777,7 @@ class RoomManager {
       isHost,
       secret: randomUUID(),
       ...(profile
-        ? { profileId: profile.profileId, tag: profile.tag, avatar: profile.avatar ?? null }
+        ? { profileId: profile.profileId, tag: profile.tag, avatar: profile.avatar ?? null, outfit: profile.outfit ?? null }
         : {}),
     };
 

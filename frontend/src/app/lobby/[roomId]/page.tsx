@@ -122,6 +122,26 @@ export default function LobbyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, name, socket]);
 
+  // Warm the selected arena as soon as the room tells us which one it is —
+  // before <TableScene>'s Canvas mounts. Two independent best-effort warm-ups:
+  // the arena's lazy code chunk (so Suspense never has to show a stand-in world)
+  // and its optional hero .glb assets. The helpers themselves are reached via
+  // dynamic import so none of the 3D code lands in this route's initial bundle;
+  // they resolve the same module promises the render path later awaits, so this
+  // only ever moves work earlier. Purely a loading optimization — no game state
+  // is read or written here.
+  useEffect(() => {
+    const arena = room?.arena;
+    if (!arena) return;
+
+    void import("../../../components/table/arenas/ArenaEnvironment")
+      .then((mod) => mod.preloadArena(arena))
+      .catch(() => {});
+    void import("../../../components/table/arenas/shared/gltf")
+      .then((mod) => mod.preloadArenaModels(arena))
+      .catch(() => {});
+  }, [room?.arena]);
+
   // Render connection/error loading states
   if (!room || (!player && !isSpectator)) {
     return <JoinStatusScreen />;

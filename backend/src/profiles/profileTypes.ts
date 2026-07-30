@@ -139,6 +139,7 @@ export interface Profile {
   displayName: string;
   tag: string;                // short discriminator (e.g. "5LHL")
   avatarUrl: string | null;   // preset avatar key, or null for procedural fallback
+  outfit: string | null;      // cosmetic outfit (skin) key, or null for default — purely visual
   isGuest: boolean;
   providers: string[];        // auth providers (["guest"] for now)
   createdAt: number;
@@ -240,6 +241,7 @@ export function normalizeProfile(raw: Partial<Profile>, mkSecret: () => string):
     displayName: typeof raw.displayName === 'string' ? raw.displayName : 'Player',
     tag: typeof raw.tag === 'string' ? raw.tag : '',
     avatarUrl: typeof raw.avatarUrl === 'string' ? raw.avatarUrl : null,
+    outfit: typeof raw.outfit === 'string' ? raw.outfit : null,
     isGuest: raw.isGuest !== false,
     providers: Array.isArray(raw.providers) && raw.providers.length ? raw.providers : ['guest'],
     createdAt: now,

@@ -76,6 +76,7 @@ export interface PublicProfile {
   displayName: string;
   tag: string;
   avatarUrl: string | null;
+  outfit: string | null; // cosmetic outfit (skin) key, or null for default — purely visual
   isGuest: boolean;
   providers: string[];
   createdAt: number;

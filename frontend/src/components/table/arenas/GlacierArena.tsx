@@ -306,25 +306,42 @@ function IceSlab({ tableGroupScale }: { tableGroupScale: [number, number, number
 }
 
 function IceBlock() {
+  // A faceted, displaced chunk of ice reused for the seat and backrest so the
+  // whole chair reads as carved from a single crystal. Built once, disposed on
+  // unmount by useDisposable.
   const geo = useDisposable(() => {
-    const g = new THREE.BoxGeometry(0.6, 0.6, 0.6, 2, 2, 2);
-    // Slightly displace vertices for a natural ice-chunk look
+    const g = new THREE.BoxGeometry(0.52, 0.52, 0.52, 2, 2, 2);
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       pos.setXYZ(i,
-        pos.getX(i) + (Math.sin(i * 7.3) * 0.025),
-        pos.getY(i) + (Math.sin(i * 3.1) * 0.02),
-        pos.getZ(i) + (Math.sin(i * 5.7) * 0.025),
+        pos.getX(i) + Math.sin(i * 7.3) * 0.03,
+        pos.getY(i) + Math.sin(i * 3.1) * 0.025,
+        pos.getZ(i) + Math.sin(i * 5.7) * 0.03,
       );
     }
     pos.needsUpdate = true;
     g.computeVertexNormals();
     return g;
   }, []);
+  const iceMat = useDisposable(() => new THREE.MeshPhysicalMaterial({
+    color: '#cdeeff', roughness: 0.08, transmission: 0.5, thickness: 0.5,
+    transparent: true, opacity: 0.92, clearcoat: 0.9, clearcoatRoughness: 0.05,
+  }), []);
   return (
-    <mesh geometry={geo} position={[0, 0.3, 0]} rotation={[0, 0.3, 0]} castShadow receiveShadow>
-      <meshPhysicalMaterial color="#cdeeff" roughness={0.08} transmission={0.5} thickness={0.5} transparent opacity={0.92} clearcoat={0.9} clearcoatRoughness={0.05} />
-    </mesh>
+    <group>
+      {/* Seat block */}
+      <mesh geometry={geo} material={iceMat} position={[0, 0.28, 0.02]} rotation={[0, 0.3, 0]} castShadow receiveShadow />
+      {/* Angled crystalline backrest */}
+      <mesh geometry={geo} material={iceMat} position={[0, 0.62, -0.24]} rotation={[0.12, -0.2, 0]} scale={[0.95, 0.9, 0.4]} castShadow />
+      {/* Sharp ice shards rising behind the seat */}
+      {[-0.16, 0.05, 0.2].map((x, i) => (
+        <mesh key={`shard${i}`} material={iceMat} position={[x, 0.7 + (i === 1 ? 0.16 : 0), -0.28]} rotation={[0, 0, x * 0.6]} castShadow>
+          <coneGeometry args={[0.05, i === 1 ? 0.4 : 0.28, 5]} />
+        </mesh>
+      ))}
+      {/* Faint inner glow so the ice reads as translucent, not flat */}
+      <pointLight position={[0, 0.4, 0]} color="#aef0ff" intensity={0.4} distance={1.2} decay={2} />
+    </group>
   );
 }
 
@@ -332,9 +349,93 @@ function IceBlock() {
 // Arena
 // ---------------------------------------------------------------------------
 
-export default function GlacierArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+/**
+ * The glacier "hero" ice formation, seated seamlessly into the snow terrain.
+ *
+ * The formation itself is an optimized GLTF (with a procedural crystal-cluster
+ * fallback). To avoid the "planted on a flat pad" look where a hard model meets
+ * the undulating snow, the model is wrapped with:
+ *   - a wide, soft SNOW SKIRT (a low displaced dome) that piles snow around the
+ *     base and dips slightly below the terrain so the seam is buried;
+ *   - a flat FROST RING decal fading into the snow to soften the ground contact;
+ *   - a cold RIM LIGHT so the ice catches the arena's key light like the rest of
+ *     the scene, matching its material read to the surrounding crystals.
+ * Everything is placed in one group at the formation's ground position so scale
+ * and lighting stay consistent with the terrain. Purely visual.
+ */
+function HeroIceFormation({
+  tier,
+  shadows,
+  fallbackGeo,
+}: {
+  tier: 'high' | 'medium' | 'low';
+  shadows: boolean;
+  fallbackGeo: THREE.BufferGeometry;
+}) {
+  // Soft snow dome piled around the formation base — displaced for a natural,
+  // wind-sculpted drift rather than a clean cone.
+  const skirtGeo = useDisposable(() => {
+    const g = new THREE.SphereGeometry(4.6, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const n = Math.sin(x * 1.3 + 1) * 0.25 + Math.cos(z * 1.1) * 0.2;
+      pos.setXYZ(i, x, y * 0.32 + n, z); // flatten to a low drift + ripple
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }, []);
+  const skirtMat = useDisposable(() => new THREE.MeshStandardMaterial({
+    color: '#eef6ff', roughness: 0.95, metalness: 0, flatShading: false,
+  }), []);
+
+  return (
+    // Sunk slightly below y=0 so the drift base dips into the terrain undulation
+    // and there is no visible seam where the snow dome meets the ground.
+    <group position={[-11, -0.4, -9]} rotation={[0, 0.5, 0]}>
+      {/* Snow skirt piling around the base */}
+      <mesh geometry={skirtGeo} material={skirtMat} position={[0, 0.35, 0]} receiveShadow castShadow={shadows} />
+      {/* Frost ring fading into the surrounding snow */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.42, 0]}>
+        <ringGeometry args={[3.8, 6.2, 40]} />
+        <meshStandardMaterial color="#dcefff" roughness={1} transparent opacity={0.35} depthWrite={false} />
+      </mesh>
+
+      {/* The formation itself — GLTF when present, procedural crystals otherwise. */}
+      <ArenaModel
+        model="glacierFormation"
+        enabled={tier !== 'low'}
+        position={[0, 0.4, 0]}
+        scale={3.2}
+        castShadow
+        fallback={
+          <mesh geometry={fallbackGeo} position={[0, 0.4, 0]}>
+            <meshStandardMaterial vertexColors roughness={0.12} metalness={0.05} transparent opacity={0.9} emissive="#2a6aa0" emissiveIntensity={0.3} />
+          </mesh>
+        }
+      />
+
+      {/* Cold rim light so the ice reads translucent and matches the key light. */}
+      <pointLight position={[2.5, 5, 2.5]} color="#bfe9ff" intensity={tier === 'high' ? 6 : 3} distance={16} decay={2} />
+    </group>
+  );
+}
+
+// ---------------------------------------------------------------------------
+//  World / Table memo split (perf) — see ClassicArena. The aurora/mountains/
+//  crystals/snow world never reconciles on a player-count change; only the ice
+//  slab + ice-block seat ring do.
+// ---------------------------------------------------------------------------
+
+const GlacierWorld = React.memo(function GlacierWorld({
+  quality,
+  reducedMotion,
+}: {
+  quality: ArenaProps['quality'];
+  reducedMotion?: boolean;
+}) {
   const tier = quality.tier;
-  const seat = getSeatRingRadii(numPlayers);
   const crystals = tier === 'high' ? 36 : tier === 'medium' ? 20 : 10;
   // Hero-formation fallback geometry (procedural crystal cluster), built once.
   const heroFallbackGeo = useDisposable(() => buildCrystalCluster(77, ['#bfe9ff', '#9fd6ff', '#d8f2ff']), []);
@@ -383,20 +484,10 @@ export default function GlacierArena({ numPlayers, localIndex, quality, tableGro
       <IceCliffRing count={tier === 'high' ? 12 : tier === 'medium' ? 7 : 0} />
       <CrystalField count={crystals} />
 
-      {/* Hero ice formation: optimized GLTF when present, else procedural crystals. */}
-      <ArenaModel
-        model="glacierFormation"
-        enabled={tier !== 'low'}
-        position={[-11, 0, -9]}
-        rotation={[0, 0.5, 0]}
-        scale={3.2}
-        castShadow
-        fallback={
-          <mesh geometry={heroFallbackGeo}>
-            <meshStandardMaterial vertexColors roughness={0.12} metalness={0.05} transparent opacity={0.9} emissive="#2a6aa0" emissiveIntensity={0.3} />
-          </mesh>
-        }
-      />
+      {/* Hero ice formation, blended seamlessly into the snow terrain: an
+          optimized GLTF (procedural crystal fallback) wrapped with a snow skirt,
+          frost ring and cold rim light so it reads as part of the glacier. */}
+      <HeroIceFormation tier={tier} shadows={quality.shadows} fallbackGeo={heroFallbackGeo} />
 
       {/* Low cold ground fog drifting over the ice (non-low). */}
       {tier !== 'low' && <GroundFog color="#cfe8f5" radius={30} y={0.5} opacity={0.22} scale={1.5} speed={0.012} reducedMotion={reducedMotion} />}
@@ -411,12 +502,36 @@ export default function GlacierArena({ numPlayers, localIndex, quality, tableGro
       {tier !== 'low' && (
         <DriftField count={tier === 'high' ? 40 : 20} quality={quality} area={[14, 3, 14]} center={[0, 1.5, 0]} size={0.32} color="#cfe8f5" velocity={[0.05, 0.0, 0.03]} sway={0.2} opacity={0.18} glow={false} softSprites reducedMotion={reducedMotion} seed={12} />
       )}
+    </>
+  );
+});
 
+const GlacierTable = React.memo(function GlacierTable({
+  numPlayers,
+  localIndex,
+  tableGroupScale,
+}: {
+  numPlayers: number;
+  localIndex: number;
+  tableGroupScale: [number, number, number];
+}) {
+  const seat = getSeatRingRadii(numPlayers);
+  return (
+    <>
       <IceSlab tableGroupScale={tableGroupScale} />
 
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.15} rZ={seat.rZ + 0.15}>
         {() => <IceBlock />}
       </SeatRing>
+    </>
+  );
+});
+
+export default function GlacierArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+  return (
+    <>
+      <GlacierWorld quality={quality} reducedMotion={reducedMotion} />
+      <GlacierTable numPlayers={numPlayers} localIndex={localIndex} tableGroupScale={tableGroupScale} />
     </>
   );
 }

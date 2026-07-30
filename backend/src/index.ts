@@ -584,11 +584,12 @@ app.post('/api/profiles', profileWriteLimiter, (req, res) => {
   try {
     const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName : '';
     const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar : null;
+    const outfit = typeof req.body?.outfit === 'string' ? req.body.outfit : null;
     if (!displayName.trim()) {
       res.status(400).json({ error: 'A display name is required' });
       return;
     }
-    const profile = profileManager.createProfile({ displayName, avatar });
+    const profile = profileManager.createProfile({ displayName, avatar, outfit });
     // The creator receives the secret; everyone else only ever sees publicProfile.
     res.status(201).json({ profile: profileManager.getPublicProfile(profile.id), secret: profile.secret });
   } catch (error: any) {
@@ -607,7 +608,7 @@ app.get('/api/profiles/:id', (req, res) => {
   res.status(200).json({ profile });
 });
 
-// Edit a profile's display name and/or avatar. Secret-authenticated.
+// Edit a profile's display name, avatar and/or cosmetic outfit. Secret-authenticated.
 app.patch('/api/profiles/:id', profileWriteLimiter, (req, res) => {
   try {
     const secret = typeof req.body?.secret === 'string' ? req.body.secret : '';
@@ -622,6 +623,10 @@ app.patch('/api/profiles/:id', profileWriteLimiter, (req, res) => {
     if (req.body?.avatar !== undefined) {
       const avatar = typeof req.body.avatar === 'string' ? req.body.avatar : null;
       profile = profileManager.setAvatar(req.params.id, secret, avatar);
+    }
+    if (req.body?.outfit !== undefined) {
+      const outfit = typeof req.body.outfit === 'string' ? req.body.outfit : null;
+      profile = profileManager.setOutfit(req.params.id, secret, outfit);
     }
     res.status(200).json({ profile });
   } catch (error: any) {
@@ -706,13 +711,13 @@ async function attachRedisAdapter(): Promise<void> {
 function resolveProfileIdentity(
   profileId?: string,
   profileSecret?: string
-): { profileId: string; tag?: string; avatar?: string | null } | undefined {
+): { profileId: string; tag?: string; avatar?: string | null; outfit?: string | null } | undefined {
   if (!profileId || !profileSecret) return undefined;
   if (!profileManager.verify(profileId, profileSecret)) return undefined;
   const p = profileManager.getProfile(profileId);
   if (!p) return undefined;
   profileManager.touchLastSeen(profileId);
-  return { profileId: p.id, tag: p.tag, avatar: p.avatarUrl };
+  return { profileId: p.id, tag: p.tag, avatar: p.avatarUrl, outfit: p.outfit };
 }
 
 io.on('connection', (socket) => {

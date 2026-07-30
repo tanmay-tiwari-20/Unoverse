@@ -31,11 +31,11 @@ async function parseError(res: Response, fallback: string): Promise<never> {
 
 /** Create a brand-new persistent profile. Returns the public profile + the
  *  private secret (store it locally; it authenticates all future edits). */
-export async function createProfile(input: { displayName: string; avatar?: string | null }): Promise<CreatedProfile> {
+export async function createProfile(input: { displayName: string; avatar?: string | null; outfit?: string | null }): Promise<CreatedProfile> {
   const res = await fetch(`${BACKEND_URL}/api/profiles`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ displayName: input.displayName, avatar: input.avatar ?? null }),
+    body: JSON.stringify({ displayName: input.displayName, avatar: input.avatar ?? null, outfit: input.outfit ?? null }),
   });
   if (!res.ok) return parseError(res, 'Failed to create profile');
   return res.json();
@@ -49,11 +49,11 @@ export async function fetchProfile(id: string): Promise<PublicProfile> {
   return data.profile;
 }
 
-/** Rename and/or change avatar. Secret-authenticated. */
+/** Rename and/or change avatar and/or cosmetic outfit. Secret-authenticated. */
 export async function patchProfile(
   id: string,
   secret: string,
-  changes: { displayName?: string; avatar?: string | null },
+  changes: { displayName?: string; avatar?: string | null; outfit?: string | null },
 ): Promise<PublicProfile> {
   const res = await fetch(`${BACKEND_URL}/api/profiles/${encodeURIComponent(id)}`, {
     method: 'PATCH',

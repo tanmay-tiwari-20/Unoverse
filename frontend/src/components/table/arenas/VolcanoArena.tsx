@@ -322,19 +322,46 @@ function ObsidianAltar({ tableGroupScale }: { tableGroupScale: [number, number, 
 function Throne() {
   return (
     <group>
+      {/* Obsidian seat block — faceted volcanic rock */}
       <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
         <boxGeometry args={[0.56, 0.6, 0.56]} />
-        <meshStandardMaterial color="#0f0908" roughness={0.4} metalness={0.35} />
+        <meshStandardMaterial color="#0f0908" roughness={0.4} metalness={0.35} flatShading />
       </mesh>
-      <mesh position={[0, 0.78, -0.22]} castShadow>
-        <boxGeometry args={[0.52, 0.6, 0.08]} />
-        <meshStandardMaterial color="#140b09" roughness={0.4} metalness={0.35} />
+      {/* Chiseled seat cushion of cooled magma stone */}
+      <mesh position={[0, 0.62, 0.02]} castShadow>
+        <boxGeometry args={[0.48, 0.06, 0.48]} />
+        <meshStandardMaterial color="#1a0f0b" roughness={0.5} metalness={0.3} />
       </mesh>
-      {/* Lava-crack emissive trim */}
+      {/* Tall jagged backrest */}
+      <mesh position={[0, 0.82, -0.24]} castShadow>
+        <boxGeometry args={[0.52, 0.7, 0.08]} />
+        <meshStandardMaterial color="#140b09" roughness={0.4} metalness={0.35} flatShading />
+      </mesh>
+      {/* Obsidian spikes crowning the backrest */}
+      {[-0.18, 0, 0.18].map((x, i) => (
+        <mesh key={`spike${i}`} position={[x, 1.2 + (i === 1 ? 0.08 : 0), -0.24]} castShadow>
+          <coneGeometry args={[0.05, i === 1 ? 0.3 : 0.22, 5]} />
+          <meshStandardMaterial color="#0c0705" roughness={0.35} metalness={0.4} flatShading />
+        </mesh>
+      ))}
+      {/* Armrests */}
+      {[-0.3, 0.3].map((x) => (
+        <mesh key={`arm${x}`} position={[x, 0.66, 0.06]} castShadow>
+          <boxGeometry args={[0.08, 0.1, 0.42]} />
+          <meshStandardMaterial color="#0f0908" roughness={0.4} metalness={0.35} />
+        </mesh>
+      ))}
+      {/* Lava-crack emissive seams — front and up the back */}
       <mesh position={[0, 0.62, 0.29]}>
         <planeGeometry args={[0.45, 0.03]} />
         <meshBasicMaterial color="#ff5a1e" transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
+      <mesh position={[0, 0.85, -0.195]}>
+        <planeGeometry args={[0.04, 0.5]} />
+        <meshBasicMaterial color="#ff6a24" transparent opacity={0.7} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      {/* Warm glow pooling under the throne */}
+      <pointLight position={[0, 0.3, 0.2]} color="#ff5a1e" intensity={0.8} distance={1.6} decay={2} />
     </group>
   );
 }
@@ -377,9 +404,20 @@ function SmokeColumn({ position, reducedMotion }: { position: [number, number, n
   );
 }
 
-export default function VolcanoArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+// ---------------------------------------------------------------------------
+//  World / Table memo split (perf) — see ClassicArena. The volcano cone, lava
+//  rivers, temple ruins, embers and ash never reconcile on a player-count
+//  change; only the obsidian altar + throne seat ring do.
+// ---------------------------------------------------------------------------
+
+const VolcanoWorld = React.memo(function VolcanoWorld({
+  quality,
+  reducedMotion,
+}: {
+  quality: ArenaProps['quality'];
+  reducedMotion?: boolean;
+}) {
   const tier = quality.tier;
-  const seat = getSeatRingRadii(numPlayers);
   const pillars = tier === 'high' ? 14 : tier === 'medium' ? 8 : 4;
   const spikes = tier === 'high' ? 18 : tier === 'medium' ? 10 : 5;
   const arches = tier === 'high' ? 6 : tier === 'medium' ? 3 : 0;
@@ -468,12 +506,36 @@ export default function VolcanoArena({ numPlayers, localIndex, quality, tableGro
       <DriftField count={tier === 'high' ? 60 : tier === 'medium' ? 30 : 10} quality={quality} area={[10, 6, 10]} center={[0, 2, 0]} size={0.06} color="#ff8a3a" velocity={[0.05, 0.5, 0.02]} sway={0.35} opacity={0.9} reducedMotion={reducedMotion} seed={2} />
       {/* Hot, smoky ground haze for depth (non-low). */}
       {tier !== 'low' && <GroundFog color="#5a1a0a" radius={28} y={0.6} opacity={0.24} scale={1.6} speed={0.016} reducedMotion={reducedMotion} />}
+    </>
+  );
+});
 
+const VolcanoTable = React.memo(function VolcanoTable({
+  numPlayers,
+  localIndex,
+  tableGroupScale,
+}: {
+  numPlayers: number;
+  localIndex: number;
+  tableGroupScale: [number, number, number];
+}) {
+  const seat = getSeatRingRadii(numPlayers);
+  return (
+    <>
       <ObsidianAltar tableGroupScale={tableGroupScale} />
 
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.15} rZ={seat.rZ + 0.15}>
         {() => <Throne />}
       </SeatRing>
+    </>
+  );
+});
+
+export default function VolcanoArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+  return (
+    <>
+      <VolcanoWorld quality={quality} reducedMotion={reducedMotion} />
+      <VolcanoTable numPlayers={numPlayers} localIndex={localIndex} tableGroupScale={tableGroupScale} />
     </>
   );
 }

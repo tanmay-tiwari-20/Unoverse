@@ -161,7 +161,7 @@ class ProfileManager {
    * `secret` — this is the only time the secret is handed out (to the creator,
    * who stores it client-side and presents it to authenticate future edits).
    */
-  public createProfile(input: { displayName: string; avatar?: string | null }): Profile {
+  public createProfile(input: { displayName: string; avatar?: string | null; outfit?: string | null }): Profile {
     const now = Date.now();
     const displayName = input.displayName.trim().slice(0, 40) || 'Player';
     const profile: Profile = {
@@ -170,6 +170,7 @@ class ProfileManager {
       displayName,
       tag: this.generateTag(),
       avatarUrl: input.avatar ? String(input.avatar).slice(0, 64) : null,
+      outfit: input.outfit ? String(input.outfit).slice(0, 64) : null,
       isGuest: true,
       providers: ['guest'],
       createdAt: now,
@@ -235,6 +236,17 @@ class ProfileManager {
     if (!this.verify(id, secret)) throw new Error('Not authorized to edit this profile');
     const p = this.profiles.get(id)!;
     p.avatarUrl = avatar ? String(avatar).slice(0, 64) : null;
+    p.updatedAt = Date.now();
+    this.markDirty(id);
+    return publicProfile(p);
+  }
+
+  /** Change a profile's cosmetic outfit (secret-authenticated). Purely visual;
+   *  never touches identity or stats. Mirror of setAvatar. */
+  public setOutfit(id: string, secret: string, outfit: string | null): PublicProfile {
+    if (!this.verify(id, secret)) throw new Error('Not authorized to edit this profile');
+    const p = this.profiles.get(id)!;
+    p.outfit = outfit ? String(outfit).slice(0, 64) : null;
     p.updatedAt = Date.now();
     this.markDirty(id);
     return publicProfile(p);

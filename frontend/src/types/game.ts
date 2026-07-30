@@ -14,6 +14,7 @@ export interface Player {
   profileId?: string;
   tag?: string; // short discriminator (e.g. "5LHL")
   avatar?: string | null; // preset avatar key, or null for the procedural fallback
+  outfit?: string | null; // cosmetic outfit (skin) key, or null for default — purely visual
 }
 
 export interface Spectator {

@@ -21,6 +21,8 @@ import { useProfileStore } from "../../store/useProfileStore";
 import { useDialogA11y } from "../../hooks/useDialogA11y";
 import { PresetAvatar } from "./PresetAvatar";
 import { AvatarPicker } from "./AvatarPicker";
+import { OutfitPicker } from "./OutfitPicker";
+import { DEFAULT_OUTFIT_KEY } from "../../lib/cosmetics/outfits";
 import type { ProfileStats } from "../../types/profile";
 import {
   formatWinRate, formatPlayTime, formatDuration, formatDate,
@@ -64,11 +66,13 @@ export function ProfileModal() {
   const cached = useProfileStore((s) => s.cachedProfile);
   const cachedName = useProfileStore((s) => s.displayName);
   const cachedAvatar = useProfileStore((s) => s.avatar);
+  const cachedOutfit = useProfileStore((s) => s.outfit);
   const loading = useProfileStore((s) => s.loading);
   const storeError = useProfileStore((s) => s.error);
   const refreshProfile = useProfileStore((s) => s.refreshProfile);
   const renameProfile = useProfileStore((s) => s.renameProfile);
   const setAvatar = useProfileStore((s) => s.setAvatar);
+  const setOutfit = useProfileStore((s) => s.setOutfit);
   const resetProfile = useProfileStore((s) => s.resetProfile);
   const clearError = useProfileStore((s) => s.clearError);
 
@@ -82,6 +86,7 @@ export function ProfileModal() {
   // Edit-mode draft state.
   const [draftName, setDraftName] = useState("");
   const [draftAvatar, setDraftAvatar] = useState("");
+  const [draftOutfit, setDraftOutfit] = useState("");
 
   // Re-fetch fresh stats whenever the modal opens (never trust local totals).
   useEffect(() => {
@@ -99,6 +104,7 @@ export function ProfileModal() {
     if (mode === "edit") {
       setDraftName(cached?.displayName ?? cachedName ?? "");
       setDraftAvatar(cached?.avatarUrl ?? cachedAvatar ?? "");
+      setDraftOutfit(cached?.outfit ?? cachedOutfit ?? DEFAULT_OUTFIT_KEY);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
@@ -109,14 +115,17 @@ export function ProfileModal() {
   const displayName = cached?.displayName ?? cachedName ?? "Player";
   const tag = cached?.tag ?? "";
   const avatarKey = cached?.avatarUrl ?? cachedAvatar ?? null;
+  const outfitKey = cached?.outfit ?? cachedOutfit ?? DEFAULT_OUTFIT_KEY;
   const stats: ProfileStats | null = cached?.stats ?? null;
 
   const handleSaveEdit = async () => {
     const trimmed = draftName.trim();
     const nameChanged = trimmed && trimmed !== displayName;
     const avatarChanged = draftAvatar && draftAvatar !== avatarKey;
+    const outfitChanged = draftOutfit && draftOutfit !== outfitKey;
     if (nameChanged) await renameProfile(trimmed);
     if (avatarChanged) await setAvatar(draftAvatar);
+    if (outfitChanged) await setOutfit(draftOutfit);
     if (!useProfileStore.getState().error) setMode("view");
   };
 
@@ -219,6 +228,12 @@ export function ProfileModal() {
                   <div className="flex flex-col gap-2">
                     <span className="font-arcade text-[0.7rem] uppercase tracking-wide text-white/70 px-1">Avatar</span>
                     <AvatarPicker value={draftAvatar || avatarKey || ""} onChange={setDraftAvatar} disabled={loading} />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <span className="font-arcade text-[0.7rem] uppercase tracking-wide text-white/70 px-1">Outfit</span>
+                    <p className="font-rounded text-[0.68rem] text-white/45 px-1 -mt-1">Your in-game character&apos;s look. Everyone at the table sees it.</p>
+                    <OutfitPicker value={draftOutfit || outfitKey} onChange={setDraftOutfit} disabled={loading} />
                   </div>
 
                   <div className="flex gap-3 mt-1">

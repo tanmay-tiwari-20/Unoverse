@@ -373,21 +373,62 @@ function MossyRock({ tableGroupScale }: { tableGroupScale: [number, number, numb
 function Stump() {
   return (
     <group>
-      <mesh position={[0, 0.28, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.34, 0.4, 0.56, 10]} />
+      {/* Carved log seat — tapered trunk with flat top. Sized so the usable seat
+          surface (mossy cushion top) lands at ≈0.42 to match the shared seated
+          HIP_Y=0.44, matching the Space chair convention — the character rests on
+          the cushion instead of sinking into it. */}
+      <mesh position={[0, 0.19, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.34, 0.42, 0.38, 12]} />
         <meshStandardMaterial color="#4a3320" roughness={1} flatShading />
       </mesh>
-      <mesh position={[0, 0.57, 0]}>
-        <cylinderGeometry args={[0.35, 0.35, 0.05, 10]} />
+      {/* Bark ridges */}
+      {[0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45, 2.8].map((a, i) => (
+        <mesh key={`bark${i}`} position={[Math.sin(a) * 0.37, 0.19, Math.cos(a) * 0.37]} rotation={[0, -a, 0]} castShadow>
+          <boxGeometry args={[0.06, 0.34, 0.03]} />
+          <meshStandardMaterial color="#3a2716" roughness={1} flatShading />
+        </mesh>
+      ))}
+      {/* Mossy cushion top — usable seat surface (top ≈0.42). */}
+      <mesh position={[0, 0.39, 0]} castShadow>
+        <cylinderGeometry args={[0.35, 0.35, 0.06, 12]} />
         <meshStandardMaterial color="#356b2c" roughness={1} />
       </mesh>
+      {/* Gnarled roots splaying at the base */}
+      {[0.5, 1.7, 2.9, 4.1, 5.3].map((a, i) => (
+        <mesh key={`root${i}`} position={[Math.sin(a) * 0.34, 0.06, Math.cos(a) * 0.34]} rotation={[Math.PI / 2.3, 0, -a]} castShadow>
+          <capsuleGeometry args={[0.05, 0.22, 4, 8]} />
+          <meshStandardMaterial color="#3a2716" roughness={1} flatShading />
+        </mesh>
+      ))}
+      {/* A vine curling up the back of the stump */}
+      <mesh position={[0, 0.22, -0.36]} rotation={[0.2, 0, 0.3]} castShadow>
+        <capsuleGeometry args={[0.022, 0.4, 4, 8]} />
+        <meshStandardMaterial color="#2f5e28" roughness={0.9} />
+      </mesh>
+      {[0.18, 0.34].map((y, i) => (
+        <mesh key={`leaf${i}`} position={[0.06 * (i ? 1 : -1), 0.18 + y, -0.34]} rotation={[0, i ? 0.6 : -0.6, 0]}>
+          <planeGeometry args={[0.14, 0.09]} />
+          <meshStandardMaterial color="#49a04a" roughness={0.8} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
     </group>
   );
 }
 
-export default function JungleArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+// ---------------------------------------------------------------------------
+//  World / Table memo split (perf) — see ClassicArena for the rationale. The
+//  heavy vegetation/particle world never reconciles on a player-count change;
+//  only the mossy-rock table + stump seat ring do.
+// ---------------------------------------------------------------------------
+
+const JungleWorld = React.memo(function JungleWorld({
+  quality,
+  reducedMotion,
+}: {
+  quality: ArenaProps['quality'];
+  reducedMotion?: boolean;
+}) {
   const tier = quality.tier;
-  const seat = getSeatRingRadii(numPlayers);
   const canopy = tier === 'high' ? 20 : tier === 'medium' ? 12 : 6;
   const mid = tier === 'high' ? 22 : tier === 'medium' ? 12 : 6;
   const ferns = tier === 'high' ? 40 : tier === 'medium' ? 20 : 0;
@@ -508,12 +549,36 @@ export default function JungleArena({ numPlayers, localIndex, quality, tableGrou
 
       {/* Butterflies (GLTF-or-procedural wings). */}
       {tier !== 'low' && <Butterflies count={tier === 'high' ? 6 : 3} enabled reducedMotion={reducedMotion} />}
+    </>
+  );
+});
 
+const JungleTable = React.memo(function JungleTable({
+  numPlayers,
+  localIndex,
+  tableGroupScale,
+}: {
+  numPlayers: number;
+  localIndex: number;
+  tableGroupScale: [number, number, number];
+}) {
+  const seat = getSeatRingRadii(numPlayers);
+  return (
+    <>
       <MossyRock tableGroupScale={tableGroupScale} />
 
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.15} rZ={seat.rZ + 0.15}>
         {() => <Stump />}
       </SeatRing>
+    </>
+  );
+});
+
+export default function JungleArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+  return (
+    <>
+      <JungleWorld quality={quality} reducedMotion={reducedMotion} />
+      <JungleTable numPlayers={numPlayers} localIndex={localIndex} tableGroupScale={tableGroupScale} />
     </>
   );
 }

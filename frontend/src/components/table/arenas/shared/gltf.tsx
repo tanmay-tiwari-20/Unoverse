@@ -63,6 +63,26 @@ interface FallbackBoundaryProps {
   children: React.ReactNode;
 }
 
+// A failed GLB is a normal, expected path (the arenas ship procedural-first and
+// most `.glb` slots are empty), so a failure must be SILENT in production. But a
+// genuinely corrupt or half-exported asset that a developer just dropped in is
+// otherwise undebuggable — the procedural fallback simply appears and nothing
+// says why. So in dev we log ONCE per url. The set is module-scoped, not
+// per-instance, so the same missing asset placed in several spots warns once.
+const warnedUrls = new Set<string>();
+function warnModelFailedOnce(url: string | undefined, err: unknown) {
+  if (process.env.NODE_ENV === 'production') return;
+  if (!url || warnedUrls.has(url)) return;
+  warnedUrls.add(url);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[arena/gltf] Optional hero model "${url}" failed to load — using the ` +
+      `procedural fallback. This is expected if the file is intentionally absent; ` +
+      `if you just added it, check the export (Draco/meshopt) and path.`,
+    err,
+  );
+}
+
 class ModelErrorBoundary extends React.Component<FallbackBoundaryProps, { failed: boolean }> {
   constructor(props: FallbackBoundaryProps) {
     super(props);
@@ -70,6 +90,11 @@ class ModelErrorBoundary extends React.Component<FallbackBoundaryProps, { failed
   }
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    // Dev-only, deduped: surface a real broken asset without spamming the
+    // console on every re-render or for an intentionally-absent file.
+    warnModelFailedOnce(this.props.resetKey, err);
   }
   componentDidUpdate(prev: FallbackBoundaryProps) {
     // A new target asset gets a fresh attempt.
@@ -194,4 +219,29 @@ export function preloadArenaModel(model: ModelKey) {
   } catch {
     // ignore — the fallback path covers a failed/absent asset
   }
+}
+
+/**
+ * Which hero slots each arena actually renders. Mirrors the `<ArenaModel model=…>`
+ * calls in the arena components, so a caller that only knows an arena id (the
+ * lobby, which learns `room.arena` before the Canvas mounts) can warm exactly
+ * that arena's assets. Classic is procedural-only and has no entry.
+ */
+const ARENA_HERO_MODELS: Record<string, readonly ModelKey[]> = {
+  space: ['spaceStation'],
+  jungle: ['jungleTree', 'jungleFirefly', 'jungleButterfly'],
+  glacier: ['glacierFormation'],
+  cyber: ['cyberTower'],
+  volcano: ['volcanoTemple'],
+};
+
+/**
+ * Best-effort warm-up of every hero asset an arena may use. Unknown/classic ids
+ * no-op. Fire-and-forget: absent files are the normal case and are covered by
+ * `ArenaModel`'s fallback.
+ */
+export function preloadArenaModels(arenaId?: string | null) {
+  const models = arenaId ? ARENA_HERO_MODELS[arenaId] : undefined;
+  if (!models) return;
+  models.forEach(preloadArenaModel);
 }

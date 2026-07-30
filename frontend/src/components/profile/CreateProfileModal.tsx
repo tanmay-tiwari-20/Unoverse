@@ -15,7 +15,9 @@ import { AlertCircle, UserPlus } from "lucide-react";
 import { useProfileStore } from "../../store/useProfileStore";
 import { useDialogA11y } from "../../hooks/useDialogA11y";
 import { DEFAULT_AVATAR_KEY } from "../../lib/profile/avatars";
+import { DEFAULT_OUTFIT_KEY } from "../../lib/cosmetics/outfits";
 import { AvatarPicker } from "./AvatarPicker";
+import { OutfitPicker } from "./OutfitPicker";
 import { PresetAvatar } from "./PresetAvatar";
 
 interface CreateProfileModalProps {
@@ -36,6 +38,7 @@ export function CreateProfileModal({ isOpen, onCreated, initialName = "" }: Crea
 
   const [name, setName] = useState(initialName);
   const [avatar, setAvatar] = useState(DEFAULT_AVATAR_KEY);
+  const [outfit, setOutfit] = useState(DEFAULT_OUTFIT_KEY);
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Focus the name field on open; this modal has no close affordance (identity
@@ -52,7 +55,7 @@ export function CreateProfileModal({ isOpen, onCreated, initialName = "" }: Crea
       return;
     }
     setLocalError(null);
-    const profile = await createProfile(trimmed, avatar);
+    const profile = await createProfile(trimmed, avatar, outfit);
     if (profile) onCreated?.(profile.displayName);
   };
 
@@ -145,6 +148,13 @@ export function CreateProfileModal({ isOpen, onCreated, initialName = "" }: Crea
                   Pick an Avatar
                 </span>
                 <AvatarPicker value={avatar} onChange={setAvatar} disabled={loading} />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <span className="font-arcade text-[0.7rem] uppercase tracking-wide text-white/70 px-1">
+                  Pick an Outfit
+                </span>
+                <OutfitPicker value={outfit} onChange={setOutfit} disabled={loading} />
               </div>
 
               <button

@@ -19,6 +19,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { PublicProfile } from '../types/profile';
 import { DEFAULT_AVATAR_KEY } from '../lib/profile/avatars';
+import { DEFAULT_OUTFIT_KEY } from '../lib/cosmetics/outfits';
 import * as profileApi from '../lib/profile/profileApi';
 
 interface ProfileState {
@@ -29,6 +30,8 @@ interface ProfileState {
   displayName: string | null;
   /** Cached preset avatar key. */
   avatar: string | null;
+  /** Cached cosmetic outfit (skin) key. */
+  outfit: string | null;
 
   // ---- Runtime-only ---------------------------------------------------------
   /** Latest server-served public view, for the profile UI. Never persisted. */
@@ -43,10 +46,11 @@ interface ProfileState {
   // ---- Actions --------------------------------------------------------------
   setHydrated: () => void;
   setIsProfileOpen: (open: boolean) => void;
-  createProfile: (displayName: string, avatar?: string | null) => Promise<PublicProfile | null>;
+  createProfile: (displayName: string, avatar?: string | null, outfit?: string | null) => Promise<PublicProfile | null>;
   refreshProfile: () => Promise<PublicProfile | null>;
   renameProfile: (displayName: string) => Promise<PublicProfile | null>;
   setAvatar: (avatar: string | null) => Promise<PublicProfile | null>;
+  setOutfit: (outfit: string | null) => Promise<PublicProfile | null>;
   resetProfile: () => Promise<PublicProfile | null>;
   clearError: () => void;
 }
@@ -57,6 +61,7 @@ function adopt(profile: PublicProfile) {
     cachedProfile: profile,
     displayName: profile.displayName,
     avatar: profile.avatarUrl,
+    outfit: profile.outfit,
   };
 }
 
@@ -67,6 +72,7 @@ export const useProfileStore = create<ProfileState>()(
       profileSecret: null,
       displayName: null,
       avatar: null,
+      outfit: null,
 
       cachedProfile: null,
       hydrated: false,
@@ -77,12 +83,13 @@ export const useProfileStore = create<ProfileState>()(
       setHydrated: () => set({ hydrated: true }),
       setIsProfileOpen: (open) => set({ isProfileOpen: open }),
 
-      createProfile: async (displayName, avatar) => {
+      createProfile: async (displayName, avatar, outfit) => {
         set({ loading: true, error: null });
         try {
           const { profile, secret } = await profileApi.createProfile({
             displayName: displayName.trim(),
             avatar: avatar ?? DEFAULT_AVATAR_KEY,
+            outfit: outfit ?? DEFAULT_OUTFIT_KEY,
           });
           set({
             profileId: profile.id,
@@ -141,6 +148,20 @@ export const useProfileStore = create<ProfileState>()(
         }
       },
 
+      setOutfit: async (outfit) => {
+        const { profileId, profileSecret } = get();
+        if (!profileId || !profileSecret) return null;
+        set({ loading: true, error: null });
+        try {
+          const profile = await profileApi.patchProfile(profileId, profileSecret, { outfit });
+          set({ ...adopt(profile), loading: false });
+          return profile;
+        } catch (e: any) {
+          set({ loading: false, error: e?.message || 'Failed to change outfit' });
+          return null;
+        }
+      },
+
       resetProfile: async () => {
         const { profileId, profileSecret } = get();
         if (!profileId || !profileSecret) return null;
@@ -166,6 +187,7 @@ export const useProfileStore = create<ProfileState>()(
         profileSecret: state.profileSecret,
         displayName: state.displayName,
         avatar: state.avatar,
+        outfit: state.outfit,
       }),
       // Flip `hydrated` once localStorage has been read so the landing page can
       // distinguish "no profile yet" from "not loaded yet" and avoid flashing the

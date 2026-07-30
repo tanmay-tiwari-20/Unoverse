@@ -388,16 +388,48 @@ function CommandPlatform({ tableGroupScale }: { tableGroupScale: [number, number
 function ConsolePod() {
   return (
     <group>
-      {/* Seat base */}
-      <mesh position={[0, 0.24, 0.05]} castShadow>
-        <boxGeometry args={[0.5, 0.48, 0.5]} />
-        <meshStandardMaterial color="#1b2130" roughness={0.5} metalness={0.7} />
+      {/* Pedestal base with a lit rim */}
+      <mesh position={[0, 0.06, 0]} castShadow>
+        <cylinderGeometry args={[0.26, 0.32, 0.12, 16]} />
+        <meshStandardMaterial color="#12161f" roughness={0.5} metalness={0.8} />
       </mesh>
-      {/* Backrest */}
-      <mesh position={[0, 0.62, -0.18]} castShadow>
-        <boxGeometry args={[0.46, 0.5, 0.08]} />
+      <mesh position={[0, 0.13, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.24, 0.3, 24]} />
+        <meshBasicMaterial color={ACCENT} transparent opacity={0.6} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      {/* Support column */}
+      <mesh position={[0, 0.2, 0]} castShadow>
+        <cylinderGeometry args={[0.08, 0.12, 0.18, 12]} />
+        <meshStandardMaterial color="#0f131b" roughness={0.4} metalness={0.85} />
+      </mesh>
+      {/* Contoured seat pan */}
+      <mesh position={[0, 0.32, 0.03]} castShadow>
+        <boxGeometry args={[0.5, 0.12, 0.5]} />
+        <meshStandardMaterial color="#1b2130" roughness={0.45} metalness={0.7} />
+      </mesh>
+      {/* Seat cushion */}
+      <mesh position={[0, 0.39, 0.03]} castShadow>
+        <boxGeometry args={[0.42, 0.06, 0.42]} />
+        <meshStandardMaterial color="#20283a" roughness={0.6} metalness={0.3} />
+      </mesh>
+      {/* High backrest with side wings */}
+      <mesh position={[0, 0.66, -0.2]} castShadow>
+        <boxGeometry args={[0.46, 0.56, 0.08]} />
         <meshStandardMaterial color="#232b3d" roughness={0.5} metalness={0.6} />
       </mesh>
+      {[-0.22, 0.22].map((x) => (
+        <mesh key={`wing${x}`} position={[x, 0.58, -0.08]} rotation={[0, x < 0 ? -0.4 : 0.4, 0]} castShadow>
+          <boxGeometry args={[0.08, 0.4, 0.2]} />
+          <meshStandardMaterial color="#1b2130" roughness={0.5} metalness={0.65} />
+        </mesh>
+      ))}
+      {/* Vertical LED strips on the backrest */}
+      {[-0.12, 0.12].map((x) => (
+        <mesh key={`led${x}`} position={[x, 0.66, -0.155]}>
+          <boxGeometry args={[0.02, 0.42, 0.01]} />
+          <meshBasicMaterial color={ACCENT} transparent opacity={0.85} blending={THREE.AdditiveBlending} depthWrite={false} />
+        </mesh>
+      ))}
       {/* Curved control console in front */}
       <mesh position={[0, 0.4, 0.42]} rotation={[0.3, 0, 0]}>
         <boxGeometry args={[0.62, 0.1, 0.26]} />
@@ -412,9 +444,20 @@ function ConsolePod() {
   );
 }
 
-export default function SpaceStationArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+// ---------------------------------------------------------------------------
+//  World / Table memo split (perf) — see ClassicArena. The celestial world +
+//  holo core + running-light gantry never reconcile on a player-count change;
+//  only the command platform + console-pod seat ring do.
+// ---------------------------------------------------------------------------
+
+const SpaceWorld = React.memo(function SpaceWorld({
+  quality,
+  reducedMotion,
+}: {
+  quality: ArenaProps['quality'];
+  reducedMotion?: boolean;
+}) {
   const tier = quality.tier;
-  const seat = getSeatRingRadii(numPlayers);
   const asteroids = tier === 'high' ? 70 : tier === 'medium' ? 34 : 12;
 
   return (
@@ -492,12 +535,37 @@ export default function SpaceStationArena({ numPlayers, localIndex, quality, tab
         <DriftField count={tier === 'high' ? 60 : 30} quality={quality} area={[16, 10, 16]} center={[0, 4, 0]} size={0.05} color="#bcd6ff" velocity={[0.05, 0.02, 0]} sway={0.2} opacity={0.5} reducedMotion={reducedMotion} seed={9} />
       )}
 
-      <CommandPlatform tableGroupScale={tableGroupScale} />
       <HoloCore reducedMotion={reducedMotion} />
       {tier !== 'low' && <RunningLights reducedMotion={reducedMotion} />}
+    </>
+  );
+});
+
+const SpaceTable = React.memo(function SpaceTable({
+  numPlayers,
+  localIndex,
+  tableGroupScale,
+}: {
+  numPlayers: number;
+  localIndex: number;
+  tableGroupScale: [number, number, number];
+}) {
+  const seat = getSeatRingRadii(numPlayers);
+  return (
+    <>
+      <CommandPlatform tableGroupScale={tableGroupScale} />
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.18} rZ={seat.rZ + 0.18}>
         {() => <ConsolePod />}
       </SeatRing>
+    </>
+  );
+});
+
+export default function SpaceStationArena({ numPlayers, localIndex, quality, tableGroupScale, reducedMotion }: ArenaProps) {
+  return (
+    <>
+      <SpaceWorld quality={quality} reducedMotion={reducedMotion} />
+      <SpaceTable numPlayers={numPlayers} localIndex={localIndex} tableGroupScale={tableGroupScale} />
     </>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useDeferredValue, useEffect, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -93,19 +93,32 @@ function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolea
   return null;
 }
 
-function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironmentProps) {
+const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironmentProps) {
   const { cameraMotion, cameraSensitivity } = useSettingsStore();
   const quality = useEffectiveQuality();
   const reducedMotion = useReducedMotion();
   // The synced, match-persistent arena choice. Landing page always uses classic.
   const arenaId = useGameStore((s) => s.room?.arena);
 
+  // Defer the active player count so a bot-add doesn't force the heavy table
+  // resize + camera reframe + seat-ring recompute into the same synchronous,
+  // uninterruptible commit that clicking "add bot" triggers — that single fat
+  // commit is what stalls a frame and trips the WebGL context-loss overlay
+  // (the "black screen"). `useDeferredValue` lets the urgent render keep the old
+  // count (nothing heavy reconciles) and schedules the count growth as a low-
+  // priority pass React can interrupt and time-slice. When the count is
+  // unchanged `deferredCount === numPlayers`, so window-resize/aspect work in
+  // CameraSetup stays urgent — only genuine count changes are deferred.
+  // WebGLSeats defers its own seat signature in lockstep, so the table slab and
+  // the seated characters transition together, one frame behind, coherently.
+  const deferredCount = useDeferredValue(numPlayers);
+
   // Table + camera adapt to the active player count (spectators excluded upstream).
-  const tableGroupScale = getTableGroupScale(numPlayers);
+  const tableGroupScale = getTableGroupScale(deferredCount);
 
   return (
     <>
-      <CameraSetup isLandingPage={isLandingPage} numPlayers={numPlayers} />
+      <CameraSetup isLandingPage={isLandingPage} numPlayers={deferredCount} />
       <OrbitControls
         makeDefault
         target={[0, 0.9, 0]}
@@ -131,7 +144,7 @@ function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironm
           are arena-independent and unchanged. */}
       <ArenaEnvironment
         arenaId={isLandingPage ? 'classic' : arenaId}
-        numPlayers={numPlayers}
+        numPlayers={deferredCount}
         localIndex={localIndex}
         quality={quality}
         tableGroupScale={tableGroupScale}
@@ -152,7 +165,8 @@ function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironm
       />
     </>
   );
-}
+});
+Scene.displayName = 'Scene';
 
 export const RoomEnvironment: React.FC<RoomEnvironmentProps> = ({ numPlayers, localIndex, isLandingPage, children }) => {
   const quality = useEffectiveQuality();
