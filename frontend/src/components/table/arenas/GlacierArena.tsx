@@ -329,18 +329,20 @@ function IceBlock() {
   }), []);
   return (
     <group>
-      {/* Seat block */}
-      <mesh geometry={geo} material={iceMat} position={[0, 0.28, 0.02]} rotation={[0, 0.3, 0]} castShadow receiveShadow />
+      {/* Seat block — flattened on Y so the block TOP lands at ≈0.42, matching the
+          shared seated HIP_Y=0.44 (same convention as the Space console pod and
+          the Jungle stump), while the base still rests on the snow at y≈0. */}
+      <mesh geometry={geo} material={iceMat} position={[0, 0.21, 0.02]} rotation={[0, 0.3, 0]} scale={[1, 0.81, 1]} castShadow receiveShadow />
       {/* Angled crystalline backrest */}
-      <mesh geometry={geo} material={iceMat} position={[0, 0.62, -0.24]} rotation={[0.12, -0.2, 0]} scale={[0.95, 0.9, 0.4]} castShadow />
+      <mesh geometry={geo} material={iceMat} position={[0, 0.5, -0.24]} rotation={[0.12, -0.2, 0]} scale={[0.95, 0.9, 0.4]} castShadow />
       {/* Sharp ice shards rising behind the seat */}
       {[-0.16, 0.05, 0.2].map((x, i) => (
-        <mesh key={`shard${i}`} material={iceMat} position={[x, 0.7 + (i === 1 ? 0.16 : 0), -0.28]} rotation={[0, 0, x * 0.6]} castShadow>
+        <mesh key={`shard${i}`} material={iceMat} position={[x, 0.58 + (i === 1 ? 0.16 : 0), -0.28]} rotation={[0, 0, x * 0.6]} castShadow>
           <coneGeometry args={[0.05, i === 1 ? 0.4 : 0.28, 5]} />
         </mesh>
       ))}
       {/* Faint inner glow so the ice reads as translucent, not flat */}
-      <pointLight position={[0, 0.4, 0]} color="#aef0ff" intensity={0.4} distance={1.2} decay={2} />
+      <pointLight position={[0, 0.28, 0]} color="#aef0ff" intensity={0.4} distance={1.2} decay={2} />
     </group>
   );
 }

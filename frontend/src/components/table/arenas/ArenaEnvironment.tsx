@@ -7,9 +7,11 @@
  * world" (a heavy, shader-and-mesh-laden component). Every themed arena beyond
  * the classic tavern is `React.lazy`-split so only the selected arena's code and
  * shaders are ever downloaded and compiled — a room in the Volcano never pays
- * for the Space Station's chunk. While a lazy chunk loads, `<Suspense>` shows the
- * ClassicArena as a lightweight, already-loaded fallback so the table is never
- * empty for a frame.
+ * for the Space Station's chunk. While a lazy chunk loads, `<Suspense>` shows an
+ * arena-neutral placeholder (bare play surface, flat light) rather than a themed
+ * world, so the table is never empty for a frame and never flashes the wrong
+ * arena. `preloadArena` lets a caller warm the chunk once the id is known, so in
+ * practice the placeholder is rarely seen at all.
  *
  * The arena is siblings-with, not a parent of, the seats/cards/camera/controls
  * (those live next to `<ArenaEnvironment>` in `Scene`), so nothing here can alter
@@ -18,10 +20,19 @@
 
 import React, { Suspense } from 'react';
 import * as THREE from 'three';
-import { ArenaId } from '../../../lib/arenas/types';
-import { resolveArena } from '../../../lib/arenas/registry';
+import { ArenaId, ThemedArenaId } from '../../../lib/arenas/types';
+import { isThemedArena, resolveArena } from '../../../lib/arenas/registry';
 import ClassicArena from './ClassicArena';
 import { ArenaProps, PlaySurface, useDisposable } from './shared/ArenaKit';
+
+/**
+ * `ThemedArenaId` (every arena that ships as its own chunk — the registry minus
+ * the eagerly-bundled default) and its `isThemedArena` guard both live in the
+ * arena registry, because the asset warm-up map in `shared/gltf` is keyed by the
+ * same type. Adding an arena to the catalog is therefore a compile error here
+ * until it has a lazy component and a preload thunk, and in `gltf` until it has
+ * a hero-asset entry — neither map can silently drift out of the catalog.
+ */
 
 // Lazily-loaded themed arenas. Each is its own chunk; the dynamic import is only
 // evaluated when that arena id is selected.
@@ -31,7 +42,7 @@ const GlacierArena = React.lazy(() => import('./GlacierArena'));
 const CyberCityArena = React.lazy(() => import('./CyberCityArena'));
 const VolcanoArena = React.lazy(() => import('./VolcanoArena'));
 
-const LAZY_ARENAS: Partial<Record<ArenaId, React.LazyExoticComponent<React.ComponentType<ArenaProps>>>> = {
+const LAZY_ARENAS: Record<ThemedArenaId, React.LazyExoticComponent<React.ComponentType<ArenaProps>>> = {
   space: SpaceStationArena,
   jungle: JungleArena,
   glacier: GlacierArena,
@@ -45,8 +56,9 @@ const LAZY_ARENAS: Partial<Record<ArenaId, React.LazyExoticComponent<React.Compo
 // lazy-loading guide), so these cannot be collapsed into one variable-path
 // helper. `React.lazy` de-dupes: a warm-up `import()` and the later render
 // resolve the same module promise, so the arena's chunk is compiled before the
-// Canvas mounts and Classic never has to stand in.
-const PRELOAD_ARENAS: Partial<Record<ArenaId, () => Promise<unknown>>> = {
+// Canvas mounts and the neutral fallback never has to stand in. Code only — no
+// model or texture prefetch happens here.
+const PRELOAD_ARENAS: Record<ThemedArenaId, () => Promise<unknown>> = {
   space: () => import('./SpaceStationArena'),
   jungle: () => import('./JungleArena'),
   glacier: () => import('./GlacierArena'),
@@ -64,10 +76,8 @@ const PRELOAD_ARENAS: Partial<Record<ArenaId, () => Promise<unknown>>> = {
  */
 export function preloadArena(arenaId?: ArenaId | string | null): void {
   const id = resolveArena(arenaId);
-  const load = PRELOAD_ARENAS[id];
-  if (load) {
-    void load().catch(() => {});
-  }
+  if (!isThemedArena(id)) return;
+  void PRELOAD_ARENAS[id]().catch(() => {});
 }
 
 /**
@@ -99,12 +109,13 @@ export interface ArenaEnvironmentProps extends ArenaProps {
 
 export function ArenaEnvironment({ arenaId, ...props }: ArenaEnvironmentProps) {
   const id = resolveArena(arenaId);
-  const Themed = id === 'classic' ? null : LAZY_ARENAS[id];
 
   // Classic (and any unknown id) renders synchronously — no Suspense, no chunk.
-  if (!Themed) {
+  if (!isThemedArena(id)) {
     return <ClassicArena {...props} />;
   }
+
+  const Themed = LAZY_ARENAS[id];
 
   return (
     <Suspense fallback={<ArenaFallback />}>

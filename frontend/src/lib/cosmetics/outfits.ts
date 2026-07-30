@@ -167,16 +167,26 @@ export const OUTFITS: Outfit[] = [
 /** The key assigned to a brand-new / outfit-less player. */
 export const DEFAULT_OUTFIT_KEY = OUTFITS[0].key;
 
-const BY_KEY: Record<string, Outfit> = Object.fromEntries(
-  OUTFITS.map((o) => [o.key, o]),
-);
+/**
+ * Key → palette lookup. A `Map` on purpose (not a plain object): stored keys are
+ * untrusted strings off a profile / the wire, and a plain object would resolve
+ * inherited names like `constructor` or `toString` to a truthy NON-outfit, which
+ * would then reach the renderer as undefined colours and NaN PBR values. A Map
+ * only ever answers with something we put in it.
+ */
+const BY_KEY: Map<string, Outfit> = new Map(OUTFITS.map((o) => [o.key, o]));
+
+/** The palette every fallback lands on. Guaranteed present (it's OUTFITS[0]). */
+const DEFAULT_OUTFIT: Outfit = OUTFITS[0];
 
 /**
- * Resolve a stored outfit key to its palette. Unknown / null keys fall back to
- * the default so rendering never breaks on legacy or missing values.
+ * Resolve a stored outfit key to its palette. Unknown / null / non-string keys
+ * fall back to the default so rendering never breaks on legacy or missing
+ * values. Always returns a complete `Outfit` — never undefined, never throws.
  */
 export function getOutfit(key: string | null | undefined): Outfit {
-  return (key && BY_KEY[key]) || BY_KEY[DEFAULT_OUTFIT_KEY];
+  if (typeof key !== 'string' || key.length === 0) return DEFAULT_OUTFIT;
+  return BY_KEY.get(key) ?? DEFAULT_OUTFIT;
 }
 
 /**
@@ -186,10 +196,11 @@ export function getOutfit(key: string | null | undefined): Outfit {
  * uniform. Never returns the arena-affinity skins at random — only the neutral
  * everyday set — so unset players read as "default" not "themed".
  */
-const NEUTRAL_KEYS = OUTFITS.filter((o) => !o.arenaAffinity).map((o) => o.key);
+const NEUTRAL_OUTFITS: Outfit[] = OUTFITS.filter((o) => !o.arenaAffinity);
 export function outfitForName(name: string | null | undefined): Outfit {
-  if (!name) return BY_KEY[DEFAULT_OUTFIT_KEY];
+  if (typeof name !== 'string' || name.length === 0) return DEFAULT_OUTFIT;
+  if (NEUTRAL_OUTFITS.length === 0) return DEFAULT_OUTFIT;
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return BY_KEY[NEUTRAL_KEYS[h % NEUTRAL_KEYS.length]];
+  return NEUTRAL_OUTFITS[h % NEUTRAL_OUTFITS.length];
 }

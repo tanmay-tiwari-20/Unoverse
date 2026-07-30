@@ -15,6 +15,10 @@
  *     that renders the SAME procedural mesh if the fetch/parse fails (missing
  *     file, 404, bad asset). So the procedural version shows instantly, then is
  *     seamlessly replaced only if a valid model actually loads.
+ *   - "Actually loads" is enforced, not assumed: a file that fetches and parses
+ *     but has no default scene or nothing drawable in it is treated as a failed
+ *     load, so a half-exported asset yields the procedural prop rather than an
+ *     invisible hole where the prop used to be.
  *   - Loads are gated by the caller (quality tier), so low/medium never even
  *     attempt a download.
  *   - drei owns the GLTF cache + disposal, so switching arenas releases the GPU
@@ -29,6 +33,8 @@ import React, { Suspense } from 'react';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
+import { ThemedArenaId } from '../../../../lib/arenas/types';
+import { isThemedArena } from '../../../../lib/arenas/registry';
 
 /**
  * Canonical hero-asset slots. Paths are relative to `public/` (served at the web
@@ -58,27 +64,83 @@ const USE_MESHOPT = true;
 
 interface FallbackBoundaryProps {
   fallback: React.ReactNode;
-  /** Bump to reset the boundary if the url changes. */
-  resetKey?: string;
+  /** Target asset; changing it resets the boundary so the new url gets a fresh attempt. */
+  url?: string;
   children: React.ReactNode;
+}
+
+/**
+ * A GLB that fetched and parsed but has nothing we can draw. Distinct from a
+ * network/parse failure only for the dev message — both resolve to the
+ * procedural fallback.
+ */
+class UnusableModelError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnusableModelError';
+  }
 }
 
 // A failed GLB is a normal, expected path (the arenas ship procedural-first and
 // most `.glb` slots are empty), so a failure must be SILENT in production. But a
 // genuinely corrupt or half-exported asset that a developer just dropped in is
 // otherwise undebuggable — the procedural fallback simply appears and nothing
-// says why. So in dev we log ONCE per url. The set is module-scoped, not
-// per-instance, so the same missing asset placed in several spots warns once.
-const warnedUrls = new Set<string>();
-function warnModelFailedOnce(url: string | undefined, err: unknown) {
-  if (process.env.NODE_ENV === 'production') return;
-  if (!url || warnedUrls.has(url)) return;
-  warnedUrls.add(url);
-  // eslint-disable-next-line no-console
-  console.warn(
+// says why. So in dev we log ONCE per distinct problem.
+//
+// The single gate is a literal `process.env.NODE_ENV` comparison so the bundler
+// folds it to `false` in a production build and drops the message strings with
+// it. Every logging path below routes through `warnOnce`, so production never
+// does more than take a branch.
+const IS_DEV = process.env.NODE_ENV === 'development';
+
+// Module-scoped, not per-instance: the same broken asset placed in several spots
+// warns once, and a remount/StrictMode double-render doesn't repeat it. Keys are
+// `category:url[#clip]`, bounded by MODEL_PATHS × clips, so this can't grow
+// without bound.
+const warned = new Set<string>();
+function warnOnce(key: string, message: string, err?: unknown) {
+  if (!IS_DEV) return;
+  if (warned.has(key)) return;
+  warned.add(key);
+  if (err === undefined) console.warn(message);
+  else console.warn(message, err);
+}
+
+/**
+ * A model resolved to the procedural fallback. Split by cause, because the two
+ * causes need different developer responses: a parsed-but-unusable asset is
+ * always a mistake (the file exists, so somebody meant to ship it), whereas a
+ * fetch/parse failure is usually just an intentionally-empty slot.
+ */
+function warnModelFailed(url: string | undefined, err: unknown) {
+  if (!IS_DEV || !url) return;
+  if (err instanceof UnusableModelError) {
+    warnOnce(
+      `unusable:${url}`,
+      `[arena/gltf] ${err.message} Falling back to the procedural prop — ` +
+        `re-export the asset with its meshes included.`,
+    );
+    return;
+  }
+  warnOnce(
+    `load:${url}`,
     `[arena/gltf] Optional hero model "${url}" failed to load — using the ` +
       `procedural fallback. This is expected if the file is intentionally absent; ` +
       `if you just added it, check the export (Draco/meshopt) and path.`,
+    err,
+  );
+}
+
+/**
+ * A clip that wouldn't bind. Deliberately NOT phrased as a load failure: the
+ * model itself is fine and on screen, only the motion is missing.
+ */
+function warnAnimationFailed(url: string, clip: string, err: unknown) {
+  warnOnce(
+    `anim:${url}#${clip}`,
+    `[arena/gltf] Animation clip "${clip}" in "${url}" could not be played; the ` +
+      `model renders without it. Usually means the clip targets nodes the ` +
+      `exported rig doesn't contain.`,
     err,
   );
 }
@@ -94,11 +156,11 @@ class ModelErrorBoundary extends React.Component<FallbackBoundaryProps, { failed
   componentDidCatch(err: unknown) {
     // Dev-only, deduped: surface a real broken asset without spamming the
     // console on every re-render or for an intentionally-absent file.
-    warnModelFailedOnce(this.props.resetKey, err);
+    warnModelFailed(this.props.url, err);
   }
   componentDidUpdate(prev: FallbackBoundaryProps) {
     // A new target asset gets a fresh attempt.
-    if (prev.resetKey !== this.props.resetKey && this.state.failed) {
+    if (prev.url !== this.props.url && this.state.failed) {
       this.setState({ failed: false });
     }
   }
@@ -111,6 +173,25 @@ class ModelErrorBoundary extends React.Component<FallbackBoundaryProps, { failed
 // ---------------------------------------------------------------------------
 // Loaded-model renderer
 // ---------------------------------------------------------------------------
+
+/**
+ * Does this subtree contain anything the renderer will actually draw? A GLB can
+ * parse cleanly and still be visually empty — an export with only cameras/lights,
+ * a scene whose meshes were culled, or a stripped file with an empty root. Those
+ * must count as a failed load, otherwise we'd swap the procedural prop out for
+ * nothing.
+ */
+function hasDrawableContent(root: THREE.Object3D): boolean {
+  let drawable = false;
+  root.traverse((o) => {
+    if (drawable) return;
+    const candidate = o as THREE.Mesh & { isPoints?: boolean; isLine?: boolean };
+    if (candidate.isMesh || candidate.isPoints || candidate.isLine) drawable = true;
+  });
+  return drawable;
+}
+
+const NO_ANIMATIONS: THREE.AnimationClip[] = [];
 
 function LoadedModel({
   url,
@@ -128,6 +209,16 @@ function LoadedModel({
   // its own cloned skeleton. This also keeps our shadow-flag mutation local to
   // this instance and lets the same cached scene be placed more than once.
   const scene = React.useMemo(() => {
+    // A parsed-but-unusable asset throws here, during render, so the boundary
+    // below catches it and restores the procedural fallback. Checked before the
+    // clone: SkeletonUtils on a malformed root is what would throw otherwise,
+    // with a far less actionable message.
+    if (!gltf.scene) {
+      throw new UnusableModelError(`"${url}" loaded but exposes no default scene.`);
+    }
+    if (!hasDrawableContent(gltf.scene)) {
+      throw new UnusableModelError(`"${url}" loaded but contains no drawable meshes.`);
+    }
     const s = cloneSkeleton(gltf.scene) as THREE.Object3D;
     s.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -137,21 +228,40 @@ function LoadedModel({
       }
     });
     return s;
-  }, [gltf.scene, castShadow, receiveShadow]);
+  }, [gltf.scene, url, castShadow, receiveShadow]);
 
   // Bind any baked-in clips to this instance's cloned rig and auto-play them all
   // (idle loops, ambient motion). Assets without animations produce an empty
   // action set and this is a no-op.
-  const { actions } = useAnimations(gltf.animations, scene);
+  const { actions } = useAnimations(gltf?.animations ?? NO_ANIMATIONS, scene);
   React.useEffect(() => {
     const playing = Object.values(actions).filter(Boolean) as THREE.AnimationAction[];
-    playing.forEach((a) => a.reset().play());
+    // A clip that targets a node this rig doesn't have throws on play. That's a
+    // cosmetic defect in the asset, not a reason to throw away a model that is
+    // otherwise fine — so each action is isolated and the mesh still renders
+    // (static, or with whichever clips did bind).
+    playing.forEach((a) => {
+      try {
+        a.reset().play();
+      } catch (err) {
+        warnAnimationFailed(url, a.getClip?.()?.name ?? 'clip', err);
+      }
+    });
     return () => {
-      playing.forEach((a) => a.stop());
+      playing.forEach((a) => {
+        try {
+          a.stop();
+        } catch {
+          // unbinding a clip that never started is not an error worth surfacing
+        }
+      });
     };
-  }, [actions]);
+  }, [actions, url]);
 
-  return <primitive object={scene} />;
+  // Keyed on the cloned scene: `<primitive>` cannot swap its `object` in place,
+  // so without this a re-clone (url or shadow flags changing) would keep showing
+  // the stale Object3D.
+  return <primitive key={scene.uuid} object={scene} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,11 +305,17 @@ export function ArenaModel({
     </group>
   );
 
-  if (!enabled) return wrapped;
+  // `enabled === false` is the quality gate; an unregistered/empty slot means
+  // there is no url to request at all. Both resolve to the procedural prop
+  // without mounting Suspense, so no request is made and nothing can throw.
+  if (!enabled || !url) return wrapped;
 
   return (
     <group position={position} rotation={rotation} scale={scale}>
-      <ModelErrorBoundary fallback={fallback} resetKey={url}>
+      {/* Boundary sits OUTSIDE Suspense: it must survive the suspension that
+          the loading child triggers, and still be mounted to catch the throw
+          that a rejected fetch replays on the retry render. */}
+      <ModelErrorBoundary fallback={fallback} url={url}>
         <Suspense fallback={fallback}>
           <LoadedModel url={url} castShadow={castShadow} receiveShadow={receiveShadow} />
         </Suspense>
@@ -214,10 +330,21 @@ export function ArenaModel({
  * still falls back. Never awaited; never blocks.
  */
 export function preloadArenaModel(model: ModelKey) {
+  const url = MODEL_PATHS[model];
   try {
-    useGLTF.preload(MODEL_PATHS[model], USE_DRACO, USE_MESHOPT);
-  } catch {
-    // ignore — the fallback path covers a failed/absent asset
+    useGLTF.preload(url, USE_DRACO, USE_MESHOPT);
+  } catch (err) {
+    // A rejected fetch is NOT reported here — drei resolves that asynchronously
+    // and `ArenaModel`'s boundary logs it with better context when the asset is
+    // actually rendered. Reaching this catch means `preload` threw synchronously,
+    // i.e. the loader itself is misconfigured, which no fallback would explain.
+    warnOnce(
+      `preload:${url}`,
+      `[arena/gltf] preloadArenaModel("${model}") threw synchronously; warm-up ` +
+        `was skipped. The arena still renders (procedurally, then upgraded on ` +
+        `demand), but the GLTF loader setup looks broken.`,
+      err,
+    );
   }
 }
 
@@ -225,9 +352,16 @@ export function preloadArenaModel(model: ModelKey) {
  * Which hero slots each arena actually renders. Mirrors the `<ArenaModel model=…>`
  * calls in the arena components, so a caller that only knows an arena id (the
  * lobby, which learns `room.arena` before the Canvas mounts) can warm exactly
- * that arena's assets. Classic is procedural-only and has no entry.
+ * that arena's assets.
+ *
+ * Keyed by `ThemedArenaId`, the same type as `PRELOAD_ARENAS` in
+ * `ArenaEnvironment`: a new arena in the catalog is a compile error here until it
+ * declares its hero slots, so it can never end up code-preloaded but silently
+ * asset-cold. An arena that stays procedural-first declares `[]` explicitly —
+ * that is a statement that it needs no warm-up, not an oversight. Classic is
+ * excluded by the type (it is procedural-only and eagerly bundled).
  */
-const ARENA_HERO_MODELS: Record<string, readonly ModelKey[]> = {
+const ARENA_HERO_MODELS: Record<ThemedArenaId, readonly ModelKey[]> = {
   space: ['spaceStation'],
   jungle: ['jungleTree', 'jungleFirefly', 'jungleButterfly'],
   glacier: ['glacierFormation'],
@@ -241,7 +375,6 @@ const ARENA_HERO_MODELS: Record<string, readonly ModelKey[]> = {
  * `ArenaModel`'s fallback.
  */
 export function preloadArenaModels(arenaId?: string | null) {
-  const models = arenaId ? ARENA_HERO_MODELS[arenaId] : undefined;
-  if (!models) return;
-  models.forEach(preloadArenaModel);
+  if (!isThemedArena(arenaId)) return;
+  ARENA_HERO_MODELS[arenaId].forEach(preloadArenaModel);
 }

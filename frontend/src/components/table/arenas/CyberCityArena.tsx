@@ -315,43 +315,46 @@ function HoloPlatform({ tableGroupScale, reducedMotion }: { tableGroupScale: [nu
 function HoverChair() {
   return (
     <group>
-      {/* Floating seat pad — no legs; it hovers */}
-      <mesh position={[0, 0.5, 0]} castShadow>
+      {/* Floating seat pad — no legs; it hovers. The pad/cushion stack is set so
+          the CUSHION top lands at ≈0.42, matching the shared seated HIP_Y=0.44
+          (same convention as the Space console pod and the Jungle stump); the
+          hover gap below is preserved, just narrowed. */}
+      <mesh position={[0, 0.345, 0]} castShadow>
         <boxGeometry args={[0.5, 0.08, 0.5]} />
         <meshStandardMaterial color="#12101f" roughness={0.4} metalness={0.7} emissive="#3a1a5a" emissiveIntensity={0.5} />
       </mesh>
-      {/* Bevelled cushion with neon piping */}
-      <mesh position={[0, 0.55, 0]} castShadow>
+      {/* Bevelled cushion with neon piping — usable seat surface (top ≈0.42). */}
+      <mesh position={[0, 0.395, 0]} castShadow>
         <boxGeometry args={[0.42, 0.05, 0.42]} />
         <meshStandardMaterial color="#1a1630" roughness={0.5} metalness={0.5} />
       </mesh>
-      <mesh position={[0, 0.575, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.42, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.2, 0.23, 4]} />
         <meshBasicMaterial color="#ff2bd6" transparent opacity={0.8} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
       {/* Floating backrest (detached slab) */}
-      <mesh position={[0, 0.82, -0.2]} rotation={[-0.12, 0, 0]} castShadow>
+      <mesh position={[0, 0.665, -0.2]} rotation={[-0.12, 0, 0]} castShadow>
         <boxGeometry args={[0.48, 0.5, 0.06]} />
         <meshStandardMaterial color="#16132a" roughness={0.4} metalness={0.7} emissive="#1a3a5a" emissiveIntensity={0.5} />
       </mesh>
       {/* Neon edge strips on the backrest */}
       {[-0.22, 0.22].map((x) => (
-        <mesh key={`edge${x}`} position={[x, 0.82, -0.168]} rotation={[-0.12, 0, 0]}>
+        <mesh key={`edge${x}`} position={[x, 0.665, -0.168]} rotation={[-0.12, 0, 0]}>
           <boxGeometry args={[0.02, 0.48, 0.01]} />
           <meshBasicMaterial color="#4ff0ff" transparent opacity={0.85} blending={THREE.AdditiveBlending} depthWrite={false} />
         </mesh>
       ))}
       {/* Hover emitter glow + repulsor rings under the pad */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.36, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.205, 0]}>
         <ringGeometry args={[0.22, 0.3, 24]} />
         <meshBasicMaterial color="#4ff0ff" transparent opacity={0.5} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.28, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.125, 0]}>
         <ringGeometry args={[0.1, 0.16, 20]} />
         <meshBasicMaterial color="#ff2bd6" transparent opacity={0.4} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
       {/* Downward hover light pooling on the deck */}
-      <pointLight position={[0, 0.32, 0]} color="#4ff0ff" intensity={0.6} distance={1.2} decay={2} />
+      <pointLight position={[0, 0.165, 0]} color="#4ff0ff" intensity={0.6} distance={1.2} decay={2} />
     </group>
   );
 }

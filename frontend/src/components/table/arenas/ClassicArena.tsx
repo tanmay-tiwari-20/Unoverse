@@ -594,25 +594,27 @@ function TavernChair() {
   const woodMid = '#2a160a';
   return (
     <group>
-      {/* Seat frame */}
-      <mesh position={[0, 0.44, 0.04]} castShadow receiveShadow>
+      {/* Seat frame — sized so the CUSHION top lands at ≈0.42, matching the
+          shared seated HIP_Y=0.44 (same convention as the Space console pod and
+          the Jungle stump) instead of sitting ~0.10 too high. */}
+      <mesh position={[0, 0.345, 0.04]} castShadow receiveShadow>
         <boxGeometry args={[0.46, 0.06, 0.44]} />
         <meshStandardMaterial color={woodMid} roughness={0.75} metalness={0.05} />
       </mesh>
-      {/* Cushion */}
-      <mesh position={[0, 0.49, 0.04]} castShadow>
+      {/* Cushion — usable seat surface (top ≈0.42). */}
+      <mesh position={[0, 0.395, 0.04]} castShadow>
         <boxGeometry args={[0.4, 0.05, 0.38]} />
         <meshPhysicalMaterial color="#5a2016" roughness={0.85} sheen={0.4} sheenColor="#7a3020" />
       </mesh>
       {/* Back posts */}
       {[-0.2, 0.2].map((x) => (
-        <mesh key={`post${x}`} position={[x, 0.72, -0.19]} castShadow>
+        <mesh key={`post${x}`} position={[x, 0.625, -0.19]} castShadow>
           <cylinderGeometry args={[0.028, 0.032, 0.62, 8]} />
           <meshStandardMaterial color={woodDark} roughness={0.8} />
         </mesh>
       ))}
       {/* Back slats */}
-      {[0.66, 0.82, 0.98].map((y) => (
+      {[0.565, 0.725, 0.885].map((y) => (
         <mesh key={`slat${y}`} position={[0, y, -0.19]} castShadow>
           <boxGeometry args={[0.38, 0.07, 0.03]} />
           <meshStandardMaterial color={woodMid} roughness={0.8} />
@@ -625,13 +627,13 @@ function TavernChair() {
         [-0.19, 0.23],
         [0.19, 0.23],
       ].map(([x, z], i) => (
-        <mesh key={`leg${i}`} position={[x, 0.21, z]} castShadow>
-          <cylinderGeometry args={[0.03, 0.038, 0.42, 8]} />
+        <mesh key={`leg${i}`} position={[x, 0.16, z]} castShadow>
+          <cylinderGeometry args={[0.03, 0.038, 0.32, 8]} />
           <meshStandardMaterial color={woodDark} roughness={0.8} />
         </mesh>
       ))}
       {/* Stretcher bar between front legs */}
-      <mesh position={[0, 0.12, 0.23]} rotation={[0, 0, Math.PI / 2]} castShadow>
+      <mesh position={[0, 0.09, 0.23]} rotation={[0, 0, Math.PI / 2]} castShadow>
         <cylinderGeometry args={[0.02, 0.02, 0.38, 6]} />
         <meshStandardMaterial color={woodDark} roughness={0.85} />
       </mesh>

@@ -322,46 +322,49 @@ function ObsidianAltar({ tableGroupScale }: { tableGroupScale: [number, number, 
 function Throne() {
   return (
     <group>
-      {/* Obsidian seat block — faceted volcanic rock */}
-      <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
-        <boxGeometry args={[0.56, 0.6, 0.56]} />
+      {/* Obsidian seat block — faceted volcanic rock. Shortened so the CUSHION
+          top lands at ≈0.42, matching the shared seated HIP_Y=0.44 (same
+          convention as the Space console pod and the Jungle stump); the block
+          still sits flush on the ground at y≈0. */}
+      <mesh position={[0, 0.195, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.56, 0.39, 0.56]} />
         <meshStandardMaterial color="#0f0908" roughness={0.4} metalness={0.35} flatShading />
       </mesh>
-      {/* Chiseled seat cushion of cooled magma stone */}
-      <mesh position={[0, 0.62, 0.02]} castShadow>
+      {/* Chiseled seat cushion of cooled magma stone — usable surface (top ≈0.42). */}
+      <mesh position={[0, 0.39, 0.02]} castShadow>
         <boxGeometry args={[0.48, 0.06, 0.48]} />
         <meshStandardMaterial color="#1a0f0b" roughness={0.5} metalness={0.3} />
       </mesh>
       {/* Tall jagged backrest */}
-      <mesh position={[0, 0.82, -0.24]} castShadow>
+      <mesh position={[0, 0.59, -0.24]} castShadow>
         <boxGeometry args={[0.52, 0.7, 0.08]} />
         <meshStandardMaterial color="#140b09" roughness={0.4} metalness={0.35} flatShading />
       </mesh>
       {/* Obsidian spikes crowning the backrest */}
       {[-0.18, 0, 0.18].map((x, i) => (
-        <mesh key={`spike${i}`} position={[x, 1.2 + (i === 1 ? 0.08 : 0), -0.24]} castShadow>
+        <mesh key={`spike${i}`} position={[x, 0.97 + (i === 1 ? 0.08 : 0), -0.24]} castShadow>
           <coneGeometry args={[0.05, i === 1 ? 0.3 : 0.22, 5]} />
           <meshStandardMaterial color="#0c0705" roughness={0.35} metalness={0.4} flatShading />
         </mesh>
       ))}
       {/* Armrests */}
       {[-0.3, 0.3].map((x) => (
-        <mesh key={`arm${x}`} position={[x, 0.66, 0.06]} castShadow>
+        <mesh key={`arm${x}`} position={[x, 0.43, 0.06]} castShadow>
           <boxGeometry args={[0.08, 0.1, 0.42]} />
           <meshStandardMaterial color="#0f0908" roughness={0.4} metalness={0.35} />
         </mesh>
       ))}
       {/* Lava-crack emissive seams — front and up the back */}
-      <mesh position={[0, 0.62, 0.29]}>
+      <mesh position={[0, 0.39, 0.29]}>
         <planeGeometry args={[0.45, 0.03]} />
         <meshBasicMaterial color="#ff5a1e" transparent opacity={0.8} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
-      <mesh position={[0, 0.85, -0.195]}>
+      <mesh position={[0, 0.62, -0.195]}>
         <planeGeometry args={[0.04, 0.5]} />
         <meshBasicMaterial color="#ff6a24" transparent opacity={0.7} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
       {/* Warm glow pooling under the throne */}
-      <pointLight position={[0, 0.3, 0.2]} color="#ff5a1e" intensity={0.8} distance={1.6} decay={2} />
+      <pointLight position={[0, 0.2, 0.2]} color="#ff5a1e" intensity={0.8} distance={1.6} decay={2} />
     </group>
   );
 }

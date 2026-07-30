@@ -17,6 +17,17 @@
 /** The concrete set of themed worlds. `classic` is the original tavern. */
 export type ArenaId = 'classic' | 'space' | 'jungle' | 'glacier' | 'cyber' | 'volcano';
 
+/**
+ * Every arena except the default. `classic` is special in two ways that matter to
+ * the loading path: it is bundled eagerly (it doubles as the synchronous render
+ * path) and it is procedural-only (no `.glb` hero assets). So the per-arena maps
+ * that drive code-chunk and asset warm-up are keyed by THIS type, not `ArenaId` —
+ * a `Record<ThemedArenaId, …>` must list every themed arena and cannot list
+ * classic, which turns "a new arena was added to the catalog but never wired up
+ * for preloading" into a compile error instead of a silently missing warm-up.
+ */
+export type ThemedArenaId = Exclude<ArenaId, 'classic'>;
+
 /** Selection value: a concrete arena, or `random` (resolved to a concrete id at
  *  room creation on the server so every client agrees). */
 export type ArenaSelection = ArenaId | 'random';

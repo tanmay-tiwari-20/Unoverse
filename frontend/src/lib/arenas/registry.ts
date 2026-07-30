@@ -7,7 +7,7 @@
  * so arena handling reads like the rest of the room-config code.
  */
 
-import { ArenaId, ArenaMeta, ArenaSelection } from './types';
+import { ArenaId, ArenaMeta, ArenaSelection, ThemedArenaId } from './types';
 
 export const DEFAULT_ARENA: ArenaId = 'classic';
 
@@ -85,6 +85,23 @@ export const ARENA_IDS: ArenaId[] = ARENA_LIST.map((a) => a.id);
 /** Type guard: is `x` a known concrete arena id? */
 export const isArenaId = (x: unknown): x is ArenaId =>
   typeof x === 'string' && (ARENA_IDS as string[]).includes(x);
+
+/**
+ * Every arena that is not the default — i.e. every arena that ships as its own
+ * lazy chunk and may carry hero `.glb` assets. Derived from the catalog rather
+ * than written out, so it cannot drift from `ARENAS`.
+ */
+export const THEMED_ARENA_IDS = ARENA_IDS.filter(
+  (id) => id !== DEFAULT_ARENA,
+) as ThemedArenaId[];
+
+/**
+ * Type guard for the loading path: narrows a concrete id (or any raw value off
+ * the network) to a themed arena, so the `Record<ThemedArenaId, …>` preload maps
+ * can be indexed without a cast. Classic and unknown ids are excluded.
+ */
+export const isThemedArena = (x: unknown): x is ThemedArenaId =>
+  isArenaId(x) && x !== DEFAULT_ARENA;
 
 /**
  * Coerce any value (a network field, a persisted string, `undefined`) into a
