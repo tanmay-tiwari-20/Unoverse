@@ -2,6 +2,7 @@ import { CardItem, CardColor, generateDeck, shuffleDeck } from './deck';
 import { UnoGameState } from './gameState';
 import { isValidMove, isValidJumpIn } from './rules';
 import { getNextPlayerIndex, getNextActivePlayerId } from './turnManager';
+import { shouldEndRound } from './roundCompletion';
 import { Player } from '../rooms/roomManager';
 import { logger } from '../utils/logger';
 import { RoundStatDelta, emptyRoundDelta } from '../profiles/profileTypes';
@@ -84,16 +85,14 @@ const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string
 
 /**
  * Advance the active turn to the next player who still holds cards.
- * If only 1 player remains with cards, the game/round is immediately ended.
+ * If the round is complete (see roundCompletion), it is ended immediately.
  */
 const advanceTurn = (
   state: UnoGameState,
   players: Player[],
   skipCount: number = 1
 ): void => {
-  const activePlayersWithCards = players.filter(p => (state.hands[p.id]?.length || 0) > 0);
-
-  if (activePlayersWithCards.length <= 1) {
+  if (shouldEndRound(state, players)) {
     state.status = 'ended';
     if (!state.winnerId) {
       const finishedPlayer = players.find(p => (state.hands[p.id]?.length || 0) === 0);
@@ -317,8 +316,11 @@ const resolvePlayedCard = (
   // Check if player finished their hand (win). advanceTurn/caller handle status.
   if (playerHand.length === 0) {
     if (!state.winnerId) state.winnerId = playerId;
-    const activePlayersWithCards = players.filter(p => (state.hands[p.id]?.length || 0) > 0);
-    if (activePlayersWithCards.length <= 1) {
+    // End here when nobody is left to play for: either at most one player still
+    // holds cards, or every remaining participant is a bot (no human left to see
+    // the rest of the round). The winner and every remaining hand are already
+    // final at this point, so scoring is identical either way.
+    if (shouldEndRound(state, players, state.winnerId)) {
       state.status = 'ended';
       state.lastAction = { type: 'play', playerId, card, unoPenalty: false };
       return;

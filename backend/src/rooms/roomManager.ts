@@ -1085,11 +1085,12 @@ class RoomManager {
       logger.info(`[MATCH_WON] ${winnerName} reached ${room.match.scores[key]} in room ${code}`);
     }
 
-    // Server-authoritative stat capture. Fold this round (and, if decided, the
-    // whole match) into every seated human's persistent profile. Isolated in a
-    // try/catch so a profile-layer hiccup can never disrupt gameplay/banking.
+    // Server-authoritative stat capture. Fold this round into every seated
+    // human's persistent profile — a completed round counts both as a round and
+    // as a match (see commitStats). Isolated in a try/catch so a profile-layer
+    // hiccup can never disrupt gameplay/banking.
     try {
-      this.commitStats(room, game, result, matchWon);
+      this.commitStats(room, game, result);
     } catch (err: any) {
       logger.error(`[PROFILE_STATS] Failed to commit stats for room ${code}:`, err?.message);
     }
@@ -1099,9 +1100,17 @@ class RoomManager {
   }
 
   /**
-   * Fold a just-banked round (and, when the match is decided, the whole match)
-   * into each seated human player's persistent profile. Server-authoritative:
-   * every counter is derived here from live game/match state, never from clients.
+   * Fold a just-banked round into each seated human player's persistent profile.
+   * Server-authoritative: every counter is derived here from live game/match
+   * state, never from clients.
+   *
+   * A completed ROUND is the unit of record. It is committed twice: once through
+   * applyRoundResult (round counters, points, per-round action deltas) and once
+   * through applyMatchResult (matches played/won, streaks, play time, and a
+   * match-history entry). Reaching the match target score is a scoreboard
+   * milestone only — it does NOT produce an extra record, so nothing is ever
+   * double-counted and no stats are withheld from players who leave, or from
+   * matches that are abandoned before anyone reaches the target.
    *
    * Guardrails ignore insignificant games — only rounds with at least
    * PROFILE_CONFIG.minHumansForStats human participants count, and only humans
@@ -1109,12 +1118,7 @@ class RoomManager {
    * are silently skipped). finalizeRound's idempotency guard means this runs at
    * most once per round, so there is no double-counting across reconnects/retries.
    */
-  private commitStats(
-    room: Room,
-    game: UnoGameState,
-    result: RoundResult,
-    matchWon: boolean
-  ): void {
+  private commitStats(room: Room, game: UnoGameState, result: RoundResult): void {
     const match = room.match;
     if (!match) return;
 
@@ -1126,13 +1130,15 @@ class RoomManager {
     const tracked = humans.filter((p) => p.profileId);
     if (tracked.length === 0) return;
 
-    // ---- Per-round placement, derived from remaining hand points --------------
+    // ---- Placement, derived from remaining hand points ------------------------
     // Winner (empty hand) is forced to 1st; everyone else ranks by ascending
-    // remaining points (fewer left = better finish).
+    // remaining points (fewer left = better finish). This single ordering serves
+    // both the round commit and the round-as-match history record.
     const ranked = room.players
       .filter((p) => game.hands[p.id])
       .map((p) => ({
         id: p.id,
+        name: p.name,
         pts: p.id === game.winnerId ? -1 : handPoints(game.hands[p.id]),
       }))
       .sort((a, b) => a.pts - b.pts);
@@ -1150,38 +1156,29 @@ class RoomManager {
       });
     }
 
-    if (!matchWon) return;
-
-    // ---- Match-level commit ---------------------------------------------------
-    // Final standings by cumulative score (higher = better; winner hit target).
-    const scores = match.scores;
-    const standings = [...room.players]
-      .map((p) => ({ name: p.name, score: scores[p.name.toLowerCase()] ?? 0 }))
-      .sort((a, b) => b.score - a.score);
-    const matchPlacement = new Map<string, number>();
-    standings.forEach((s, i) => matchPlacement.set(s.name.toLowerCase(), i + 1));
-
-    const winnerName = match.matchWinnerName ?? result.winnerName;
-    const winnerScore = scores[winnerName.toLowerCase()] ?? 0;
-    const durationMs = match.matchStartedAt ? Math.max(0, Date.now() - match.matchStartedAt) : 0;
-    const players: MatchPlayerRecord[] = standings.map((s) => ({
-      name: s.name,
-      placement: matchPlacement.get(s.name.toLowerCase()) ?? 0,
+    // ---- Round-as-match commit ------------------------------------------------
+    // Everything below describes THIS round: its winner, its standings, its
+    // wall-clock length. `rounds: 1` because one record covers exactly one round.
+    const winnerName = result.winnerName;
+    const durationMs = game.startedAt ? Math.max(0, Date.now() - game.startedAt) : 0;
+    const players: MatchPlayerRecord[] = ranked.map((r) => ({
+      name: r.name,
+      placement: roundPlacement.get(r.id) ?? 0,
     }));
     const houseRulesSummary = this.summarizeHouseRules(room.houseRules);
+    const finishedAt = Date.now();
 
     for (const p of tracked) {
-      const lname = p.name.toLowerCase();
-      const placement = matchPlacement.get(lname) ?? 0;
-      const won = winnerName.toLowerCase() === lname;
-      const myScore = scores[lname] ?? 0;
+      const won = p.id === game.winnerId;
+      const placement = roundPlacement.get(p.id) ?? 0;
       const record: MatchRecord = {
-        date: Date.now(),
-        players,
+        date: finishedAt,
+        // Cloned per profile: each record is persisted independently.
+        players: players.map((s) => ({ ...s })),
         winnerName,
         placement,
         durationMs,
-        rounds: match.round,
+        rounds: 1,
         settings: { targetScore: match.targetScore, houseRulesSummary },
       };
       profileManager.applyMatchResult(p.profileId!, {
@@ -1189,7 +1186,9 @@ class RoomManager {
         placement,
         record,
         playTimeMs: durationMs,
-        lossMargin: won ? null : Math.max(0, winnerScore - myScore),
+        // The round winner banks every remaining card's value, so a loser's
+        // margin behind them is exactly the points awarded this round.
+        lossMargin: won ? null : result.pointsAwarded,
       });
     }
   }

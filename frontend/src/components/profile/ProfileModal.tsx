@@ -302,23 +302,23 @@ export function ProfileModal() {
                     </div>
                   </div>
 
-                  {/* Headline record */}
+                  {/* Headline record. One completed round counts as one game, so
+                      these track rounds finished — the separate round counters
+                      would just repeat them. Win % is derived from the same pair. */}
                   <div>
                     <SectionTitle icon={Trophy}>Record</SectionTitle>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <Stat label="Played" value={stats?.matchesPlayed ?? 0} />
-                      <Stat label="Won" value={stats?.matchesWon ?? 0} accent="text-lime-400" />
+                      <Stat label="Played" value={stats?.matchesPlayed ?? 0} icon={Layers} />
+                      <Stat label="Won" value={stats?.matchesWon ?? 0} icon={Layers} accent="text-lime-400" />
                       <Stat label="Lost" value={matchesLost} accent="text-rose-400" />
                       <Stat label="Win %" value={formatWinRate(cached?.winRate ?? 0)} accent="text-yellow-400" />
                     </div>
                   </div>
 
-                  {/* Streaks + rounds */}
+                  {/* Streaks + scoring */}
                   <div>
-                    <SectionTitle icon={Flame}>Rounds &amp; Streaks</SectionTitle>
+                    <SectionTitle icon={Flame}>Streaks &amp; Scoring</SectionTitle>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <Stat label="Rounds" value={stats?.roundsPlayed ?? 0} icon={Layers} />
-                      <Stat label="R. Won" value={stats?.roundsWon ?? 0} icon={Layers} accent="text-lime-400" />
                       <Stat label="Streak" value={stats?.currentStreak ?? 0} icon={Flame} accent="text-orange-400" />
                       <Stat label="Best" value={stats?.bestStreak ?? 0} icon={Flame} accent="text-yellow-400" />
                       <Stat label="Points" value={stats?.pointsScored ?? 0} icon={Zap} />
@@ -375,7 +375,7 @@ export function ProfileModal() {
                                   </span>
                                 </div>
                                 <div className="font-rounded text-[0.66rem] text-white/50 truncate">
-                                  {m.players.length}p · {m.rounds} rounds · {formatDuration(m.durationMs)} · {m.settings.houseRulesSummary}
+                                  {m.players.length}p · {m.rounds} {m.rounds === 1 ? "round" : "rounds"} · {formatDuration(m.durationMs)} · {m.settings.houseRulesSummary}
                                 </div>
                               </div>
                               <span className="font-rounded text-[0.62rem] text-white/40 shrink-0 text-right">{formatRelative(m.date, now)}</span>

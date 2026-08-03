@@ -46,7 +46,15 @@ Unoverse has **two deployable pieces** that must be deployed differently:
 | `STORE` | **prod** | `redis` | `redis` for production; `file` (single machine) or `memory` (no persistence). |
 | `REDIS_URL` | if `STORE=redis` | `redis://user:pass@host:6379` | Also enables the Socket.IO Redis adapter for multi-instance. |
 | `DATA_DIR` | no | `./.data/rooms` | Only for `STORE=file`. |
+| `PROFILE_DIR` | no | `./.data/profiles` | Only for `STORE=file`. Where player profiles/stats are written. |
+| `RECENT_MATCHES_MAX` | no | `20` | Match-history entries kept per profile. |
+| `PROFILE_MIN_HUMANS` | no | `1` | Min humans at the table for a round to count toward stats. `2` = ignore solo-vs-bots. |
 | `TURN_TIMEOUT_MS` | no | `45000` | Turn auto-resolve deadline. |
+
+> **Stats persistence:** profiles use the same `STORE` selector as rooms. With
+> `STORE=memory` every player's stats are lost on restart, and on hosts with an
+> ephemeral filesystem `STORE=file` is lost on redeploy too — use `STORE=redis` in
+> production if lifetime stats must survive.
 
 ### Frontend (`frontend/.env` or Vercel dashboard)
 

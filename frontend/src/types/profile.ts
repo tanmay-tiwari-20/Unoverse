@@ -13,7 +13,9 @@
 
 /** Lifetime statistics for one competitive context (casual, or reserved ranked). */
 export interface ProfileStats {
-  // General (match-level)
+  // General (match-level). A completed ROUND is the unit of record, so
+  // matchesPlayed/matchesWon count finished rounds — a match does not have to
+  // run all the way to its target score for stats to be banked.
   matchesPlayed: number;
   matchesWon: number;
   roundsPlayed: number;
@@ -24,7 +26,7 @@ export interface ProfileStats {
   placementSum: number;
   placementCount: number;
 
-  // Streaks (consecutive MATCH wins).
+  // Streaks (consecutive round wins).
   currentStreak: number;
   bestStreak: number;
   closestLoss: number | null;
@@ -48,17 +50,17 @@ export interface ProfileStats {
 /** One player's line in a stored match record. */
 export interface MatchPlayerRecord {
   name: string;
-  placement: number; // 1 = winner of the match
+  placement: number; // 1 = winner
 }
 
-/** A completed match, stored on each participant's profile for the history UI. */
+/** A completed round, stored on each participant's profile for the history UI. */
 export interface MatchRecord {
-  date: number;                 // epoch ms the match finished
+  date: number;                 // epoch ms the round finished
   players: MatchPlayerRecord[]; // final standings
   winnerName: string;
-  placement: number;            // THIS profile owner's placement in the match
-  durationMs: number;           // wall-clock length of the match
-  rounds: number;               // number of rounds played
+  placement: number;            // THIS profile owner's placement
+  durationMs: number;           // wall-clock length of the round
+  rounds: number;               // rounds covered by this record (currently always 1)
   settings: {
     targetScore: number;
     houseRulesSummary: string;

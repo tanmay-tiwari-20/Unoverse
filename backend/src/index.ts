@@ -1095,6 +1095,10 @@ io.on('connection', (socket) => {
       }
 
       broadcastGameState(currentRoomCode);
+      // A draw can end the round outright — the forcePlayDrawnCard rule plays the
+      // drawn card, which may be the player's last. Route it through the shared
+      // end-of-round handler so scoring/announcement never depend on who acted.
+      handlePossibleGameEnd(currentRoomCode);
     } catch (error: any) {
       logger.error(`[Socket] Draw card error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to draw card' });

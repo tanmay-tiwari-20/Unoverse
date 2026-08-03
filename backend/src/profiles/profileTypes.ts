@@ -24,8 +24,11 @@
  */
 export interface ProfileStats {
   // ---- General (match-level) ------------------------------------------------
-  matchesPlayed: number;   // completed matches (games) participated in
-  matchesWon: number;      // matches won (reached target score first)
+  // A completed ROUND is the unit of record: it counts once here and once in the
+  // round counters below, so matchesPlayed tracks rounds finished rather than
+  // waiting for someone to reach the match target score.
+  matchesPlayed: number;   // completed rounds participated in
+  matchesWon: number;      // rounds won
   roundsPlayed: number;    // individual rounds participated in
   roundsWon: number;       // rounds won (emptied hand first)
   pointsScored: number;    // cumulative UNO points banked across rounds
@@ -35,10 +38,10 @@ export interface ProfileStats {
   placementCount: number;
 
   // ---- Streaks --------------------------------------------------------------
-  currentStreak: number;   // current consecutive MATCH wins
-  bestStreak: number;      // best consecutive MATCH wins ever
-  // Smallest losing margin (points behind the winner) in a lost match. Reserved
-  // for "so close!" surfacing; null until first recorded. Kept from seed schema.
+  currentStreak: number;   // current consecutive round wins
+  bestStreak: number;      // best consecutive round wins ever
+  // Smallest losing margin (points behind the round winner) in a lost round.
+  // Surfaced as "so close!"; null until first recorded.
   closestLoss: number | null;
 
   // ---- Gameplay counters ----------------------------------------------------
@@ -106,16 +109,16 @@ export interface MatchPlayerRecord {
 }
 
 /**
- * A completed match, stored on each participant's profile for the match-history
+ * A completed round, stored on each participant's profile for the match-history
  * UI. Capped to the most recent N (see RECENT_MATCHES_MAX).
  */
 export interface MatchRecord {
-  date: number;                 // epoch ms the match finished
+  date: number;                 // epoch ms the round finished
   players: MatchPlayerRecord[]; // final standings
   winnerName: string;
-  placement: number;            // THIS profile owner's placement in the match
-  durationMs: number;           // wall-clock length of the match
-  rounds: number;               // number of rounds played
+  placement: number;            // THIS profile owner's placement
+  durationMs: number;           // wall-clock length of the round
+  rounds: number;               // rounds covered by this record (currently always 1)
   settings: {
     targetScore: number;
     houseRulesSummary: string;  // short human-readable rules summary

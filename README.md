@@ -120,7 +120,8 @@ All stats are computed **on the backend from live game state** and never trusted
 the client:
 
 * **Match & round record** — matches played/won, rounds played/won, total points, and
-  average placement.
+  average placement. Every completed **round** counts as a match, so a record is
+  banked as soon as a round finishes — no need to play a match out to the target score.
 * **Streaks** — current and best win streaks, plus closest-loss margin.
 * **Card play breakdown** — cards played/drawn, wilds, Wild Draw Fours, draw cards,
   reverses, and skips.
@@ -129,9 +130,9 @@ the client:
 * **Win rate** is *derived* at read time (`matchesWon / matchesPlayed`) — never stored.
 
 ### Match history
-Each finished match records its date, final placements, the winner, duration, round
-count, and a house-rules summary. The most recent **N** matches (capped via
-`RECENT_MATCHES_MAX`) are viewable in the in-app profile modal.
+Each finished **round** records its date, final placements, the winner, duration, and a
+house-rules summary. The most recent **N** entries (capped via `RECENT_MATCHES_MAX`) are
+viewable in the in-app profile modal.
 
 ### Persistence
 Profiles use the same storage abstraction as rooms (governed by `STORE`): an in-memory

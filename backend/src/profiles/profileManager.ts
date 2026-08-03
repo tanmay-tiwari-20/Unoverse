@@ -22,12 +22,12 @@ export interface RoundResultInput {
   points: number;    // UNO points this player banked this round
 }
 
-/** Input for committing one player's completed match to their profile. */
+/** Input for committing one player's completed round to their match-level stats. */
 export interface MatchResultInput {
-  won: boolean;       // did this player win the match?
-  placement: number;  // final match standing (1 = match winner)
+  won: boolean;       // did this player win the round?
+  placement: number;  // final standing (1 = winner)
   record: MatchRecord;
-  playTimeMs: number; // wall-clock length of the match
+  playTimeMs: number; // wall-clock length of the round
   lossMargin?: number | null; // points behind the winner (losers only)
 }
 
@@ -307,9 +307,10 @@ class ProfileManager {
   }
 
   /**
-   * Commit one completed MATCH to a profile: matches played/won, win-streak
-   * update, total play time, closest-loss, and push a capped match-history
-   * record. Call once per participant when a match is decided.
+   * Commit one completed ROUND to a profile's match-level stats: matches
+   * played/won, win-streak update, total play time, closest-loss, and push a
+   * capped history record. A round IS the unit of record, so this is called once
+   * per participant per completed round, alongside applyRoundResult.
    */
   public applyMatchResult(id: string, input: MatchResultInput): void {
     const p = this.profiles.get(id);
