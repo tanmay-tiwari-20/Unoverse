@@ -52,6 +52,8 @@ interface ProfileState {
   setAvatar: (avatar: string | null) => Promise<PublicProfile | null>;
   setOutfit: (outfit: string | null) => Promise<PublicProfile | null>;
   resetProfile: () => Promise<PublicProfile | null>;
+  /** Drop a local identity the server no longer recognises. */
+  clearIdentity: () => void;
   clearError: () => void;
 }
 
@@ -175,6 +177,27 @@ export const useProfileStore = create<ProfileState>()(
           return null;
         }
       },
+
+      /**
+       * Forget the persisted identity, keeping the display name so the create
+       * flow can prefill it.
+       *
+       * Called when the server reports it has never heard of this profileId —
+       * the identity is unusable (its secret authenticates nothing and no stats
+       * can be attributed to it), so holding onto it only produces failures. The
+       * landing page's create-profile gate is `hydrated && !profileId`, so
+       * clearing it here is what re-opens that flow. `hydrated` is deliberately
+       * left true: localStorage HAS been read, and resetting it would flash the
+       * returning-player UI.
+       */
+      clearIdentity: () =>
+        set({
+          profileId: null,
+          profileSecret: null,
+          cachedProfile: null,
+          avatar: null,
+          outfit: null,
+        }),
 
       clearError: () => set({ error: null }),
     }),

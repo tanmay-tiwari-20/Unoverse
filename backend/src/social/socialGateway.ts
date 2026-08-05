@@ -297,8 +297,13 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
   ioRef ??= io;
   const { on, guard, getRoomCode } = bindings;
 
-  const fail = (message: string): void => {
-    socket.emit('social:error', { message });
+  /**
+   * Report a rejected intent. `code` is a stable machine-readable tag the client
+   * can act on; the message is the human copy. Only codes the client genuinely
+   * needs to branch on are set — everything else is display-only.
+   */
+  const fail = (message: string, code?: string): void => {
+    socket.emit('social:error', code ? { message, code } : { message });
   };
 
   /**
@@ -318,7 +323,12 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
   const withMe = (label: string, fn: (profileId: string) => void) => (): void => {
     const profileId = meId();
     if (!profileId) {
-      fail('Set up your profile to use friends.');
+      // This socket never completed a handshake — usually a hello that raced the
+      // client's localStorage rehydration, or one sent to an instance that has
+      // since restarted. `not-bound` tells the client to retry the handshake and
+      // replay this action, so a recoverable race stops looking to the player
+      // like "you have no profile".
+      fail('Set up your profile to use friends.', 'not-bound');
       return;
     }
     presenceManager.touch(profileId);
@@ -342,15 +352,29 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
    * The secret is checked with the same constant-time `profileManager.verify`
    * the REST writes use. An unverified hello binds nothing, so every subsequent
    * social event fails closed.
+   *
+   * A rejection is reported as `social:hello-failed` with a reason rather than a
+   * generic error, because the two reasons need OPPOSITE client behaviour. A
+   * profile this server has never heard of is a dead local identity — the usual
+   * cause is a redeploy on a host with an ephemeral filesystem (or `STORE=memory`)
+   * wiping the profile store while the browser kept its localStorage copy — and
+   * retrying it forever can only fail. The client is told so it can clear the
+   * dead identity and let the player create a new one, instead of every social
+   * action reporting "Set up your profile to use friends." for good.
+   *
+   * Existence is already public (`GET /api/profiles/:id` answers 404 vs 200, and
+   * ids are visible on profile cards), so separating the two leaks nothing new.
    */
   on('social:hello', guard(socialHelloSchema, ({ profileId, profileSecret }) => {
-    if (!profileManager.verify(profileId, profileSecret)) {
-      fail('Could not verify your profile.');
-      return;
-    }
     const profile = profileManager.getProfile(profileId);
     if (!profile) {
-      fail('Could not verify your profile.');
+      socket.emit('social:hello-failed', { reason: 'unknown-profile' });
+      logger.debug(`[SOCIAL] Hello for unknown profile ${profileId} from socket ${socket.id}`);
+      return;
+    }
+    if (!profileManager.verify(profileId, profileSecret)) {
+      socket.emit('social:hello-failed', { reason: 'bad-secret' });
+      logger.debug(`[SOCIAL] Hello with bad secret for ${profileId} from socket ${socket.id}`);
       return;
     }
 

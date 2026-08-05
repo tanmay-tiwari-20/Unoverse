@@ -83,6 +83,35 @@ export function attachSocialListeners(socket: Socket): void {
   socket.on('social:snapshot', (snapshot: SocialSnapshot) => {
     logger.debug('[SOCIAL] Snapshot received:', snapshot.friends.length, 'friends');
     useSocialStore.getState().applySnapshot(snapshot);
+    // The server only sends a snapshot once a hello has bound this socket, so
+    // its arrival IS the handshake ack — no extra event needed on the wire.
+    markBound();
+  });
+
+  /**
+   * The handshake was refused. The two reasons need opposite handling:
+   *
+   *  - `unknown-profile`: this server has never heard of the id. The local
+   *    identity is dead (its secret authenticates nothing), so retrying can only
+   *    keep failing — drop it and let the landing page's create gate reopen.
+   *  - `bad-secret`: the id exists but this browser's secret doesn't match it,
+   *    so the identity is equally unusable here. Same treatment, different copy.
+   */
+  socket.on('social:hello-failed', ({ reason }: { reason: 'unknown-profile' | 'bad-secret' }) => {
+    logger.warn('[SOCIAL] Handshake refused:', reason);
+    markUnbound();
+    // Nothing queued can ever succeed under this identity.
+    queued = [];
+    useProfileStore.getState().clearIdentity();
+    // `reset()` clears `error`, so the message is set after it, not before.
+    useSocialStore.getState().reset();
+    useSocialStore
+      .getState()
+      .setError(
+        reason === 'unknown-profile'
+          ? 'Your profile is no longer on the server. Create a new one to use friends.'
+          : 'Your saved profile could not be verified. Create a new one to use friends.'
+      );
   });
 
   socket.on('social:presence', (views: PresenceView[]) => {
@@ -171,76 +200,199 @@ export function attachSocialListeners(socket: Socket): void {
     setTimeout(() => useSocialStore.getState().dismissNotification(id), SOCIAL_NOTIFICATION_TTL_MS);
   });
 
-  socket.on('social:error', ({ message }: { message: string }) => {
-    logger.warn('[SOCIAL] Error:', message);
+  socket.on('social:error', ({ message, code }: { message: string; code?: string }) => {
+    logger.warn('[SOCIAL] Error:', message, code ? `(${code})` : '');
+    // `not-bound` is recoverable: the action raced the handshake or arrived after
+    // a reconnect, so one silent re-bind attempt is tried before surfacing the
+    // error. Every other code is shown immediately.
+    if (code === 'not-bound' && !rebindAttempted) {
+      rebindAttempted = true;
+      logger.debug('[SOCIAL] Retrying handshake once for not-bound error');
+      // The server disagrees with this client's idea of being bound — usually a
+      // reconnect under a new socket id, or an instance restart. Believe the
+      // server, so anything tapped from here queues instead of being emitted
+      // into a socket that would reject it again.
+      markUnbound();
+      sayHello(activeSocket);
+      return;
+    }
     useSocialStore.getState().setError(message);
     // Auto-clear after the same TTL so the panel doesn't stay red forever.
     setTimeout(() => useSocialStore.getState().setError(null), SOCIAL_NOTIFICATION_TTL_MS);
   });
 
+  // Unbind on disconnect so the next connect establishes a fresh handshake.
+  socket.on('disconnect', () => {
+    logger.debug('[SOCIAL] Disconnected');
+    markUnbound();
+  });
+
+  // Watch for identity changes: when a profile is created (or rehydrated from
+  // localStorage after connect), say hello immediately so the social layer
+  // becomes usable without the player needing to reload or tap anything.
+  //
+  // Never unsubscribed on purpose: these listeners are attached once for the
+  // whole session (`attached` guard above), so the watcher's lifetime is the
+  // app's lifetime — the same as every socket listener registered here.
+  useProfileStore.subscribe((state, prev) => {
+    const hadIdentity = prev.profileId && prev.profileSecret;
+    const hasIdentity = state.profileId && state.profileSecret;
+    if (!hadIdentity && hasIdentity) {
+      logger.debug('[SOCIAL] Identity appeared — saying hello');
+      sayHello(activeSocket);
+    }
+  });
+
   logger.debug('[SOCIAL] Listeners attached');
+  // Rehydration may have completed before the watcher above existed, so greet
+  // once here too. `sayHello` is a no-op without an identity and never sends a
+  // duplicate hello, so this is safe either way.
+  sayHello(socket);
+}
+
+/**
+ * ============================================================================
+ *  The handshake: binding state, retry, and replay.
+ * ============================================================================
+ *
+ * Every social action needs this socket to be BOUND — the server established
+ * identity once per connection via `social:hello` and reads it from presence
+ * thereafter, so an unbound socket fails every action with "Set up your profile
+ * to use friends." even though the profile is sitting right there in
+ * localStorage.
+ *
+ * Binding used to be fire-and-forget, which meant any single failure was
+ * permanent: nothing tracked whether the hello landed, nothing retried it, and
+ * nothing told the player what had gone wrong. The ways it fails are all
+ * ordinary — the socket connects before zustand `persist` has rehydrated the
+ * identity; a profile is created after the socket connected; the connection
+ * drops and returns under a new socket id; or the server no longer knows the
+ * profile at all.
+ *
+ * So binding is a small state machine instead. Actions taken while unbound are
+ * QUEUED and replayed once the snapshot lands, rather than being emitted into a
+ * socket that will reject them.
+ */
+
+type BindingState = 'idle' | 'pending' | 'bound';
+
+let binding: BindingState = 'idle';
+
+/** The socket the listeners are attached to, so a queued action has something to
+ *  replay onto and the identity watcher has something to greet. */
+let activeSocket: Socket | null = null;
+
+/** Actions deferred until the handshake completes. Bounded: a player tapping
+ *  during a reconnect should replay their intent, not a minute of backlog. */
+let queued: Array<(socket: Socket) => void> = [];
+const MAX_QUEUED = 8;
+
+/** How long to wait for the snapshot before calling the handshake failed. */
+const HELLO_TIMEOUT_MS = 8000;
+let helloTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Guards against an unbound/rebind loop: the server's `not-bound` gets exactly
+ *  one silent re-handshake per successful bind, then the error is shown. */
+let rebindAttempted = false;
+
+function clearHelloTimer(): void {
+  if (helloTimer) {
+    clearTimeout(helloTimer);
+    helloTimer = null;
+  }
+}
+
+/** The handshake landed. Replay whatever the player asked for while it was in
+ *  flight — this is what makes a search typed during reconnect just work. */
+function markBound(): void {
+  binding = 'bound';
+  rebindAttempted = false;
+  clearHelloTimer();
+
+  const socket = activeSocket;
+  if (!socket?.connected || queued.length === 0) {
+    queued = [];
+    return;
+  }
+  const replay = queued;
+  queued = [];
+  for (const action of replay) {
+    try {
+      action(socket);
+    } catch (err) {
+      logger.warn('[SOCIAL] Queued action failed after bind:', err);
+    }
+  }
+}
+
+/** The handshake is no longer valid — the next action re-establishes it. */
+function markUnbound(): void {
+  binding = 'idle';
+  clearHelloTimer();
 }
 
 /**
  * Say hello and bind this socket to the local profile.
  *
- * TIMING. There are two independent async things in flight on a cold load: the
- * socket connecting, and zustand `persist` rehydrating the profile out of
- * localStorage. Either can win. If the socket connects first — which it usually
- * does — the profile is still null here, and a naive emit-and-return would leave
- * the socket permanently unbound, so every later social action fails with
- * "Set up your profile to use friends." even though the profile is right there.
- *
- * So: emit if the profile is ready, and otherwise subscribe and emit the moment
- * it becomes ready. The subscription unsubscribes itself after firing once, and
- * is replaced (not stacked) if hello is called again before it resolves.
- *
- * Safe to call repeatedly — the server's `social:hello` is idempotent, binding
- * the same profile to the same socket and re-sending the snapshot.
+ * Safe to call repeatedly: the server's handler is idempotent, and an in-flight
+ * hello is not duplicated. When no identity exists yet this is a no-op — the
+ * identity watcher installed by `attachSocialListeners` fires the hello the
+ * moment one appears, whether that's from rehydration or from the player
+ * creating a profile.
  */
-let pendingHello: (() => void) | null = null;
-
 export function sayHello(socket: Socket | null): void {
+  if (socket) activeSocket = socket;
   if (!socket?.connected) return;
+  if (binding === 'pending') return;
 
-  // Any earlier wait is stale now — this call supersedes it.
-  pendingHello?.();
-  pendingHello = null;
-
-  const emit = (profileId: string, profileSecret: string): void => {
-    socket.emit('social:hello', { profileId, profileSecret });
-    logger.debug('[SOCIAL] Hello sent');
-  };
-
-  const { profileId, profileSecret, hydrated } = useProfileStore.getState();
-  if (profileId && profileSecret) {
-    emit(profileId, profileSecret);
-    return;
-  }
-
-  // Rehydration has finished and there genuinely is no profile — this player
-  // hasn't created one yet. Nothing to wait for; the social UI stays inert
-  // until they do, and `CreateProfileModal` calls hello again on creation.
-  if (hydrated) {
+  const { profileId, profileSecret } = useProfileStore.getState();
+  if (!profileId || !profileSecret) {
     logger.debug('[SOCIAL] No profile yet — hello deferred until one exists');
     return;
   }
 
-  // Still rehydrating. Wait for the identity to land, then bind.
-  logger.debug('[SOCIAL] Waiting for profile to hydrate before hello');
-  const unsubscribe = useProfileStore.subscribe((state) => {
-    if (state.profileId && state.profileSecret) {
-      unsubscribe();
-      pendingHello = null;
-      if (socket.connected) emit(state.profileId, state.profileSecret);
-    } else if (state.hydrated) {
-      // Hydrated with no profile — stop waiting, but don't error. Creating a
-      // profile later triggers its own hello.
-      unsubscribe();
-      pendingHello = null;
-    }
-  });
-  pendingHello = unsubscribe;
+  binding = 'pending';
+  socket.emit('social:hello', { profileId, profileSecret });
+  logger.debug('[SOCIAL] Hello sent');
+
+  // A hello that is never answered would otherwise leave actions queued forever.
+  clearHelloTimer();
+  helloTimer = setTimeout(() => {
+    helloTimer = null;
+    if (binding !== 'pending') return;
+    binding = 'idle';
+    queued = [];
+    logger.warn('[SOCIAL] Handshake timed out');
+    useSocialStore.getState().setError('Could not reach the friends service. Please try again.');
+  }, HELLO_TIMEOUT_MS);
+}
+
+/**
+ * Run a social action, establishing the binding first if necessary.
+ *
+ * Every emitter goes through this, so no action can be sent to a socket the
+ * server will reject — the reason the original bug was reachable from every
+ * button in the panel at once.
+ */
+function whenBound(socket: Socket | null, action: (socket: Socket) => void): void {
+  if (!socket?.connected) return;
+  activeSocket = socket;
+
+  if (binding === 'bound') {
+    action(socket);
+    return;
+  }
+
+  const { profileId, profileSecret } = useProfileStore.getState();
+  if (!profileId || !profileSecret) {
+    // Genuinely no identity — this is the one case where the original message
+    // was the truth, and creating a profile is what fixes it.
+    useSocialStore.getState().setError('Create a profile to use friends.');
+    return;
+  }
+
+  if (queued.length < MAX_QUEUED) queued.push(action);
+  sayHello(socket);
 }
 
 // ---------------------------------------------------------------------------
@@ -248,86 +400,101 @@ export function sayHello(socket: Socket | null): void {
 // ---------------------------------------------------------------------------
 
 export function searchPlayers(socket: Socket | null, query: string): void {
-  if (!socket?.connected || !query.trim()) return;
+  if (!query.trim()) return;
   useSocialStore.getState().beginSearch(query);
-  socket.emit('social:search', { query: query.trim(), limit: 20 });
+  whenBound(socket, (s) => {
+    s.emit('social:search', { query: query.trim(), limit: 20 });
+  });
 }
 
 export function inspectPlayer(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
   useSocialStore.getState().beginLoadProfile(profileId);
-  socket.emit('social:inspect', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:inspect', { profileId });
+  });
 }
 
 export function sendFriendRequest(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:friend-request', { profileId });
-  // Acknowledge the tap immediately. The snapshot that follows re-labels this
-  // row from the real graph, so a rejected request corrects itself; without this
-  // the button sits unchanged for a round-trip and reads as unresponsive.
-  useSocialStore.getState().markSearchResultSent(profileId);
+  whenBound(socket, (s) => {
+    s.emit('social:friend-request', { profileId });
+    // Acknowledge the tap immediately. The snapshot that follows re-labels this
+    // row from the real graph, so a rejected request corrects itself; without this
+    // the button sits unchanged for a round-trip and reads as unresponsive.
+    useSocialStore.getState().markSearchResultSent(profileId);
+  });
 }
 
 export function acceptFriendRequest(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:friend-accept', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:friend-accept', { profileId });
+  });
 }
 
 export function declineFriendRequest(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:friend-decline', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:friend-decline', { profileId });
+  });
 }
 
 export function cancelFriendRequest(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:friend-cancel', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:friend-cancel', { profileId });
+  });
 }
 
 export function removeFriend(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:friend-remove', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:friend-remove', { profileId });
+  });
 }
 
 export function blockPlayer(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:block', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:block', { profileId });
+  });
 }
 
 export function unblockPlayer(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:unblock', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:unblock', { profileId });
+  });
 }
 
 export function inviteFriend(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:invite', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:invite', { profileId });
+  });
 }
 
 export function acceptInvite(socket: Socket | null, inviteId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:invite-accept', { inviteId });
-  // Drop the card the moment Accept is tapped. The server also sends
-  // `social:invite-closed`, and `dropInvite` is idempotent, so this only removes
-  // the round-trip during which the toast would otherwise sit there looking
-  // ignored — and if the accept is refused, the error surfaces in the panel.
-  useSocialStore.getState().dropInvite(inviteId);
+  whenBound(socket, (s) => {
+    s.emit('social:invite-accept', { inviteId });
+    // Drop the card the moment Accept is tapped. The server also sends
+    // `social:invite-closed`, and `dropInvite` is idempotent, so this only removes
+    // the round-trip during which the toast would otherwise sit there looking
+    // ignored — and if the accept is refused, the error surfaces in the panel.
+    useSocialStore.getState().dropInvite(inviteId);
+  });
 }
 
 export function declineInvite(socket: Socket | null, inviteId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:invite-decline', { inviteId });
-  // Same reasoning as accept — the card leaves on the tap, not on the ack.
-  useSocialStore.getState().dropInvite(inviteId);
+  whenBound(socket, (s) => {
+    s.emit('social:invite-decline', { inviteId });
+    // Same reasoning as accept — the card leaves on the tap, not on the ack.
+    useSocialStore.getState().dropInvite(inviteId);
+  });
 }
 
 export function joinFriend(socket: Socket | null, profileId: string): void {
-  if (!socket?.connected) return;
-  socket.emit('social:join-friend', { profileId });
+  whenBound(socket, (s) => {
+    s.emit('social:join-friend', { profileId });
+  });
 }
 
 export function updatePrivacy(socket: Socket | null, privacy: Partial<PrivacySettings>): void {
-  if (!socket?.connected) return;
   const { profileSecret } = useProfileStore.getState();
   if (!profileSecret) return;
-  socket.emit('social:privacy', { profileSecret, privacy });
+  whenBound(socket, (s) => {
+    s.emit('social:privacy', { profileSecret, privacy });
+  });
 }
