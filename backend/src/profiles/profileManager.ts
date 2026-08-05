@@ -9,7 +9,11 @@ import {
   MatchRecord,
   RoundStatDelta,
   CounterStatKey,
+  PrivacySettings,
   emptyStats,
+  emptySocialGraph,
+  defaultPrivacy,
+  normalizePrivacy,
   normalizeProfile,
   publicProfile,
 } from './profileTypes';
@@ -181,6 +185,8 @@ class ProfileManager {
       stats: emptyStats(),
       rankedStats: emptyStats(),
       recentMatches: [],
+      social: emptySocialGraph(),
+      privacy: defaultPrivacy(),
     };
     this.profiles.set(profile.id, profile);
     this.markDirty(profile.id);
@@ -339,6 +345,89 @@ class ProfileManager {
     p.updatedAt = Date.now();
     p.lastSeenAt = Date.now();
     this.markDirty(id);
+  }
+
+  // ---- Social support ------------------------------------------------------
+  // The friend graph itself is owned by SocialManager; ProfileManager exposes
+  // only the lookups it can answer efficiently from the profile table it owns.
+
+  /** Resolve many profiles at once (friend lists, request lists). Unknown ids
+   *  are skipped rather than returned as holes. */
+  public getProfiles(ids: readonly string[]): Profile[] {
+    const out: Profile[] = [];
+    for (const id of ids) {
+      const p = this.profiles.get(id);
+      if (p) out.push(p);
+    }
+    return out;
+  }
+
+  /**
+   * Find players by username, `Username#TAG`, bare `#TAG`, or exact Player ID.
+   *
+   * Ranking is deterministic: exact id / exact tag first, then exact name, then
+   * prefix matches, then substring matches, alphabetical within each band. The
+   * scan is linear over the in-memory profile Map, which is a few hundred
+   * microseconds at realistic profile counts and needs no secondary index to
+   * keep in sync; `scanCap` bounds the worst case regardless of table size.
+   */
+  public searchProfiles(rawQuery: string, limit = 20): Profile[] {
+    const query = rawQuery.trim().slice(0, 64);
+    if (!query) return [];
+
+    // `Name#TAG` / `#TAG` — the tag is the discriminating half, so split it out.
+    const hash = query.indexOf('#');
+    const namePart = (hash >= 0 ? query.slice(0, hash) : query).trim().toLowerCase();
+    const tagPart = (hash >= 0 ? query.slice(hash + 1) : '').trim().toUpperCase();
+    const lower = query.toLowerCase();
+
+    // Exact Player ID short-circuits everything (the ID is a UUID, so it can
+    // never collide with a display name).
+    const byId = this.profiles.get(query);
+    if (byId) return [byId];
+
+    const scanCap = 20_000;
+    const scored: { p: Profile; rank: number }[] = [];
+    let scanned = 0;
+
+    for (const p of this.profiles.values()) {
+      if (++scanned > scanCap) break;
+      const name = p.displayName.toLowerCase();
+      const tag = p.tag.toUpperCase();
+
+      let rank = -1;
+      if (tagPart) {
+        // A tag was supplied: it must match, and the name half (if any) must too.
+        if (tag !== tagPart) continue;
+        if (namePart && !name.startsWith(namePart)) continue;
+        rank = 0;
+      } else if (tag === query.toUpperCase()) {
+        rank = 0;                       // bare tag, e.g. "5LHL"
+      } else if (name === lower) {
+        rank = 1;                       // exact username
+      } else if (name.startsWith(lower)) {
+        rank = 2;                       // prefix
+      } else if (name.includes(lower)) {
+        rank = 3;                       // substring
+      } else {
+        continue;
+      }
+      scored.push({ p, rank });
+    }
+
+    scored.sort((a, b) => a.rank - b.rank || a.p.displayName.localeCompare(b.p.displayName));
+    return scored.slice(0, Math.max(1, Math.min(limit, 50))).map((s) => s.p);
+  }
+
+  /** Update privacy settings (secret-authenticated). Partial — only supplied
+   *  keys change; the rest keep their current values. */
+  public setPrivacy(id: string, secret: string, patch: Partial<PrivacySettings>): PrivacySettings {
+    if (!this.verify(id, secret)) throw new Error('Not authorized to edit this profile');
+    const p = this.profiles.get(id)!;
+    p.privacy = normalizePrivacy({ ...p.privacy, ...patch });
+    p.updatedAt = Date.now();
+    this.markDirty(id);
+    return p.privacy;
   }
 
   // ---- Diagnostics ---------------------------------------------------------

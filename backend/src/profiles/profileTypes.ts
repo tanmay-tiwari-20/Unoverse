@@ -108,6 +108,150 @@ export interface MatchPlayerRecord {
   placement: number; // 1 = winner of the match
 }
 
+// ---------------------------------------------------------------------------
+// Social graph (Friends & Social System).
+// ---------------------------------------------------------------------------
+//
+// The friend graph lives on the PROFILE, not on the ephemeral seated `Player`:
+// `Profile.id` is the durable identity that survives reconnects, name changes
+// and room churn, and it is already secret-authenticated. Storing it here also
+// means the graph rides the existing ProfileStore (memory / file / redis) with
+// no second persistence layer to keep in sync.
+//
+// Every edge is stored on BOTH endpoints (a friendship appears in each
+// profile's `friends`; a pending request appears as `outgoing` on the sender and
+// `incoming` on the receiver). That costs one extra write per mutation and buys
+// O(1) reads for the two queries the UI actually makes — "who are my friends"
+// and "who is waiting on me" — with no scan over the profile table.
+
+/** An established, mutual friendship edge. */
+export interface FriendLink {
+  /** The OTHER profile's immutable id. */
+  id: string;
+  /** Epoch ms the friendship was established. */
+  since: number;
+}
+
+/** A pending friend request edge (stored on both sender and receiver). */
+export interface FriendRequestLink {
+  /** The OTHER profile's immutable id. */
+  id: string;
+  /** Epoch ms the request was created. */
+  at: number;
+}
+
+/**
+ * One profile's slice of the social graph.
+ *
+ * Deliberately a set of id lists rather than embedded profile snapshots: names,
+ * avatars, outfits and presence are all resolved at read time from the live
+ * profile + presence registry, so a friend renaming themselves can never leave
+ * a stale copy behind in someone else's list.
+ *
+ * Forward-compatible by construction — Direct Messages, Parties, Guilds and
+ * "Recently Played With" are all additional id lists / edge kinds on this same
+ * shape, and need no change to the persistence or projection layers.
+ */
+export interface SocialGraph {
+  friends: FriendLink[];
+  /** Requests others sent to me, awaiting my accept/decline. */
+  incoming: FriendRequestLink[];
+  /** Requests I sent, awaiting their accept/decline. */
+  outgoing: FriendRequestLink[];
+  /**
+   * Profiles I have blocked. Architecture-ready: the graph, persistence and
+   * every mutation gate already honor it (a block clears existing edges and
+   * refuses new ones in both directions); only a dedicated block/report UI is
+   * left to build.
+   */
+  blocked: string[];
+}
+
+/** Who may send this profile a friend request. */
+export type FriendRequestPolicy = 'everyone' | 'friends-of-friends' | 'nobody';
+
+/**
+ * Per-profile privacy settings. Enforced SERVER-SIDE in the social projection
+ * (see `socialManager.inspect`), never by hiding things client-side — a viewer
+ * who is not allowed to see match history simply never receives it.
+ */
+export interface PrivacySettings {
+  /** Gate on inbound friend requests. */
+  friendRequests: FriendRequestPolicy;
+  /** When false, non-friends see this profile as permanently Offline. */
+  showOnlineStatus: boolean;
+  /** When false, `recentMatches` is withheld from other players' inspections. */
+  showMatchHistory: boolean;
+  /** When false, the 3D outfit preview is withheld from other players. */
+  showOutfit: boolean;
+  /** When false, friends cannot use "Join" to drop into this player's room. */
+  allowFriendJoin: boolean;
+}
+
+/** Default privacy: open and social, matching the game's party-game feel. */
+export function defaultPrivacy(): PrivacySettings {
+  return {
+    friendRequests: 'everyone',
+    showOnlineStatus: true,
+    showMatchHistory: true,
+    showOutfit: true,
+    allowFriendJoin: true,
+  };
+}
+
+/** An empty social graph (new profiles and legacy backfill). */
+export function emptySocialGraph(): SocialGraph {
+  return { friends: [], incoming: [], outgoing: [], blocked: [] };
+}
+
+/** Coerce a persisted (possibly legacy / partial) social graph into a complete
+ *  one, dropping malformed entries and self-references. */
+export function normalizeSocialGraph(raw: unknown, selfId: string): SocialGraph {
+  const out = emptySocialGraph();
+  if (!raw || typeof raw !== 'object') return out;
+  const src = raw as Partial<SocialGraph>;
+
+  const links = (list: unknown, stamp: 'since' | 'at'): any[] => {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set<string>();
+    const acc: any[] = [];
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object') continue;
+      const id = (entry as { id?: unknown }).id;
+      if (typeof id !== 'string' || !id || id === selfId || seen.has(id)) continue;
+      const when = (entry as Record<string, unknown>)[stamp];
+      seen.add(id);
+      acc.push({ id, [stamp]: typeof when === 'number' && Number.isFinite(when) ? when : 0 });
+    }
+    return acc;
+  };
+
+  out.friends = links(src.friends, 'since');
+  out.incoming = links(src.incoming, 'at');
+  out.outgoing = links(src.outgoing, 'at');
+  out.blocked = Array.isArray(src.blocked)
+    ? Array.from(new Set(src.blocked.filter((id): id is string => typeof id === 'string' && !!id && id !== selfId)))
+    : [];
+  return out;
+}
+
+/** Coerce persisted privacy settings, backfilling anything missing. */
+export function normalizePrivacy(raw: unknown): PrivacySettings {
+  const base = defaultPrivacy();
+  if (!raw || typeof raw !== 'object') return base;
+  const src = raw as Partial<PrivacySettings>;
+  return {
+    friendRequests:
+      src.friendRequests === 'nobody' || src.friendRequests === 'friends-of-friends'
+        ? src.friendRequests
+        : 'everyone',
+    showOnlineStatus: src.showOnlineStatus !== false,
+    showMatchHistory: src.showMatchHistory !== false,
+    showOutfit: src.showOutfit !== false,
+    allowFriendJoin: src.allowFriendJoin !== false,
+  };
+}
+
 /**
  * A completed round, stored on each participant's profile for the match-history
  * UI. Capped to the most recent N (see RECENT_MATCHES_MAX).
@@ -119,6 +263,11 @@ export interface MatchRecord {
   placement: number;            // THIS profile owner's placement
   durationMs: number;           // wall-clock length of the round
   rounds: number;               // rounds covered by this record (currently always 1)
+  // Themed arena the round was played in. Optional purely for backward
+  // compatibility with records written before arenas were recorded; it is
+  // display/derivation data only (it powers "favorite arena" on the profile)
+  // and is never read by the game engine.
+  arena?: string | null;
   settings: {
     targetScore: number;
     houseRulesSummary: string;  // short human-readable rules summary
@@ -133,8 +282,9 @@ export interface MatchRecord {
  * Reserved-but-unpopulated fields are kept as future-proofing hooks:
  *   - `isGuest` / `providers` / `tokenVersion` — auth & cloud-save
  *   - `rankedStats` — Ranked mode / Seasons
- * Room in the type for `xp`/`level`/`friends`/`achievements`/`badges` is
- * documented here but intentionally NOT added until those features exist.
+ * Room in the type for `xp`/`level`/`achievements`/`badges` is documented here
+ * but intentionally NOT added until those features exist. `social` + `privacy`
+ * back the Friends & Social System.
  */
 export interface Profile {
   id: string;                 // immutable UUID — the durable player identity
@@ -153,11 +303,27 @@ export interface Profile {
   stats: ProfileStats;        // casual lifetime stats
   rankedStats: ProfileStats;  // reserved for Ranked mode
   recentMatches: MatchRecord[];
+  /** Friend graph. Private to the owner — never rides `PublicProfile`; it is
+   *  served only to the authenticated owner through the social layer. */
+  social: SocialGraph;
+  /** Owner-configurable privacy. Enforced server-side on every projection. */
+  privacy: PrivacySettings;
 }
 
-/** Public view of a profile: the private `secret` stripped. Everything else
- *  (stats, history, dates) is display data and safe to broadcast/serve. */
-export type PublicProfile = Omit<Profile, 'secret'> & { winRate: number };
+/**
+ * Public view of a profile: the private `secret` AND the private `social` graph
+ * stripped. Everything else (stats, history, dates) is display data and safe to
+ * broadcast/serve. `friendCount` is the one derived social figure that is public.
+ *
+ * NOTE: this is the OWNER-facing view (`GET /api/profiles/:id`, unchanged
+ * behavior). Inspecting *another* player goes through the social layer's
+ * viewer-aware projection, which additionally applies that player's privacy
+ * settings — see `socialManager.inspect`.
+ */
+export type PublicProfile = Omit<Profile, 'secret' | 'social'> & {
+  winRate: number;
+  friendCount: number;
+};
 
 /** A zeroed stats block (used for new profiles and stat resets). */
 export function emptyStats(): ProfileStats {
@@ -238,8 +404,9 @@ export function normalizeStats(raw: Partial<ProfileStats> | undefined | null): P
  */
 export function normalizeProfile(raw: Partial<Profile>, mkSecret: () => string): Profile {
   const now = typeof raw.createdAt === 'number' ? raw.createdAt : Date.now();
+  const id = String(raw.id);
   return {
-    id: String(raw.id),
+    id,
     secret: typeof raw.secret === 'string' && raw.secret.length > 0 ? raw.secret : mkSecret(),
     displayName: typeof raw.displayName === 'string' ? raw.displayName : 'Player',
     tag: typeof raw.tag === 'string' ? raw.tag : '',
@@ -255,6 +422,10 @@ export function normalizeProfile(raw: Partial<Profile>, mkSecret: () => string):
     stats: normalizeStats(raw.stats),
     rankedStats: normalizeStats(raw.rankedStats),
     recentMatches: Array.isArray(raw.recentMatches) ? raw.recentMatches.slice(0, 100) : [],
+    // Profiles persisted before the social system existed hydrate with an empty
+    // graph + default privacy, and are re-persisted once (see hydrate()).
+    social: normalizeSocialGraph(raw.social, id),
+    privacy: normalizePrivacy(raw.privacy),
   };
 }
 
@@ -263,9 +434,10 @@ export function winRate(stats: ProfileStats): number {
   return stats.matchesPlayed > 0 ? stats.matchesWon / stats.matchesPlayed : 0;
 }
 
-/** Strip the private secret before a profile crosses the wire; attach the
- *  derived win rate for convenience. The profile analog of publicPlayer(). */
+/** Strip the private secret AND the private friend graph before a profile
+ *  crosses the wire; attach the derived win rate + public friend count. The
+ *  profile analog of publicPlayer(). */
 export function publicProfile(p: Profile): PublicProfile {
-  const { secret, ...rest } = p;
-  return { ...rest, winRate: winRate(p.stats) };
+  const { secret, social, ...rest } = p;
+  return { ...rest, winRate: winRate(p.stats), friendCount: social.friends.length };
 }

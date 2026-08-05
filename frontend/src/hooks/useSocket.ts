@@ -7,6 +7,10 @@ import { HouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
 import { getSeatCoords } from '../utils/seating';
 import { logger } from '../utils/logger';
+// Friends & Social System. Two calls only — the listeners are attached alongside
+// the gameplay ones, and `sayHello` re-binds the profile after every (re)connect.
+// Both are no-ops when no profile exists, so profile-less play is untouched.
+import { attachSocialListeners, sayHello } from '../lib/social/socialClient';
 
 const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
 
@@ -142,6 +146,10 @@ function setupSocketListeners(socketInstance: Socket) {
     logger.debug('SOCKET_CONNECTED', socketInstance.id);
     useGameStore.getState().setConnectionStatus('connected');
     useGameStore.getState().setError(null);
+
+    // Re-bind the social identity on every connect AND reconnect, so presence and
+    // the friend graph are correct again after a drop without the player acting.
+    sayHello(socketInstance);
 
     const state = useGameStore.getState();
     const identity = state.player ?? state.spectator;
@@ -323,6 +331,11 @@ function setupSocketListeners(socketInstance: Socket) {
       useGameStore.getState().addToast(`${name} stopped spectating.`, 'info');
     }
   });
+
+  // Friends & Social System listeners, registered exactly once alongside the
+  // gameplay ones. Every `social:*` event is handled inside `socialClient` and
+  // lands in `useSocialStore` — none of them touch game state.
+  attachSocialListeners(socketInstance);
 }
 
 export const useSocket = () => {

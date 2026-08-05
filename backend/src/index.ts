@@ -48,6 +48,18 @@ import {
   removeBotSchema,
   startGameSchema,
 } from './validation/socketSchemas';
+// Friends & Social System. Confined to these four lifecycle calls plus
+// `attachSocial` — no gameplay handler changes behavior, and every hook is a
+// no-op for a socket that never presented a verified profile.
+import {
+  attachSocial,
+  socialDisconnect,
+  socialEnterRoom,
+  socialLeaveRoom,
+  socialRefreshRoom,
+  socialDiagnostics,
+  startSocialServices,
+} from './social/socialGateway';
 
 // Load environment variables from backend/.env if present (optional in dev).
 try {
@@ -355,6 +367,8 @@ function handlePossibleGameEnd(code: string): boolean {
     match: room.match ?? null,
   });
   logger.debug(`[Socket] Round in room ${code} ended. Winner: ${winner?.name ?? 'Unknown'}`);
+  // Everyone here stops being "playing" — refresh their friends' cards.
+  socialRefreshRoom(code);
   return true;
 }
 
@@ -464,6 +478,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     rooms: roomManager.getRoomCount(),
+    social: socialDiagnostics(),
     timestamp: new Date().toISOString(),
   });
 });
@@ -779,6 +794,12 @@ io.on('connection', (socket) => {
     });
   }
 
+  // Friends & Social System. Registers only `social:*` events, through the same
+  // rate-limit + schema pipeline above. `getRoomCode` lets the social layer read
+  // (never write) the connection's current room, so a socket that joined before
+  // saying hello still reports accurate presence.
+  attachSocial(io, socket, { on, guard, getRoomCode: () => currentRoomCode });
+
   // Create room event (alternative pathway)
   on('create-room', guard(createRoomSchema, ({ name, arena, profileId, profileSecret }) => {
     try {
@@ -789,6 +810,7 @@ io.on('connection', (socket) => {
       currentRoomCode = room.code;
       currentName = name;
       socket.join(room.code);
+      socialEnterRoom(socket.id, room.code);
 
       logger.debug(`[Socket] Host ${name} (${socket.id}) created and joined room ${room.code}`);
 
@@ -816,6 +838,7 @@ io.on('connection', (socket) => {
       currentRoomCode = upperCode;
       currentName = name;
       socket.join(upperCode);
+      socialEnterRoom(socket.id, upperCode);
 
       if (isSpectator) {
         logger.debug(`[Socket] Spectator ${name} (${socket.id}) joined room ${upperCode}`);
@@ -975,6 +998,9 @@ io.on('connection', (socket) => {
 
       // Broadcast initial game state to all players
       broadcastGameState(currentRoomCode);
+
+      // Every member just went lobby -> playing/watching.
+      socialRefreshRoom(currentRoomCode);
     } catch (error: any) {
       logger.error(`[Socket] Start game error for room ${currentRoomCode}:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to start game' });
@@ -1252,6 +1278,11 @@ io.on('connection', (socket) => {
     socketRateLimiter.removeSocket(socket.id);
     clearSenderHistory(socket.id);
 
+    // Presence must be released here, BEFORE the early return below: a socket
+    // that never joined a room still holds a social identity, and skipping this
+    // would leave that profile permanently "online" to its friends.
+    socialDisconnect(socket.id);
+
     if (!currentRoomCode) return;
 
     const room = roomManager.getRoom(currentRoomCode);
@@ -1302,6 +1333,7 @@ io.on('connection', (socket) => {
   // Common cleanup logic for explicit leave
   function handleLeave() {
     if (!currentRoomCode) return;
+    const leftCode = currentRoomCode;
 
     const result = roomManager.leaveRoom(socket.id);
     if (result) {
@@ -1338,9 +1370,16 @@ io.on('connection', (socket) => {
 
     currentRoomCode = null;
     currentName = null;
+
+    // Presence follows the player out of the room. Also refreshes everyone still
+    // inside, since a freed seat can make the room joinable for their friends.
+    socialLeaveRoom(socket.id, leftCode);
   }
 
 });
+
+/** Disposer for the social layer's background timers (set by start()). */
+let stopSocialServices: (() => void) | null = null;
 
 // Start Server — build the durable store, rehydrate any in-progress rooms, then
 // begin accepting connections so reconnecting players find their game intact.
@@ -1387,6 +1426,10 @@ async function start() {
     });
   }, ROOM_SWEEP_CONFIG.intervalMs).unref();
 
+  // Friends & Social System: invite-expiry delivery + the idle ("Away") sweep.
+  // Independent of every gameplay timer above; nothing in the game loop reads it.
+  stopSocialServices = startSocialServices(io);
+
   server.listen(port, () => {
     logger.info(`===============================================`);
     logger.info(`  Unoverse Backend Server running on port ${port}  `);
@@ -1415,6 +1458,7 @@ async function shutdown(signal: string) {
 
   try {
     io.close();                       // stop Socket.IO, disconnect clients
+    stopSocialServices?.();           // clear the social away-sweep timer
     await new Promise<void>((resolve) => server.close(() => resolve())); // stop HTTP
     await roomManager.shutdown();     // flush pending room writes + close store
     await profileManager.shutdown();  // flush pending profile writes + close store

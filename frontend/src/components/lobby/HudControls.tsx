@@ -14,6 +14,7 @@ import { useVoiceStore } from '../../store/useVoiceStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useChatEnabled } from '../../hooks/useChatEnabled';
 import { useExitTable } from '../../hooks/useExitTable';
+import { FriendsButton } from '../social/FriendsButton';
 
 export interface HudControlsProps {
   /**
@@ -107,6 +108,11 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
           )}
         </button>
       )}
+
+      {/* Friends drawer — sized to match the neighbouring chips so the row
+          stays one visual unit. Sits before Settings so the destructive Exit
+          chip keeps its position at the end of the row. */}
+      <FriendsButton compact className="w-9 h-9 sm:w-11 sm:h-11" />
 
       <button
         onClick={() => {

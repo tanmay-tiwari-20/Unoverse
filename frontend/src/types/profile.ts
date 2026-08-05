@@ -61,10 +61,30 @@ export interface MatchRecord {
   placement: number;            // THIS profile owner's placement
   durationMs: number;           // wall-clock length of the round
   rounds: number;               // rounds covered by this record (currently always 1)
+  // Themed arena the round was played in. Optional for backward compatibility
+  // with records written before arenas were recorded; display data only (it
+  // powers "favorite arena" on the profile).
+  arena?: string | null;
   settings: {
     targetScore: number;
     houseRulesSummary: string;
   };
+}
+
+/** Who may send this profile a friend request. */
+export type FriendRequestPolicy = 'everyone' | 'friends-of-friends' | 'nobody';
+
+/**
+ * Per-profile privacy settings. Mirrors the server shape. These are ENFORCED
+ * server-side in every projection — the client renders the toggles and sends the
+ * intent, but never relies on them to hide anything it has already received.
+ */
+export interface PrivacySettings {
+  friendRequests: FriendRequestPolicy;
+  showOnlineStatus: boolean;
+  showMatchHistory: boolean;
+  showOutfit: boolean;
+  allowFriendJoin: boolean;
 }
 
 /**
@@ -90,4 +110,9 @@ export interface PublicProfile {
   rankedStats: ProfileStats;
   recentMatches: MatchRecord[];
   winRate: number;
+  /** Derived count of established friendships. The friend GRAPH itself is
+   *  private and never rides this shape — it arrives through the social layer. */
+  friendCount: number;
+  /** Owner-configurable privacy. Present on the owner's own view. */
+  privacy: PrivacySettings;
 }

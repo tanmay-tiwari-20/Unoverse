@@ -1179,6 +1179,9 @@ class RoomManager {
         placement,
         durationMs,
         rounds: 1,
+        // Recorded for display/derivation only ("favorite arena" on the profile);
+        // never read back by the game engine.
+        arena: room.arena ?? null,
         settings: { targetScore: match.targetScore, houseRulesSummary },
       };
       profileManager.applyMatchResult(p.profileId!, {

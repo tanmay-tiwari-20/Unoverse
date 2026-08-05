@@ -63,6 +63,28 @@ export const RATE_LIMITS: Record<string, RateLimitRule> = {
   'join-room': { capacity: 10, refillPerSec: 2 },
   'start-game': { capacity: 10, refillPerSec: 3 },
   'leave-room': { capacity: 10, refillPerSec: 3 },
+
+  // --- Friends & Social System -------------------------------------------
+  // Search is the cheapest to abuse and the most expensive to serve, so it gets
+  // the tightest bucket. Graph mutations are inherently low-frequency (a human
+  // clicks them); the limits below are far above real use and exist only to cap
+  // a script. Every social event notifies on throttle so the UI can explain
+  // itself rather than appearing to silently fail.
+  'social:hello': { capacity: 6, refillPerSec: 0.5 },
+  'social:search': { capacity: 8, refillPerSec: 1.5, notify: true },
+  'social:inspect': { capacity: 15, refillPerSec: 3, notify: true },
+  'social:friend-request': { capacity: 10, refillPerSec: 0.5, notify: true },
+  'social:friend-accept': { capacity: 15, refillPerSec: 1, notify: true },
+  'social:friend-decline': { capacity: 15, refillPerSec: 1, notify: true },
+  'social:friend-cancel': { capacity: 15, refillPerSec: 1, notify: true },
+  'social:friend-remove': { capacity: 10, refillPerSec: 0.5, notify: true },
+  'social:block': { capacity: 10, refillPerSec: 0.5, notify: true },
+  'social:unblock': { capacity: 10, refillPerSec: 0.5, notify: true },
+  'social:invite': { capacity: 8, refillPerSec: 0.5, notify: true },
+  'social:invite-accept': { capacity: 10, refillPerSec: 1, notify: true },
+  'social:invite-decline': { capacity: 10, refillPerSec: 1, notify: true },
+  'social:join-friend': { capacity: 8, refillPerSec: 1, notify: true },
+  'social:privacy': { capacity: 10, refillPerSec: 1, notify: true },
 };
 
 /** Min gap between throttle-notice `error` emissions per event, so the notice
@@ -182,6 +204,42 @@ export interface ProfileConfig {
 export const PROFILE_CONFIG: ProfileConfig = {
   recentMatchesMax: num(process.env.RECENT_MATCHES_MAX, 20),
   minHumansForStats: num(process.env.PROFILE_MIN_HUMANS, 1),
+};
+
+// ---------------------------------------------------------------------------
+// Friends & Social System.
+// ---------------------------------------------------------------------------
+
+export interface SocialConfig {
+  /** Max established friends per profile. Bounds the fan-out of a presence
+   *  broadcast and the size of a snapshot payload. */
+  maxFriends: number;
+  /** Max simultaneous outgoing friend requests, so a script can't paper the
+   *  whole player base with invitations. */
+  maxOutgoingRequests: number;
+  /** Max pending incoming requests kept; the oldest is dropped past this. */
+  maxIncomingRequests: number;
+  /** Max search results returned for one query. */
+  searchLimit: number;
+  /** How long a game invitation stays valid before it self-expires. */
+  inviteTtlMs: number;
+  /** Max live outgoing invitations per sender. */
+  maxOutgoingInvites: number;
+  /** Idle time after which a connected player is shown as Away. */
+  awayAfterMs: number;
+  /** How often the away sweep runs. Server-side only — no client polling. */
+  awaySweepMs: number;
+}
+
+export const SOCIAL_CONFIG: SocialConfig = {
+  maxFriends: num(process.env.SOCIAL_MAX_FRIENDS, 200),
+  maxOutgoingRequests: num(process.env.SOCIAL_MAX_OUTGOING_REQUESTS, 50),
+  maxIncomingRequests: num(process.env.SOCIAL_MAX_INCOMING_REQUESTS, 100),
+  searchLimit: num(process.env.SOCIAL_SEARCH_LIMIT, 20),
+  inviteTtlMs: num(process.env.SOCIAL_INVITE_TTL_MS, 90_000),
+  maxOutgoingInvites: num(process.env.SOCIAL_MAX_OUTGOING_INVITES, 10),
+  awayAfterMs: num(process.env.SOCIAL_AWAY_AFTER_MS, 5 * 60_000),
+  awaySweepMs: num(process.env.SOCIAL_AWAY_SWEEP_MS, 60_000),
 };
 
 // ---------------------------------------------------------------------------

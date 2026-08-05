@@ -11,6 +11,8 @@ import { CreateProfileModal } from "../components/profile/CreateProfileModal";
 import { ProfileModal } from "../components/profile/ProfileModal";
 import { PresetAvatar } from "../components/profile/PresetAvatar";
 import { CreateRoomModal } from "../components/lobby/CreateRoomModal";
+import { FriendsButton } from "../components/social/FriendsButton";
+import { SocialLayer } from "../components/social/SocialLayer";
 import { ArenaSelection } from "../lib/arenas/types";
 
 const LandingScene = dynamic(
@@ -250,19 +252,27 @@ export default function LandingPage() {
       {/* Profile chip — opens the persistent player profile. Only shown once a
           profile exists (first-time visitors see the create flow instead). */}
       {profileHydrated && profileId && (
-        <motion.button
+        <motion.div
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, type: "spring", damping: 20, stiffness: 260 }}
-          onClick={() => setIsProfileOpen(true)}
-          className="absolute top-4 right-4 z-20 panel-arcade bg-gradient-to-b from-neutral-900/90 to-black/90 backdrop-blur-md pl-2 pr-3.5 py-2 flex items-center gap-2.5 pointer-events-auto cursor-pointer hover:scale-[1.03] transition-transform"
-          aria-label="Open your player profile"
+          className="absolute top-4 right-4 z-20 flex items-center gap-2 pointer-events-auto"
         >
-          <PresetAvatar avatarKey={profileAvatar} size={36} />
-          <span className="font-arcade text-sm text-white uppercase tracking-wide max-w-[7rem] truncate">
-            {profileName ?? "Profile"}
-          </span>
-        </motion.button>
+          {/* Friends drawer. Sits beside the profile chip because both are
+              "you and yours", and both need a profile to mean anything. */}
+          <FriendsButton className="h-[52px] px-3" />
+
+          <button
+            onClick={() => setIsProfileOpen(true)}
+            className="panel-arcade bg-gradient-to-b from-neutral-900/90 to-black/90 backdrop-blur-md pl-2 pr-3.5 py-2 flex items-center gap-2.5 cursor-pointer hover:scale-[1.03] transition-transform"
+            aria-label="Open your player profile"
+          >
+            <PresetAvatar avatarKey={profileAvatar} size={36} />
+            <span className="font-arcade text-sm text-white uppercase tracking-wide max-w-[7rem] truncate">
+              {profileName ?? "Profile"}
+            </span>
+          </button>
+        </motion.div>
       )}
 
       {/* Foreground UI */}
@@ -464,6 +474,11 @@ export default function LandingPage() {
         onClose={() => setCreateOpen(false)}
         onConfirm={handleCreateRoom}
       />
+
+      {/* Friends & Social System. One mount point for the drawer, the player
+          profile viewer, invitations and social notifications. Purely additive —
+          it renders nothing until the player opens it or a friend does something. */}
+      <SocialLayer />
     </main>
   );
 }

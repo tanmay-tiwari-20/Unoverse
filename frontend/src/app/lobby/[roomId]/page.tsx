@@ -10,6 +10,7 @@ import { useGameStore } from "../../../store/useGameStore";
 import { ErrorBoundary } from "../../../components/providers/ErrorBoundary";
 import { ReactionsHandler } from "../../../components/social/ReactionsHandler";
 import { ChatPanel } from "../../../components/social/ChatPanel";
+import { SocialLayer } from "../../../components/social/SocialLayer";
 import { TurnGlowIndicator } from "../../../components/table/TurnGlowIndicator";
 import { SettingsModal } from "../../../components/ui/SettingsModal";
 import { HouseRulesModal } from "../../../components/ui/HouseRulesModal";
@@ -235,6 +236,15 @@ export default function LobbyPage() {
       {/* GAME EFFECTS LAYER */}
       <ErrorBoundary section="Turn Glow" fallback={null}>
         <TurnGlowIndicator />
+      </ErrorBoundary>
+
+      {/* =================================================================== */}
+      {/* FRIENDS & SOCIAL: drawer, player profiles, invitations, notices.     */}
+      {/* Fenced off with `fallback={null}` like every other overlay here, so a */}
+      {/* fault in the social layer can never take the table down with it.     */}
+      {/* =================================================================== */}
+      <ErrorBoundary section="Friends" fallback={null}>
+        <SocialLayer />
       </ErrorBoundary>
     </div>
   );
