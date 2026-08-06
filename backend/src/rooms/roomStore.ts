@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { Room } from './roomManager';
 import { logger } from '../utils/logger';
+import { getRedis, isRedisConfigured } from '../config/redis';
 
 /**
  * Durable storage for rooms. The RoomManager keeps an in-memory Map as the fast,
@@ -84,27 +85,28 @@ export class FileRoomStore implements RoomStore {
 /**
  * Redis-backed store. Each room is a JSON string under key `uno:room:<CODE>`, all
  * tracked in a set `uno:rooms` for loadAll(). This is the production path and the
- * only one that also enables horizontal scaling later (shared state across
- * instances). ioredis is imported lazily so the file/memory paths need no Redis.
+ * only one that also enables horizontal scaling (shared state across instances).
+ *
+ * Connection handling lives in config/redis.ts — this store borrows the shared
+ * command client rather than opening its own, so rooms + profiles cost ONE
+ * connection between them.
  */
 export class RedisRoomStore implements RoomStore {
   private client: any;
   private readonly keyPrefix = 'uno:room:';
   private readonly indexKey = 'uno:rooms';
+  /** Max keys fetched per MGET. Bounds both the Redis-side reply buffer and our
+   *  peak heap when a deployment has thousands of live rooms. */
+  private static readonly BATCH = 200;
 
   private constructor(client: any) {
     this.client = client;
   }
 
-  static async create(url: string): Promise<RedisRoomStore> {
-    // Lazy import: only pulled in when Redis is actually selected.
-    const { default: Redis } = await import('ioredis');
-    const client = new Redis(url, {
-      lazyConnect: true,
-      maxRetriesPerRequest: 3,
-    });
-    await client.connect();
-    logger.info(`[STORE] Connected to Redis at ${url.replace(/\/\/.*@/, '//***@')}`);
+  /** Borrow the process-wide shared client (connects on first use). */
+  static async create(): Promise<RedisRoomStore> {
+    const client = await getRedis();
+    logger.info('[STORE] Using Redis room store (uno:room:*).');
     return new RedisRoomStore(client);
   }
 
@@ -115,22 +117,39 @@ export class RedisRoomStore implements RoomStore {
   async loadAll(): Promise<Room[]> {
     const codes: string[] = await this.client.smembers(this.indexKey);
     if (!codes.length) return [];
-    const keys = codes.map((c) => this.key(c));
-    const values: (string | null)[] = await this.client.mget(keys);
+
     const rooms: Room[] = [];
-    for (let i = 0; i < values.length; i++) {
-      const raw = values[i];
-      if (!raw) {
-        // Index references a room whose snapshot is gone — clean up the dangling ref.
-        await this.client.srem(this.indexKey, codes[i]);
-        continue;
-      }
-      try {
-        rooms.push(JSON.parse(raw) as Room);
-      } catch (err: any) {
-        logger.error(`[STORE] Skipping unparseable Redis room ${codes[i]}:`, err?.message);
+    const dangling: string[] = [];
+
+    // Fetch in bounded batches — a single MGET over every key would build one
+    // giant reply, which is the classic way a rehydrate spikes memory on a busy
+    // deployment.
+    for (let start = 0; start < codes.length; start += RedisRoomStore.BATCH) {
+      const slice = codes.slice(start, start + RedisRoomStore.BATCH);
+      const values: (string | null)[] = await this.client.mget(slice.map((c) => this.key(c)));
+      for (let i = 0; i < values.length; i++) {
+        const raw = values[i];
+        if (!raw) {
+          // The index references a room whose snapshot expired or was deleted.
+          dangling.push(slice[i]);
+          continue;
+        }
+        try {
+          rooms.push(JSON.parse(raw) as Room);
+        } catch (err: any) {
+          logger.error(`[STORE] Skipping unparseable Redis room ${slice[i]}:`, err?.message);
+          dangling.push(slice[i]);
+        }
       }
     }
+
+    // Clean up every dangling index entry in ONE round trip rather than issuing
+    // an SREM per orphan inside the read loop.
+    if (dangling.length) {
+      await this.client.srem(this.indexKey, ...dangling).catch(() => {});
+      logger.debug(`[STORE] Pruned ${dangling.length} dangling room index entr(ies).`);
+    }
+
     return rooms;
   }
 
@@ -148,9 +167,9 @@ export class RedisRoomStore implements RoomStore {
     await this.client.multi().del(this.key(upper)).srem(this.indexKey, upper).exec();
   }
 
-  async close(): Promise<void> {
-    await this.client.quit();
-  }
+  // No close(): the shared client's lifecycle is owned by config/redis.ts and
+  // closed once at shutdown. Closing it here would pull the connection out from
+  // under the profile store.
 }
 
 /**
@@ -159,11 +178,20 @@ export class RedisRoomStore implements RoomStore {
  *   STORE=memory               -> MemoryRoomStore (no persistence)
  *   STORE=file (default)       -> FileRoomStore   (DATA_DIR or ./.data/rooms)
  *
- * If a real store fails to initialize we fall back to MemoryRoomStore rather than
- * refusing to boot — the game still works, just without durability.
+ * FAILURE POLICY — deliberately different by environment:
+ *
+ *   Production (NODE_ENV=production) with STORE=redis: a failure to reach Redis
+ *   THROWS. Silently degrading to in-memory here is worse than not starting: the
+ *   instance would look healthy, accept traffic, and quietly drop every game on
+ *   restart — and in a multi-instance deploy it would serve state that diverges
+ *   from its peers. Failing loudly lets the platform retry / hold the rollout.
+ *
+ *   Development: fall back to in-memory with a loud warning so a missing local
+ *   Redis never blocks you from working on gameplay.
  */
 export async function createRoomStore(): Promise<RoomStore> {
   const kind = (process.env.STORE || 'file').toLowerCase();
+  const isProd = process.env.NODE_ENV === 'production';
 
   try {
     if (kind === 'memory') {
@@ -171,16 +199,24 @@ export async function createRoomStore(): Promise<RoomStore> {
       return new MemoryRoomStore();
     }
     if (kind === 'redis') {
-      const url = process.env.REDIS_URL;
-      if (!url) throw new Error('STORE=redis requires REDIS_URL to be set');
-      return await RedisRoomStore.create(url);
+      if (!isRedisConfigured()) {
+        throw new Error('STORE=redis requires REDIS_URL to be set');
+      }
+      return await RedisRoomStore.create();
     }
     // Default: file
     const dir = process.env.DATA_DIR || path.join(process.cwd(), '.data', 'rooms');
     logger.info(`[STORE] Using file store at ${dir}`);
     return new FileRoomStore(dir);
   } catch (err: any) {
-    logger.error(`[STORE] Failed to initialize '${kind}' store, falling back to in-memory:`, err?.message);
+    if (kind === 'redis' && isProd) {
+      // Re-throw: index.ts turns this into a clear message + non-zero exit.
+      throw new Error(`Failed to initialize the Redis room store: ${err?.message}`);
+    }
+    logger.error(
+      `[STORE] Failed to initialize '${kind}' store, falling back to in-memory:`,
+      err?.message
+    );
     return new MemoryRoomStore();
   }
 }

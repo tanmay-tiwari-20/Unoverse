@@ -1,3 +1,8 @@
+// MUST be first: loads backend/.env into process.env BEFORE any module that
+// reads env at import time (serverConfig, config/redis, ...) is evaluated.
+// Import statements are hoisted, so this cannot be done further down the file.
+import './config/loadEnv';
+
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -7,6 +12,12 @@ import { roomManager, Room } from './rooms/roomManager';
 import { createRoomStore } from './rooms/roomStore';
 import { profileManager } from './profiles/profileManager';
 import { createProfileStore } from './profiles/profileStore';
+import {
+  createRedisClient,
+  isRedisConfigured,
+  redisHealth,
+  closeRedis,
+} from './config/redis';
 import {
   drawCardAction,
   playCardAction,
@@ -61,12 +72,8 @@ import {
   startSocialServices,
 } from './social/socialGateway';
 
-// Load environment variables from backend/.env if present (optional in dev).
-try {
-  process.loadEnvFile();
-} catch {
-  // No .env file — fall back to process defaults. This is fine for local dev.
-}
+// Environment variables are loaded by './config/loadEnv' (first import above),
+// which runs before any module-level process.env read in this process.
 
 // ---- Turn timer --------------------------------------------------------------
 // Each active turn is given a deadline. If the active player (or color chooser)
@@ -415,6 +422,10 @@ const botRunner = new BotRunner({
 const app = express();
 const port = process.env.PORT || 3001;
 
+/** Whether the Socket.IO Redis adapter is active (set during start()). Reported
+ *  by /health so you can confirm multi-instance broadcasts are really on. */
+let redisAdapterEnabled = false;
+
 // Resolve the CORS policy ONCE and share it between Express and Socket.IO so the
 // two can never drift. In production a missing/empty/"*" CORS_ORIGIN throws here,
 // which we surface and refuse to start (see below) rather than opening the server
@@ -473,12 +484,23 @@ const profileWriteLimiter = rateLimit({ windowMs: 60_000, max: 30 });
 
 // Health check — used by container orchestrators / load balancers to verify the
 // process is alive and serving. Lightweight and unauthenticated by design.
-app.get('/health', (_req, res) => {
+//
+// Redis is probed with a bounded PING (see redisHealth). The endpoint reports
+// Redis status but does NOT 503 on a Redis outage: the server still serves
+// in-memory games, and taking every instance out of rotation over a transient
+// Redis blip would turn a degradation into a full outage. Alert on
+// `storage.status`, don't gate traffic on it.
+app.get('/health', async (_req, res) => {
   res.status(200).json({
     status: 'ok',
     uptime: process.uptime(),
     rooms: roomManager.getRoomCount(),
     social: socialDiagnostics(),
+    storage: {
+      backend: (process.env.STORE || 'file').toLowerCase(),
+      redis: await redisHealth(),
+      socketAdapter: redisAdapterEnabled ? 'redis' : 'in-memory',
+    },
     timestamp: new Date().toISOString(),
   });
 });
@@ -689,30 +711,37 @@ const io = new Server(server, {
  * Attach the Socket.IO Redis adapter so multiple backend instances share
  * broadcasts (io.to(room).emit reaches sockets connected to any instance). Only
  * engaged when REDIS_URL is set — single-instance / file-store deploys skip this
- * entirely. ioredis + the adapter are imported lazily so they're not required for
- * the no-Redis path.
+ * entirely.
+ *
+ * The adapter needs its OWN pub + sub connections: a Redis connection in
+ * subscriber mode may only issue (un)subscribe commands, so it cannot be the
+ * shared command client the stores use. Both are built through
+ * config/redis.ts's factory so they inherit the same reconnect-forever policy —
+ * a Redis restart must not permanently sever cross-instance broadcasts.
  *
  * NOTE: the adapter shares broadcasts across instances, but room *state*
  * (RoomManager's in-memory Map) still lives per-process. True horizontal scaling
  * also requires sticky sessions at the load balancer (so a given socket always
  * hits the same instance) plus STORE=redis for shared state. This wiring is the
  * messaging half of that story.
+ *
+ * Returns true when the adapter was enabled.
  */
-async function attachRedisAdapter(): Promise<void> {
-  const url = process.env.REDIS_URL;
-  if (!url) return;
+async function attachRedisAdapter(): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
   try {
     const { createAdapter } = await import('@socket.io/redis-adapter');
-    const { default: Redis } = await import('ioredis');
-    const pubClient = new Redis(url);
-    const subClient = pubClient.duplicate();
-    // Surface connection errors instead of crashing on an unhandled 'error' event.
-    pubClient.on('error', (e) => logger.error('[REDIS_ADAPTER] pub client error:', e?.message));
-    subClient.on('error', (e) => logger.error('[REDIS_ADAPTER] sub client error:', e?.message));
+    // Two dedicated connections, named so they're identifiable in CLIENT LIST.
+    const pubClient = await createRedisClient('socketio-pub');
+    const subClient = await createRedisClient('socketio-sub');
     io.adapter(createAdapter(pubClient, subClient));
     logger.info('[REDIS_ADAPTER] Socket.IO Redis adapter enabled (multi-instance broadcasts).');
+    return true;
   } catch (err: any) {
+    // A missing adapter only costs cross-instance fan-out; a single instance is
+    // still fully playable, so this is a warning rather than a fatal error.
     logger.error('[REDIS_ADAPTER] Failed to enable adapter, continuing single-instance:', err?.message);
+    return false;
   }
 }
 
@@ -1384,6 +1413,10 @@ let stopSocialServices: (() => void) | null = null;
 // Start Server — build the durable store, rehydrate any in-progress rooms, then
 // begin accepting connections so reconnecting players find their game intact.
 async function start() {
+  // In production with STORE=redis, createRoomStore/createProfileStore THROW if
+  // Redis is unreachable rather than silently degrading to in-memory. That
+  // rejection propagates out of start() and is handled below, where we log the
+  // cause and exit non-zero so the platform can retry or halt the rollout.
   const store = await createRoomStore();
   roomManager.setStore(store);
   try {
@@ -1393,8 +1426,8 @@ async function start() {
   }
 
   // Build the durable profile store and rehydrate persistent player profiles +
-  // lifetime stats. Independent of the room store (its own STORE/PROFILE_DIR),
-  // so a profile-layer failure never blocks the game from starting.
+  // lifetime stats. Shares the same Redis connection as the room store when
+  // STORE=redis; independent directory when STORE=file.
   const profileStore = await createProfileStore();
   profileManager.setStore(profileStore);
   try {
@@ -1411,7 +1444,7 @@ async function start() {
   rearmTimersForActiveRooms();
 
   // Enable cross-instance broadcasts if Redis is configured (no-op otherwise).
-  await attachRedisAdapter();
+  redisAdapterEnabled = await attachRedisAdapter();
 
   // Idle-room garbage collection. A lifecycle-aware background sweeper periodically
   // reclaims rooms with NO live members — empty/never-joined rooms, expired invite
@@ -1434,12 +1467,24 @@ async function start() {
     logger.info(`===============================================`);
     logger.info(`  Unoverse Backend Server running on port ${port}  `);
     logger.info(`  Log level: ${logger.level}`);
+    logger.info(`  Storage:   ${(process.env.STORE || 'file').toLowerCase()}`);
+    logger.info(`  Socket.IO: ${redisAdapterEnabled ? 'Redis adapter (multi-instance)' : 'in-memory adapter (single instance)'}`);
     logger.info(`  Rooms persisted: ${roomManager.getRoomCount()} restored`);
     logger.info(`===============================================`);
   });
 }
 
-start();
+// A failure inside start() means the server cannot serve correctly — most often
+// STORE=redis in production with an unreachable REDIS_URL. Exit non-zero with an
+// actionable message instead of leaving a half-initialized process listening.
+start().catch((err: any) => {
+  logger.error('[STARTUP] Failed to start the server:', err?.message || err);
+  logger.error(
+    '[STARTUP] If this is a Redis error, verify REDIS_URL is reachable from this ' +
+      'host and that STORE is set correctly (redis | file | memory).'
+  );
+  process.exit(1);
+});
 
 // Graceful shutdown. Container platforms send SIGTERM on deploy/scale-down; we
 // stop accepting connections, close sockets, flush pending persistence, then exit.
@@ -1462,6 +1507,11 @@ async function shutdown(signal: string) {
     await new Promise<void>((resolve) => server.close(() => resolve())); // stop HTTP
     await roomManager.shutdown();     // flush pending room writes + close store
     await profileManager.shutdown();  // flush pending profile writes + close store
+    // Close the SHARED Redis connection last: both stores above write through it
+    // during their flush, and quit() drains in-flight commands (disconnect()
+    // would drop them). Without this the process can also linger until the
+    // socket times out, past the platform's shutdown grace window.
+    await closeRedis();
     logger.info('[SHUTDOWN] Clean shutdown complete.');
     clearTimeout(forceExit);
     process.exit(0);

@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { Profile } from './profileTypes';
 import { logger } from '../utils/logger';
+import { getRedis, isRedisConfigured } from '../config/redis';
 
 /**
  * Durable storage for player profiles. Mirrors the RoomStore pattern exactly:
@@ -87,26 +88,26 @@ export class FileProfileStore implements ProfileStore {
 /**
  * Redis-backed store. Each profile is a JSON string under `uno:profile:<id>`,
  * all tracked in a set `uno:profiles` for loadAll(). The production path and the
- * one that also enables cross-instance shared profiles / leaderboards later.
- * ioredis is imported lazily so the file/memory paths need no Redis.
+ * one that enables cross-instance shared profiles / leaderboards.
+ *
+ * Borrows the shared command client from config/redis.ts (same connection the
+ * room store uses), so persistence costs one connection, not two.
  */
 export class RedisProfileStore implements ProfileStore {
   private client: any;
   private readonly keyPrefix = 'uno:profile:';
   private readonly indexKey = 'uno:profiles';
+  /** Max keys per MGET — bounds peak memory when rehydrating many profiles. */
+  private static readonly BATCH = 200;
 
   private constructor(client: any) {
     this.client = client;
   }
 
-  static async create(url: string): Promise<RedisProfileStore> {
-    const { default: Redis } = await import('ioredis');
-    const client = new Redis(url, {
-      lazyConnect: true,
-      maxRetriesPerRequest: 3,
-    });
-    await client.connect();
-    logger.info(`[PROFILE_STORE] Connected to Redis at ${url.replace(/\/\/.*@/, '//***@')}`);
+  /** Borrow the process-wide shared client (connects on first use). */
+  static async create(): Promise<RedisProfileStore> {
+    const client = await getRedis();
+    logger.info('[PROFILE_STORE] Using Redis profile store (uno:profile:*).');
     return new RedisProfileStore(client);
   }
 
@@ -117,21 +118,33 @@ export class RedisProfileStore implements ProfileStore {
   async loadAll(): Promise<Profile[]> {
     const ids: string[] = await this.client.smembers(this.indexKey);
     if (!ids.length) return [];
-    const keys = ids.map((id) => this.key(id));
-    const values: (string | null)[] = await this.client.mget(keys);
+
     const profiles: Profile[] = [];
-    for (let i = 0; i < values.length; i++) {
-      const raw = values[i];
-      if (!raw) {
-        await this.client.srem(this.indexKey, ids[i]);
-        continue;
-      }
-      try {
-        profiles.push(JSON.parse(raw) as Profile);
-      } catch (err: any) {
-        logger.error(`[PROFILE_STORE] Skipping unparseable Redis profile ${ids[i]}:`, err?.message);
+    const dangling: string[] = [];
+
+    for (let start = 0; start < ids.length; start += RedisProfileStore.BATCH) {
+      const slice = ids.slice(start, start + RedisProfileStore.BATCH);
+      const values: (string | null)[] = await this.client.mget(slice.map((id) => this.key(id)));
+      for (let i = 0; i < values.length; i++) {
+        const raw = values[i];
+        if (!raw) {
+          dangling.push(slice[i]);
+          continue;
+        }
+        try {
+          profiles.push(JSON.parse(raw) as Profile);
+        } catch (err: any) {
+          logger.error(`[PROFILE_STORE] Skipping unparseable Redis profile ${slice[i]}:`, err?.message);
+          dangling.push(slice[i]);
+        }
       }
     }
+
+    if (dangling.length) {
+      await this.client.srem(this.indexKey, ...dangling).catch(() => {});
+      logger.debug(`[PROFILE_STORE] Pruned ${dangling.length} dangling profile index entr(ies).`);
+    }
+
     return profiles;
   }
 
@@ -147,9 +160,7 @@ export class RedisProfileStore implements ProfileStore {
     await this.client.multi().del(this.key(id)).srem(this.indexKey, id).exec();
   }
 
-  async close(): Promise<void> {
-    await this.client.quit();
-  }
+  // No close(): the shared client is owned and closed by config/redis.ts.
 }
 
 /**
@@ -159,10 +170,13 @@ export class RedisProfileStore implements ProfileStore {
  *   STORE=memory               -> MemoryProfileStore (no persistence)
  *   STORE=file (default)       -> FileProfileStore (PROFILE_DIR or ./.data/profiles)
  *
- * Falls back to MemoryProfileStore on failure rather than refusing to boot.
+ * Same failure policy as the room store: in production, STORE=redis that cannot
+ * reach Redis THROWS (losing every profile + lifetime stat on restart is not an
+ * acceptable silent degradation). In development it falls back to memory.
  */
 export async function createProfileStore(): Promise<ProfileStore> {
   const kind = (process.env.STORE || 'file').toLowerCase();
+  const isProd = process.env.NODE_ENV === 'production';
 
   try {
     if (kind === 'memory') {
@@ -170,16 +184,23 @@ export async function createProfileStore(): Promise<ProfileStore> {
       return new MemoryProfileStore();
     }
     if (kind === 'redis') {
-      const url = process.env.REDIS_URL;
-      if (!url) throw new Error('STORE=redis requires REDIS_URL to be set');
-      return await RedisProfileStore.create(url);
+      if (!isRedisConfigured()) {
+        throw new Error('STORE=redis requires REDIS_URL to be set');
+      }
+      return await RedisProfileStore.create();
     }
     // Default: file. PROFILE_DIR is the sibling of the rooms' DATA_DIR.
     const dir = process.env.PROFILE_DIR || path.join(process.cwd(), '.data', 'profiles');
     logger.info(`[PROFILE_STORE] Using file store at ${dir}`);
     return new FileProfileStore(dir);
   } catch (err: any) {
-    logger.error(`[PROFILE_STORE] Failed to initialize '${kind}' store, falling back to in-memory:`, err?.message);
+    if (kind === 'redis' && isProd) {
+      throw new Error(`Failed to initialize the Redis profile store: ${err?.message}`);
+    }
+    logger.error(
+      `[PROFILE_STORE] Failed to initialize '${kind}' store, falling back to in-memory:`,
+      err?.message
+    );
     return new MemoryProfileStore();
   }
 }

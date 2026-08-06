@@ -74,13 +74,25 @@ Unoverse has **two deployable pieces** that must be deployed differently:
 
 ### Option A: Railway or Render (easiest, uses the Dockerfile)
 
-1. Provision **Redis** (Railway: add a Redis plugin; Render: add a Redis instance / use Upstash). Copy its connection URL.
+1. Provision **Redis** (Railway: add a Redis plugin; Render: add a **Key Value**
+   instance / use Upstash). Copy its connection URL. On Render use the **Internal**
+   URL (`redis://red-xxxxx:6379`) — it stays on the private network, needs no TLS,
+   and doesn't count against bandwidth. The External URL is `rediss://` and is only
+   for connecting from your laptop.
 2. Create a new service from your repo, root directory `backend/`. The platform
    auto-detects `backend/Dockerfile`.
-3. Set env vars: `NODE_ENV=production`, `STORE=redis`, `REDIS_URL=<from step 1>`,
-   `CORS_ORIGIN=<your frontend URL>`, `LOG_LEVEL=info`.
-4. Deploy. Confirm health: open `https://<backend-url>/health` → `{"status":"ok",...}`.
-5. Note the backend's public HTTPS URL for the frontend.
+3. Set env vars **in the host dashboard, not in a `.env` file** (`.env` is gitignored
+   and never reaches the server): `NODE_ENV=production`, `STORE=redis`,
+   `REDIS_URL=<from step 1>`, `CORS_ORIGIN=<your frontend URL>`, `LOG_LEVEL=info`.
+   Leave `PORT` unset — the host injects it.
+4. Point the platform's health check path at `/health`.
+5. Deploy. Confirm health: open `https://<backend-url>/health` → `{"status":"ok",...}`
+   with `"storage":{"backend":"redis","redis":{"status":"ready",...}}`.
+6. Note the backend's public HTTPS URL for the frontend.
+
+> **Fails to start?** Two config mistakes are fatal by design: a missing/`*`
+> `CORS_ORIGIN` under `NODE_ENV=production`, and `STORE=redis` with an unreachable
+> `REDIS_URL`. Both are logged with the exact fix before the process exits.
 
 ### Option B: Any VPS with Docker
 
@@ -128,10 +140,53 @@ The server handles `SIGTERM`/`SIGINT` gracefully (flushes persistence, closes so
 
 - Managed is simplest: Railway Redis plugin, Render Redis, **Upstash**, or Redis Cloud.
 - Set `STORE=redis` and `REDIS_URL` on the backend.
-- This gives you two things at once:
+- This gives you three things at once:
   1. **Durability** — in-progress games survive a backend restart/redeploy.
   2. **Multi-instance broadcasts** — the Socket.IO Redis adapter auto-enables when
      `REDIS_URL` is present.
+  3. **Shared profiles/friends** — profiles, friends, and presence are visible from
+     every instance instead of being trapped on one box.
+
+### Connection URL format
+
+| Provider | URL shape |
+| --- | --- |
+| Local Docker | `redis://localhost:6379` |
+| Railway / Render | injected for you (`redis://default:pass@host:6379`) |
+| Upstash / Redis Cloud | `rediss://default:pass@host:6379` (note `rediss` = TLS) |
+
+`rediss://` automatically enables TLS. No extra config needed.
+
+### Verify before you deploy
+
+```bash
+cd backend
+npm run redis:check     # pings Redis, does a round-trip write/read, then cleans up
+```
+
+### Behaviour when Redis is unreachable
+
+- **`NODE_ENV=production`** — the server **refuses to start**. This is deliberate: a
+  silent fallback to per-instance memory would split your players across boxes and
+  quietly lose games.
+- **Development** — falls back to the file store with a loud warning so you can keep
+  working without Redis running.
+
+`GET /health` reports live storage state, so point your platform's health check at it
+to catch a degraded instance:
+
+```json
+"storage": {
+  "backend": "redis",
+  "redis": { "status": "ready", "latencyMs": 4 },
+  "socketAdapter": "redis"
+}
+```
+
+`redis.status` is `ready` (PING ok) / `disabled` (no `REDIS_URL`) / `degraded`
+(connected but PING failing) / `error` (no client at all). The endpoint still returns
+`200` during a Redis outage — alert on `storage.redis.status`, don't pull the
+instance out of the load balancer for it.
 
 ---
 

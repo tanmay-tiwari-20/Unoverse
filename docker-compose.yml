@@ -12,6 +12,13 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
+    # Published so the backend can also be run on the HOST (`npm run dev`)
+    # against this container. Bound to 127.0.0.1 on purpose: this Redis has no
+    # password, so it must never be reachable from the LAN. The `backend`
+    # service below does not use this mapping — it reaches Redis over the
+    # compose network as `redis:6379`.
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
