@@ -16,6 +16,7 @@ import { SettingsModal } from "../../../components/ui/SettingsModal";
 import { HouseRulesModal } from "../../../components/ui/HouseRulesModal";
 import { HelpModals } from "../../../components/ui/HelpModals";
 import { FPSCounter } from "../../../components/ui/FPSCounter";
+import { RotateDevicePrompt } from "../../../components/ui/RotateDevicePrompt";
 import { PremiumLoader } from "../../../components/lobby/PremiumLoader";
 import { JoinStatusScreen } from "../../../components/lobby/JoinStatusScreen";
 import { ConnectionOverlay } from "../../../components/lobby/ConnectionOverlay";
@@ -181,6 +182,13 @@ export default function LobbyPage() {
         <HelpModals />
       </ErrorBoundary>
       <FPSCounter />
+
+      {/* Landscape nudge for portrait phones. The table is designed wide, so
+          this guides players to rotate — with a persistent opt-out, never a
+          gate. Fenced off so a fault here can't take the table down. */}
+      <ErrorBoundary section="Orientation" fallback={null}>
+        <RotateDevicePrompt />
+      </ErrorBoundary>
 
       {/* Toast Notifications Container */}
       <ToastStack />

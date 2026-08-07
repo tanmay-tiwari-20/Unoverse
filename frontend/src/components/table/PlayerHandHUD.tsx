@@ -21,7 +21,7 @@ export const PlayerHandHUD: React.FC = () => {
   const pendingDrawType = useGameStore((state) => state.pendingDrawType);
   const houseRules = useGameStore((state) => state.houseRules);
   const { playCard, jumpIn } = useSocket();
-  const { width, isMobile, isTablet, isTouch } = useViewport();
+  const { width, isMobile, isTablet, isTouch, isLandscape } = useViewport();
 
   // Hide hand when game is not active or has ended
   if (!room || !player || !['playing', 'awaiting_color_selection'].includes(room.status)) {
@@ -180,8 +180,13 @@ export const PlayerHandHUD: React.FC = () => {
     );
   };
 
+  // On a landscape phone the viewport is only ~390px tall, so the fan's arch
+  // would reach past the midline and occlude the table. Sit it flush with the
+  // safe-area floor there; everywhere else keep the usual breathing room.
+  const bottomOffset = isMobile && isLandscape ? 'bottom-0' : 'bottom-2 sm:bottom-5';
+
   return (
-    <div className="fixed left-1/2 -translate-x-1/2 pointer-events-none flex flex-col justify-end z-[100] w-full px-2 safe-bottom bottom-2 sm:bottom-5">
+    <div className={`fixed left-1/2 -translate-x-1/2 pointer-events-none flex flex-col justify-end z-[100] w-full px-2 safe-bottom ${bottomOffset}`}>
       <AnimatePresence>
         <div className="flex justify-center items-end" style={{ width: fanWidth, margin: '0 auto' }}>
           {hand.map((card, idx) => renderCard(card, idx))}

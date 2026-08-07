@@ -7,6 +7,11 @@ export default function manifest(): MetadataRoute.Manifest {
     description: 'Immersive 3D Multiplayer UNO Experience',
     start_url: '/',
     display: 'standalone',
+    // The 3D table, seat arc and card fan are all inherently wide, so landscape
+    // is the intended way to play. This hint is only honoured by installed PWAs
+    // in standalone mode — browser tabs (and all of iOS) ignore it, which is why
+    // RotateDevicePrompt still nudges portrait phones at the table.
+    orientation: 'landscape',
     background_color: '#030712',
     theme_color: '#030712',
     icons: [

@@ -22,7 +22,7 @@ export const ChatPanel: React.FC = () => {
   const room = useGameStore((state) => state.room);
   const isSpectator = useGameStore((state) => state.isSpectator);
   const { sendChat } = useSocket();
-  const { isMobile, isTablet } = useViewport();
+  const { isMobile, isTablet, isLandscape } = useViewport();
   const isCompact = isMobile || isTablet;
 
   const [draft, setDraft] = useState("");
@@ -170,8 +170,8 @@ export const ChatPanel: React.FC = () => {
             style={
               isCompact
                 ? {
-                    height: "75dvh",
-                    maxHeight: "75dvh",
+                    height: isMobile && isLandscape ? "60dvh" : "75dvh",
+                    maxHeight: isMobile && isLandscape ? "60dvh" : "75dvh",
                     marginBottom: keyboardOffset,
                   }
                 : undefined

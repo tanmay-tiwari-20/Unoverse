@@ -48,6 +48,14 @@ interface SettingsState {
   reducedMotion: boolean;
   showLastPlayedBy: boolean;
 
+  /**
+   * The player has chosen to play on a portrait phone anyway, dismissing the
+   * rotate nudge. Persisted so the choice is honoured for good rather than
+   * re-asked every round — some players have rotation locked at the OS level or
+   * physically cannot rotate their device, so this must never become a gate.
+   */
+  allowPortrait: boolean;
+
   // Setters
   setIsSettingsOpen: (isOpen: boolean) => void;
   setIsReportBugOpen: (isOpen: boolean) => void;
@@ -75,6 +83,7 @@ interface SettingsState {
   setCameraSensitivity: (sens: number) => void;
   setReducedMotion: (enabled: boolean) => void;
   setShowLastPlayedBy: (enabled: boolean) => void;
+  setAllowPortrait: (allowed: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -112,6 +121,9 @@ export const useSettingsStore = create<SettingsState>()(
       reducedMotion: false,
       // Subtle "last played by" indicator near the discard pile — on by default.
       showLastPlayedBy: true,
+      // Start by nudging portrait phones toward landscape; flipped permanently
+      // the moment the player says they'd rather stay in portrait.
+      allowPortrait: false,
 
       // UI Actions (don't technically need persistence but they are part of the store)
       setIsSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
@@ -146,6 +158,7 @@ export const useSettingsStore = create<SettingsState>()(
       setCameraSensitivity: (sens) => set({ cameraSensitivity: sens }),
       setReducedMotion: (enabled) => set({ reducedMotion: enabled }),
       setShowLastPlayedBy: (enabled) => set({ showLastPlayedBy: enabled }),
+      setAllowPortrait: (allowed) => set({ allowPortrait: allowed }),
     }),
     {
       name: 'uno-real-settings', // unique name
@@ -169,6 +182,7 @@ export const useSettingsStore = create<SettingsState>()(
         cameraSensitivity: state.cameraSensitivity,
         reducedMotion: state.reducedMotion,
         showLastPlayedBy: state.showLastPlayedBy,
+        allowPortrait: state.allowPortrait,
       }),
       // On first load (no persisted data), respect the OS reduced-motion pref
       // and auto-disable heavy animation settings.
