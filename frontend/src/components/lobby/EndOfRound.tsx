@@ -115,13 +115,15 @@ export const EndOfRound: React.FC = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="game-over-title"
-        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto"
+        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto short:p-4 short:gap-2 short:max-w-md short:max-h-[94dvh]"
       >
-        <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce">
+        {/* Trophy badge is pure decoration — the first thing to go when a
+            landscape phone leaves no room for the scoreboard below it. */}
+        <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce short:hidden">
           <Trophy size={30} className="fill-white/30" />
         </div>
         <div>
-          <h2 id="game-over-title" className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse">
+          <h2 id="game-over-title" className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse short:text-xl">
             {matchWon ? 'Match Over!' : `Round ${match?.round ?? 1}`}
           </h2>
           <p className="font-rounded font-bold text-white text-md mt-1 inline-flex items-center gap-1.5">
@@ -136,7 +138,7 @@ export const EndOfRound: React.FC = () => {
         </div>
 
         {/* Running Match Scoreboard */}
-        <div className="w-full border-t-2 border-b-2 border-white/20 py-3 my-0.5 space-y-2 max-h-52 overflow-y-auto">
+        <div className="w-full border-t-2 border-b-2 border-white/20 py-3 my-0.5 space-y-2 max-h-52 overflow-y-auto short:py-2 short:space-y-1 short:max-h-28">
           <span className="font-arcade text-[10px] uppercase tracking-widest text-yellow-200 block text-left mb-1">
             Match Scoreboard · to {target}
           </span>
@@ -164,7 +166,7 @@ export const EndOfRound: React.FC = () => {
                 setIsProcessing(true);
                 startGame();
               }}
-              className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3 px-6 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3 px-6 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 short:py-2 short:text-xs"
             >
               <RefreshCw size={16} /> {matchWon ? 'New Match' : 'Next Round'}
             </button>
@@ -176,7 +178,7 @@ export const EndOfRound: React.FC = () => {
 
           <button
             onClick={exitTable}
-            className="btn-arcade w-full bg-gradient-to-b from-rose-500 to-red-700 text-white py-3 px-4 text-xs uppercase"
+            className="btn-arcade w-full bg-gradient-to-b from-rose-500 to-red-700 text-white py-3 px-4 text-xs uppercase short:py-2 short:text-[11px]"
           >
             Exit to Menu
           </button>

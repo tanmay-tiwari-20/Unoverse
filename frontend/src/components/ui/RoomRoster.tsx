@@ -88,7 +88,7 @@ export const RoomRoster: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.97 }}
             transition={{ duration: 0.18 }}
-            className="absolute left-0 mt-2 w-60 sm:w-64 max-h-[60dvh] overflow-y-auto panel-arcade bg-gradient-to-b from-neutral-900 to-black p-3 z-50"
+            className="absolute left-0 mt-2 w-60 sm:w-64 max-h-[60dvh] overflow-y-auto custom-scrollbar panel-arcade bg-gradient-to-b from-neutral-900 to-black p-3 z-50 short:max-h-[52dvh] short:w-72 short:p-2"
           >
             {/* Capacity summary + full-room notice */}
             <div className="mb-2">

@@ -275,18 +275,21 @@ export default function LandingPage() {
         </motion.div>
       )}
 
-      {/* Foreground UI */}
-      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
+      {/* Foreground UI. On a landscape phone the vertical stack would overflow a
+          ~390px-tall viewport, so `short:` re-flows it into two columns —
+          wordmark on the left, controls on the right — using the width the
+          orientation actually gives us. */}
+      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none short:flex-row short:gap-6 short:px-6">
         {/* Centerpiece Hero */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1.2, ease: "easeOut" }}
-          className="flex flex-col items-center gap-6 sm:gap-8 pointer-events-auto w-full max-w-sm px-4"
+          className="flex flex-col items-center gap-6 sm:gap-8 pointer-events-auto w-full max-w-sm px-4 short:flex-row short:items-center short:gap-6 short:max-w-3xl short:px-0"
         >
           {/* Titles */}
-          <div className="text-center flex flex-col items-center gap-2 sm:gap-3 arcade-bob">
-            <h1 className="font-arcade text-6xl sm:text-7xl md:text-8xl leading-none arcade-stroke-uno text-yellow-400">
+          <div className="text-center flex flex-col items-center gap-2 sm:gap-3 arcade-bob short:flex-1 short:shrink-0">
+            <h1 className="font-arcade text-6xl sm:text-7xl md:text-8xl leading-none arcade-stroke-uno text-yellow-400 short:text-5xl">
               UNOVERSE!
             </h1>
             <p className="font-arcade text-xs sm:text-sm tracking-wide uppercase text-white arcade-stroke-uno-sm">
@@ -295,7 +298,7 @@ export default function LandingPage() {
           </div>
 
           {/* Controls Panel */}
-          <div className="w-full flex flex-col gap-4">
+          <div className="w-full flex flex-col gap-4 short:flex-1 short:gap-2">
             <AnimatePresence mode="wait">
               {error && (
                 <motion.div
@@ -313,7 +316,7 @@ export default function LandingPage() {
             </AnimatePresence>
 
             {/* Inputs Container */}
-            <div className="panel-arcade bg-gradient-to-b from-neutral-900/95 to-black/95 backdrop-blur-md p-4 flex flex-col gap-3 relative overflow-hidden" suppressHydrationWarning>
+            <div className="panel-arcade bg-gradient-to-b from-neutral-900/95 to-black/95 backdrop-blur-md p-4 flex flex-col gap-3 relative overflow-hidden short:gap-2 short:p-3" suppressHydrationWarning>
               <div className="absolute inset-0 arcade-dots pointer-events-none" />
 
               <form autoComplete="off" data-form-type="other" data-lpignore="true" onSubmit={(e) => e.preventDefault()} className="contents">
@@ -328,7 +331,7 @@ export default function LandingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-wide font-rounded font-bold uppercase focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all text-base"
+                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-wide font-rounded font-bold uppercase focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all text-base short:py-2.5 short:text-sm"
                 />
 
                 <input
@@ -342,7 +345,7 @@ export default function LandingPage() {
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-[0.3em] font-arcade uppercase text-xl focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all"
+                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-[0.3em] font-arcade uppercase text-xl focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all short:py-2.5 short:text-base"
                 />
 
                 {/* Quick Play — instant public matchmaking, no code needed */}
@@ -350,18 +353,18 @@ export default function LandingPage() {
                   type="button"
                   onClick={handleQuickPlay}
                   disabled={loading}
-                  className="btn-arcade w-full bg-gradient-to-b from-amber-400 to-orange-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2"
+                  className="btn-arcade w-full bg-gradient-to-b from-amber-400 to-orange-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2 short:py-2.5 short:text-xs"
                 >
                   <Zap size={16} className="fill-white" /> Quick Play
                 </button>
 
                 {/* Actions */}
-                <div className="flex gap-3">
+                <div className="flex gap-3 short:gap-2">
                   <button
                     type="button"
                     onClick={handleJoinRoom}
                     disabled={loading}
-                    className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
+                    className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer short:py-2.5 short:text-xs"
                   >
                     Join
                   </button>
@@ -370,7 +373,7 @@ export default function LandingPage() {
                     type="button"
                     onClick={openCreateModal}
                     disabled={loading}
-                    className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer"
+                    className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer short:py-2.5 short:text-xs"
                   >
                     Create
                   </button>
@@ -381,8 +384,9 @@ export default function LandingPage() {
         </motion.div>
       </div>
 
-      {/* Minimal Footer */}
-      <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none z-10">
+      {/* Minimal Footer. Hidden on landscape phones — the two-column hero needs
+          every pixel of a ~390px-tall viewport more than the tagline does. */}
+      <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none z-10 short:hidden">
         <span className="font-arcade text-xs text-white/70 uppercase tracking-[0.2em] arcade-stroke-sm">
           Built for multiplayer fun
         </span>
@@ -407,7 +411,7 @@ export default function LandingPage() {
               role="alertdialog"
               aria-labelledby="spectator-prompt-title"
               aria-describedby="spectator-prompt-desc"
-              className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 flex flex-col items-center gap-4 w-full max-w-sm text-center relative overflow-hidden"
+              className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 flex flex-col items-center gap-4 w-full max-w-sm text-center relative overflow-hidden short:p-4 short:gap-2.5 short:max-h-[92dvh] short:overflow-y-auto"
             >
               <div className="absolute inset-0 arcade-dots pointer-events-none" />
 

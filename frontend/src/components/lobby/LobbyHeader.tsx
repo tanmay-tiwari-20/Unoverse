@@ -22,8 +22,12 @@ export const LobbyHeader: React.FC<LobbyHeaderProps> = ({ onOpenInvite, onToggle
   const room = useGameStore((s) => s.room);
   const isSpectator = useGameStore((s) => s.isSpectator);
 
+  // z-40 beats GameHUD's z-20 context. Both are positioned with a z-index, so
+  // each forms its own stacking context and the roster dropdown's inner z-50
+  // cannot escape this header — with equal z-index the later element in the DOM
+  // (GameHUD, and the lobby action bar inside it) would paint over the dropdown.
   return (
-    <header className="absolute top-0 left-0 right-0 hud-pad flex justify-between items-start z-20 pointer-events-none gap-2">
+    <header className="absolute top-0 left-0 right-0 hud-pad flex justify-between items-start z-40 pointer-events-none gap-2">
       {/* Top Left: Compact Lobby Panel + Roster */}
       {room && (
         <div className="pointer-events-auto flex flex-col items-start gap-1.5">

@@ -43,13 +43,15 @@ export const ColorPickerDialog: React.FC = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="color-dialog-title"
-        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto"
+        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 sm:gap-6 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto short:p-3.5 short:gap-3 short:max-w-md short:max-h-[94dvh]"
       >
         <div>
-          <h3 id="color-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">Choose Color</h3>
-          <p className="font-rounded font-semibold text-white/80 text-xs mt-1">Pick the active color for the Wild card</p>
+          <h3 id="color-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm short:text-lg">Choose Color</h3>
+          <p className="font-rounded font-semibold text-white/80 text-xs mt-1 short:hidden">Pick the active color for the Wild card</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 w-full">
+        {/* Four large targets. In landscape the row is wide but short, so the
+            2×2 grid opens out to 4-across and the buttons lose their tall pad. */}
+        <div className="grid grid-cols-2 gap-4 w-full short:grid-cols-4 short:gap-2">
           {COLOR_CHOICES.map(({ color, label, classes }) => (
             <button
               key={color}
@@ -58,7 +60,7 @@ export const ColorPickerDialog: React.FC = () => {
                 setIsProcessing(true);
                 chooseColor(color);
               }}
-              className={`btn-arcade bg-gradient-to-b ${classes} py-5 text-base uppercase disabled:cursor-not-allowed`}
+              className={`btn-arcade bg-gradient-to-b ${classes} py-5 text-base uppercase disabled:cursor-not-allowed short:py-3 short:text-sm`}
             >
               {label}
             </button>

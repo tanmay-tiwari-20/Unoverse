@@ -28,9 +28,9 @@ export const GameStoppedNotice: React.FC = () => {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -20, scale: 0.95 }}
           transition={{ type: 'spring', damping: 22, stiffness: 280 }}
-          className="absolute top-28 left-1/2 -translate-x-1/2 z-30 pointer-events-auto w-[90%] max-w-md"
+          className="absolute top-28 left-1/2 -translate-x-1/2 z-30 pointer-events-auto w-[90%] max-w-md short:top-24 short:max-w-lg"
         >
-          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black px-6 py-5 flex flex-col items-center gap-3 text-center relative">
+          <div className="panel-arcade bg-gradient-to-b from-neutral-900 to-black px-6 py-5 flex flex-col items-center gap-3 text-center relative short:px-4 short:py-3 short:gap-1.5">
             <button
               onClick={() => setGameStoppedNotice(false)}
               className="absolute top-2.5 right-2.5 chip-arcade w-7 h-7 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700"

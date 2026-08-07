@@ -69,7 +69,7 @@ export const ArenaPickerModal: React.FC<{ isOpen: boolean; onClose: () => void }
         className="w-full max-w-3xl bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[92dvh]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b-2 border-white/15 bg-cyan-600/15">
+        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b-2 border-white/15 bg-cyan-600/15 short:px-4 short:py-2">
           <h2
             id="arena-picker-title"
             className="font-arcade text-lg sm:text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2"
@@ -107,7 +107,7 @@ export const ArenaPickerModal: React.FC<{ isOpen: boolean; onClose: () => void }
         </div>
 
         {/* Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 custom-scrollbar short:p-4">
           <ArenaGrid value={current} onChange={commit} disabled={!canEdit} includeRandom={canEdit} />
         </div>
       </motion.div>

@@ -151,7 +151,7 @@ export const SettingsModal: React.FC = () => {
         className="w-full max-w-4xl bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[90dvh]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20">
+        <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20 short:px-4 short:py-2">
           <h2 id="settings-title" className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
             <Settings size={20} className="text-white" /> Settings
           </h2>
@@ -165,8 +165,8 @@ export const SettingsModal: React.FC = () => {
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar short:p-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 short:gap-4">
             
             {/* Audio Settings */}
             <div className="space-y-6">

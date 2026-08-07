@@ -117,7 +117,7 @@ export const FriendsPanel: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[1900] bg-black/55 backdrop-blur-sm pointer-events-auto flex items-end sm:items-stretch sm:justify-end"
+          className="fixed inset-0 z-[1900] bg-black/55 backdrop-blur-sm pointer-events-auto flex items-end sm:items-stretch sm:justify-end short:items-center short:justify-end short:p-3"
           onClick={close}
         >
           <motion.div
@@ -131,10 +131,10 @@ export const FriendsPanel: React.FC = () => {
             exit={{ opacity: 0, x: 24, y: 24 }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full sm:w-[26rem] sm:max-w-[92vw] bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[88dvh] sm:max-h-none sm:h-full sm:rounded-r-none safe-x"
+            className="w-full sm:w-[26rem] sm:max-w-[92vw] bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[88dvh] sm:max-h-none sm:h-full sm:rounded-r-none short:h-auto short:max-h-[76dvh] short:my-auto short:rounded-2xl safe-x"
           >
             {/* ── Header ──────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 border-b-2 border-white/15 bg-red-600/20 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 border-b-2 border-white/15 bg-red-600/20 shrink-0 short:px-4 short:py-2">
               <h2
                 id="friends-panel-title"
                 className="font-arcade text-lg uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2"

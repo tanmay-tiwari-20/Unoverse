@@ -85,21 +85,23 @@ export function CreateProfileModal({ isOpen, onCreated, initialName = "" }: Crea
             <div className="absolute inset-0 arcade-dots pointer-events-none" />
 
             {/* Header */}
-            <div className="relative flex flex-col items-center gap-3 px-6 pt-6 pb-4 text-center">
-              <PresetAvatar avatarKey={avatar} size={72} className="arcade-bob" />
+            <div className="relative flex flex-col items-center gap-3 px-6 pt-6 pb-4 text-center short:gap-1.5 short:pt-3 short:pb-2">
+              <PresetAvatar avatarKey={avatar} size={72} className="arcade-bob short:hidden" />
               <h2
                 id="create-profile-title"
-                className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2"
+                className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2 short:text-lg"
               >
                 <UserPlus size={22} className="text-white" /> Create Profile
               </h2>
-              <p className="font-rounded font-semibold text-white/75 text-xs leading-relaxed">
+              {/* The pitch is onboarding copy, not instruction — on a landscape
+                  phone the name field and confirm button matter more. */}
+              <p className="font-rounded font-semibold text-white/75 text-xs leading-relaxed short:hidden">
                 Set up your player once — your stats, match history, and Player ID
                 stick with you across every game.
               </p>
             </div>
 
-            <div className="relative px-6 pb-6 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+            <div className="relative px-6 pb-6 overflow-y-auto custom-scrollbar flex flex-col gap-4 short:pb-3 short:gap-2.5">
               <AnimatePresence mode="wait">
                 {error && (
                   <motion.div

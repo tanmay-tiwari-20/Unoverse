@@ -36,17 +36,19 @@ export const SwapTargetDialog: React.FC = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="swap-dialog-title"
-        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto"
+        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-6 flex flex-col items-center gap-5 w-full max-w-sm text-center pointer-events-auto max-h-[90dvh] overflow-y-auto short:p-3.5 short:gap-2.5 short:max-w-lg short:max-h-[94dvh]"
       >
         <div>
-          <h3 id="swap-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm inline-flex items-center gap-2">
+          <h3 id="swap-dialog-title" className="font-arcade text-2xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm inline-flex items-center gap-2 short:text-lg">
             <ArrowLeftRight size={22} /> Seven Swap
           </h3>
-          <p className="font-rounded font-semibold text-white/80 text-xs mt-1">
+          <p className="font-rounded font-semibold text-white/80 text-xs mt-1 short:hidden">
             Choose a player to swap your entire hand with
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-2.5 w-full">
+        {/* Target list goes 2-across in landscape so five opponents don't push
+            the confirm affordance past a ~390px-tall viewport. */}
+        <div className="grid grid-cols-1 gap-2.5 w-full short:grid-cols-2 short:gap-2">
           {room?.players
             .filter((p) => p.id !== player.id)
             .map((p) => {
@@ -57,7 +59,7 @@ export const SwapTargetDialog: React.FC = () => {
                   disabled={isProcessing}
                   onClick={() => chooseSwapTarget(p.id)}
                   aria-label={`Swap hands with ${p.name}, ${cardCount} ${cardCount === 1 ? 'card' : 'cards'}`}
-                  className="btn-arcade bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-between gap-2"
+                  className="btn-arcade bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-between gap-2 short:py-2 short:text-xs"
                 >
                   <span className="truncate">{p.name}</span>
                   <span className="font-rounded text-[10px] bg-black/30 px-2 py-0.5 rounded-full shrink-0">

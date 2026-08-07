@@ -18,11 +18,14 @@ import { LobbyView } from './LobbyView';
 export const GameHUD: React.FC = () => {
   const gameStatus = useGameStore((s) => s.gameStatus);
 
+  // `sm:top-14` fires on a landscape phone, since it is wide (~844px) despite
+  // being only ~390px tall. `short:top-12` sits just below the header — whose
+  // chips also shrink to 36px there — rather than overlapping it.
   return (
-    <div className="absolute top-10 sm:top-14 left-0 right-0 flex flex-col items-center z-20 pointer-events-none px-3 text-center">
+    <div className="absolute top-10 sm:top-14 short:top-12 left-0 right-0 flex flex-col items-center z-20 pointer-events-none px-3 text-center">
       <div className="pointer-events-auto">
         {/* Display state alert banners */}
-        <div className="flex flex-col items-center gap-1.5">
+        <div className="flex flex-col items-center gap-1.5 short:gap-1">
           <ErrorBoundary section="Table HUD">
             {gameStatus === 'lobby' ? <LobbyView /> : <GameView />}
             <GameActionPrompts />

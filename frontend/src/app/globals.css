@@ -1,10 +1,32 @@
 @import "tailwindcss";
 
+/* Height-aware variant for landscape phones. Fires below 500px of viewport
+   height (covers landscape phones at ~390-430px but never tablets/desktop).
+   Use it to override width-based `sm:`/`md:` classes, which fire on a landscape
+   phone because it is wide, and so apply desktop sizing to a cramped vertical
+   space. Example: `sm:text-7xl short:text-5xl`
+
+   Deliberately written with `max-height` rather than the `height < 500px` range
+   syntax: the range form round-trips badly through the PostCSS/Turbopack CSS
+   parser here and emits a bare `height < 500px {` block that fails to parse. */
+@custom-variant short (@media (max-height: 499.98px));
+
 :root {
   --background: #030712; /* Deep slate-950 */
   --foreground: #f9fafb; /* gray-50 */
   --card-bg: rgba(17, 24, 39, 0.7); /* glassmorphic dark gray */
   --card-border: rgba(255, 255, 255, 0.08);
+  /* Clearance under the bottom-pinned lobby action bar. Added on top of the
+     safe-area inset rather than replacing it, so a home-bar phone keeps both. */
+  --action-bar-gap: 1.25rem;
+}
+
+/* Landscape phones trade some of that clearance back for table height, but
+   keep enough that the buttons never sit flush against the screen edge. */
+@media (max-height: 499.98px) {
+  :root {
+    --action-bar-gap: 0.625rem;
+  }
 }
 
 @theme inline {

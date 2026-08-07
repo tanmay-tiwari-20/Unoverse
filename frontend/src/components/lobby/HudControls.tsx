@@ -46,7 +46,7 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
         onClick={() => {
           onToggleMic();
         }}
-        className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
+        className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 short:w-9 short:h-9 flex items-center justify-center text-white cursor-pointer ${
           isMicEnabled
             ? 'bg-gradient-to-b from-lime-400 to-green-600'
             : 'bg-gradient-to-b from-rose-500 to-red-700'
@@ -63,7 +63,7 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
           setSpeakerEnabled(!isSpeakerEnabled);
           addToast(!isSpeakerEnabled ? 'Voice Chat Enabled' : 'Voice Chat Muted', 'info');
         }}
-        className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
+        className={`chip-arcade w-9 h-9 sm:w-11 sm:h-11 short:w-9 short:h-9 flex items-center justify-center text-white cursor-pointer ${
           isSpeakerEnabled
             ? 'bg-gradient-to-b from-blue-400 to-blue-600'
             : 'bg-gradient-to-b from-rose-500 to-red-700'
@@ -80,7 +80,7 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
       {chatEnabled && (
         <button
           onClick={() => setChatOpen(!isChatOpen)}
-          className={`chip-arcade relative w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer ${
+          className={`chip-arcade relative w-9 h-9 sm:w-11 sm:h-11 short:w-9 short:h-9 flex items-center justify-center text-white cursor-pointer ${
             isChatOpen
               ? 'bg-gradient-to-b from-blue-400 to-blue-600'
               : 'bg-gradient-to-b from-neutral-700 to-neutral-900'
@@ -112,13 +112,13 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
       {/* Friends drawer — sized to match the neighbouring chips so the row
           stays one visual unit. Sits before Settings so the destructive Exit
           chip keeps its position at the end of the row. */}
-      <FriendsButton compact className="w-9 h-9 sm:w-11 sm:h-11" />
+      <FriendsButton compact className="w-9 h-9 sm:w-11 sm:h-11 short:w-9 short:h-9" />
 
       <button
         onClick={() => {
           setIsSettingsOpen(true);
         }}
-        className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-700 to-neutral-900"
+        className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 short:w-9 short:h-9 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-neutral-700 to-neutral-900"
         title="Settings"
         aria-label="Open settings"
         aria-haspopup="dialog"
@@ -128,7 +128,7 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
 
       <button
         onClick={exitTable}
-        className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-rose-500 to-red-700"
+        className="chip-arcade w-9 h-9 sm:w-11 sm:h-11 short:w-9 short:h-9 flex items-center justify-center text-white cursor-pointer bg-gradient-to-b from-rose-500 to-red-700"
         title="Exit Table"
         aria-label="Exit room"
       >

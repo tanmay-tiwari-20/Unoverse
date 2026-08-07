@@ -79,7 +79,7 @@ export const GameActionPrompts: React.FC = () => {
             setIsProcessing(true);
             callUno();
           }}
-          className="btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600"
+          className="btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600 short:mt-1 short:px-5 short:py-2 short:text-sm"
         >
           <Siren size={18} /> CALL UNO!
         </motion.button>

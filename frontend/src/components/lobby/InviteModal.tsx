@@ -72,7 +72,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ open, onClose, roomId 
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-            className="w-full max-w-md panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 relative text-white"
+            className="w-full max-w-md panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 relative text-white max-h-[76dvh] overflow-y-auto custom-scrollbar short:max-w-lg short:max-h-[80dvh] short:p-4"
           >
             {/* Close Button */}
             <button
@@ -84,7 +84,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ open, onClose, roomId 
               <X size={14} />
             </button>
 
-            <h3 className="font-arcade text-lg sm:text-xl text-yellow-400 tracking-wider mb-6 text-center uppercase arcade-stroke-uno-sm">
+            <h3 className="font-arcade text-lg sm:text-xl text-yellow-400 tracking-wider mb-6 text-center uppercase arcade-stroke-uno-sm short:text-base short:mb-3">
               Invite Friends
             </h3>
 
