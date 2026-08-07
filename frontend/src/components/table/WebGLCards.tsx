@@ -198,25 +198,6 @@ export const WebGLCards: React.FC = () => {
           isTouch={isTouch}
           canDraw={canDraw}
         />
-
-        {/* Draw-pile count — a compact frosted-glass chip (number + tiny label),
-            consistent with the opponent SeatBadge, instead of the old shouty
-            black "N CARDS" pill. */}
-        {drawPileCount > 0 && (
-          <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>
-            <div className="pointer-events-none select-none whitespace-nowrap flex items-center gap-1.5 rounded-full bg-slate-950/55 backdrop-blur-md border border-white/10 shadow-lg px-2 py-1">
-              <span
-                key={drawPileCount}
-                className="hud-count-bump inline-flex items-center justify-center rounded-full bg-white/15 text-white font-bold tabular-nums leading-none min-w-[20px] h-5 text-[11px] px-1"
-              >
-                {drawPileCount}
-              </span>
-              <span className="text-white/70 font-semibold text-[10px] uppercase tracking-wide">
-                Deck
-              </span>
-            </div>
-          </Html>
-        )}
       </group>
 
       {/* 3. OPPONENT HANDS */}
