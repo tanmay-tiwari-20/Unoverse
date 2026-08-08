@@ -20,18 +20,25 @@ export const GameView: React.FC = () => {
   const swapChooserId = useGameStore((s) => s.swapChooserId);
   const isMyTurn = useIsMyTurn();
 
-  // Shared frosted-glass shell so every state reads as one calm banner; the
-  // accent (ring + text tint + dot) is the only thing that changes between
-  // states, keeping the hierarchy quiet until it's your turn.
+  // Shared shell, and the same glass the header clusters and lobby strip use —
+  // so the in-round banner reads as part of one HUD rather than a fourth kind
+  // of floating pill. The accent (border tint + text tint + dot/icon) is the
+  // only thing that changes between states, keeping the hierarchy quiet until
+  // it is your turn.
+  //
+  // `ring-*` is deliberately not used for the emphasis: Tailwind implements it
+  // as a box-shadow, and `.ui-hud-glass` sets box-shadow itself — in this
+  // unlayered stylesheet the class would win and the ring would silently do
+  // nothing. The brighter border does the same job with no such trap.
   const shell =
-    'font-rounded font-bold text-[11px] sm:text-[10px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full ' +
-    'bg-slate-950/55 backdrop-blur-md border shadow-lg select-none whitespace-nowrap';
+    'ui-hud-glass ui-hud-pill font-rounded font-bold text-[11px] sm:text-[10px] inline-flex ' +
+    'items-center gap-1.5 px-3 py-1.5 select-none whitespace-nowrap';
 
   if (gameStatus === 'playing') {
     return isMyTurn ? (
-      // Your turn: the one moment worth emphasising — brighter glass, emerald
-      // accent ring and a soft pulse. Still glass, not a loud solid gradient.
-      <span className={`${shell} border-emerald-300/50 ring-1 ring-emerald-300/30 text-emerald-50 hud-pop-in`}>
+      // Your turn: the one moment worth emphasising — brighter border, emerald
+      // accent and a single pop-in. Still glass, not a loud solid gradient.
+      <span className={`${shell} border-emerald-300/60 text-emerald-50 hud-pop-in`}>
         <Star size={13} className="fill-emerald-300 text-emerald-300" />
         <span className="font-arcade uppercase tracking-wide text-emerald-50">Your Turn</span>
         <TurnTimer className="ml-0.5 text-[10px]" />

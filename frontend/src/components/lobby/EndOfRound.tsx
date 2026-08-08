@@ -1,11 +1,46 @@
 'use client';
 
-import React, { useRef } from 'react';
-import { Award, Hourglass, Medal, PartyPopper, RefreshCw, Trophy } from 'lucide-react';
+/**
+ * ============================================================================
+ *  EndOfRound — who won, where the match stands, and what happens next.
+ * ============================================================================
+ *
+ * THE SHAPE OF THE REDESIGN. The old version stacked a bouncing trophy, a
+ * pulsing headline, a scoreboard and two buttons into one narrow column, which
+ * made the winner compete with the standings for attention and left a landscape
+ * phone with a 28px-tall scroller for the scores. This version splits the screen
+ * into two regions that are laid out differently per orientation:
+ *
+ *   portrait      hero on top (winner, one line of context) → standings below
+ *   landscape     hero on the LEFT, standings scrolling on the RIGHT
+ *
+ * The winner is recognisable from the hero alone — avatar, name, and either
+ * "YOU WIN" or "<name> wins" at the largest type on screen — so the standings
+ * can stay quiet and compact instead of restating it.
+ *
+ * WHAT DID NOT CHANGE, deliberately:
+ *   • "Did I win?" is still `match.matchWinnerUid === player.uid` — a SEAT
+ *     comparison. Two players may share a display name and a name comparison
+ *     would let an opponent's win light up my client.
+ *   • The scoreboard is still keyed by seat uid, still sorted by the server's
+ *     points, and still falls back to the banked name for players who left.
+ *   • Only the host can advance, via `startGame()`; everyone else sees the wait
+ *     state. Starting a round is the server's decision and this dialog only
+ *     surfaces the affordance to the client allowed to ask.
+ *   • `exitTable` still handles leaving, and `ConfettiCanvas` still celebrates.
+ *
+ * Cards-left is new and it is read, not derived: `playerCards[seat].length` is
+ * the server's own `handCounts` for the final state of the round.
+ */
+
+import React, { useMemo } from 'react';
+import { Award, DoorOpen, Hourglass, Medal, RefreshCw, Trophy } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
-import { useDialogA11y } from '../../hooks/useDialogA11y';
 import { useExitTable } from '../../hooks/useExitTable';
+import { PresetAvatar } from '../profile/PresetAvatar';
+import { PlayerIdTag } from '../social/PlayerIdTag';
+import { Badge, Button, Modal, ModalBody, ModalFooter, SectionLabel } from '../ui/kit';
 import { ConfettiCanvas } from './ConfettiCanvas';
 
 interface ScoreEntry {
@@ -15,7 +50,17 @@ interface ScoreEntry {
   /** Permanent Player ID, when this seat belongs to a profile. Display only. */
   playerId?: string | null;
   score: number;
+  /** Preset avatar key for the live seat, when it is still occupied. */
+  avatar?: string | null;
+  /** Cards still in hand when the round ended. Null when the seat has left. */
+  cardsLeft: number | null;
+  isBot: boolean;
 }
+
+/** Rank furniture. Gold/silver/bronze, then a plain number — and always a
+ *  numeral beside the icon, so rank never depends on recognising a colour. */
+const RANK_ICON = [Trophy, Medal, Award] as const;
+const RANK_TINT = ['text-yellow-300', 'text-slate-200', 'text-orange-300'] as const;
 
 interface ScoreRowProps {
   entry: ScoreEntry;
@@ -28,54 +73,68 @@ interface ScoreRowProps {
 }
 
 /** One line of the cumulative match scoreboard, with its progress-to-target bar. */
-const ScoreRow: React.FC<ScoreRowProps> = ({ entry, rank, target, isMe, justWonRound, roundPoints }) => {
-  const isLeader = rank === 1;
-  const RankIcon = rank === 1 ? Trophy : rank === 2 ? Medal : Award;
-  const rankIconColor = rank === 1 ? 'text-yellow-300' : rank === 2 ? 'text-slate-300' : 'text-orange-400';
-  const pct = Math.min(100, Math.round((entry.score / target) * 100));
+const ScoreRowBase: React.FC<ScoreRowProps> = ({
+  entry, rank, target, isMe, justWonRound, roundPoints,
+}) => {
+  const RankIcon = RANK_ICON[rank - 1] ?? Award;
+  const tint = RANK_TINT[rank - 1] ?? 'text-white/45';
+  const pct = target > 0 ? Math.min(100, Math.round((entry.score / target) * 100)) : 0;
 
   return (
     <div
-      className={`px-3 py-1.5 rounded-xl border-2 ${
-        isLeader
-          ? 'bg-amber-400/20 border-yellow-300/60 text-yellow-100'
-          : isMe
-            ? 'bg-blue-500/20 border-blue-400/50 text-blue-100'
-            : 'bg-white/5 border-white/15 text-white/80'
+      className={`ui-card px-2 py-1.5 sm:px-2.5 ${
+        rank === 1 ? 'ui-card-lead' : isMe ? 'ui-card-self' : ''
       }`}
     >
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-2 text-[11px] font-rounded font-bold">
-          <span className="inline-flex items-center gap-1">
-            <RankIcon size={14} className={rankIconColor} /> #{rank}
+      <div className="flex items-center gap-2">
+        <span className="font-arcade flex w-7 shrink-0 items-center gap-0.5 text-[11px] tabular-nums text-white/70">
+          <RankIcon size={12} className={`shrink-0 ${tint}`} aria-hidden="true" />
+          {rank}
+        </span>
+
+        <PresetAvatar avatarKey={entry.avatar} size={24} className="!border-2 shrink-0" />
+
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="font-arcade truncate text-[12px] text-white">{entry.name}</span>
+            {isMe && <span className="font-rounded shrink-0 text-[9px] font-bold text-sky-300">YOU</span>}
+            {entry.isBot && (
+              <span className="font-rounded shrink-0 text-[9px] font-bold uppercase text-violet-300">Bot</span>
+            )}
+            <PlayerIdTag id={entry.playerId} size="text-[9px]" />
           </span>
-          <span className="font-arcade truncate max-w-[90px]">{entry.name}</span>
-          {/* Two players may share a display name — the Player ID is what tells
-              their rows apart. Kept muted so the name still reads first. */}
-          {entry.playerId && (
-            <span className="text-[9px] font-rounded text-white/40 tabular-nums">#{entry.playerId}</span>
-          )}
-          {justWonRound && (
-            <span className="text-[9px] font-rounded font-bold text-lime-300 uppercase">+{roundPoints}</span>
-          )}
-        </div>
-        <span className="text-[12px] font-arcade text-white tabular-nums">{entry.score}</span>
+        </span>
+
+        {/* Cards still in hand — the other half of "why did they score that". */}
+        {entry.cardsLeft != null && entry.cardsLeft > 0 && (
+          <span
+            className="font-rounded shrink-0 text-[9px] font-bold tabular-nums text-white/40"
+            title={`${entry.cardsLeft} cards left in hand`}
+          >
+            {entry.cardsLeft}c
+          </span>
+        )}
+        {justWonRound && (
+          <Badge tone="good" className="shrink-0">+{roundPoints}</Badge>
+        )}
+        <span className="font-arcade shrink-0 text-[13px] tabular-nums text-white">{entry.score}</span>
       </div>
-      <div className="mt-1 h-1.5 w-full bg-black/40 rounded-full overflow-hidden">
-        <div className="h-full bg-gradient-to-r from-lime-400 to-green-500 rounded-full" style={{ width: `${pct}%` }} />
+
+      {/* Progress to the target score. Paired with the number above it, so the
+          bar is reinforcement rather than the only way to read the standing. */}
+      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-black/45">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-lime-400 to-green-500"
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   );
 };
 
-/**
- * End-of-round / end-of-match summary: who won, the running match scoreboard,
- * and the loop back into another round.
- *
- * Only the host can advance — everyone else waits — because starting a round is
- * a server-side decision; this dialog just surfaces the affordance to the one
- * client allowed to ask for it.
- */
+/** Memoized: a row only re-renders when its own entry or flags change. */
+const ScoreRow = React.memo(ScoreRowBase);
+
 export const EndOfRound: React.FC = () => {
   const room = useGameStore((s) => s.room);
   const player = useGameStore((s) => s.player);
@@ -83,86 +142,133 @@ export const EndOfRound: React.FC = () => {
   const winnerName = useGameStore((s) => s.winnerName);
   const winnerId = useGameStore((s) => s.winnerId);
   const match = useGameStore((s) => s.match);
+  const playerCards = useGameStore((s) => s.playerCards);
   const isProcessing = useGameStore((s) => s.isProcessing);
   const setIsProcessing = useGameStore((s) => s.setIsProcessing);
   const { startGame } = useSocket();
   const exitTable = useExitTable();
 
-  // End-of-round summary is a modal dialog (not dismissible — the host advances).
-  const endDialogRef = useRef<HTMLDivElement>(null);
-  useDialogA11y(endDialogRef, gameStatus === 'ended', undefined, { closeOnEscape: false });
+  const open = gameStatus === 'ended';
 
-  if (gameStatus !== 'ended') return null;
-
-  const isHost = player?.isHost || false;
-  const matchWon = !!match?.matchWinnerName;
+  const matchWon = Boolean(match?.matchWinnerName);
   const roundPoints = match?.lastRound?.pointsAwarded ?? 0;
   const target = match?.targetScore ?? 500;
 
   // "Did I win?" is a seat comparison, never a name comparison — an opponent
   // sharing my display name must not make my client claim the win.
-  const iWonMatch = !!player && !!match?.matchWinnerUid && match.matchWinnerUid === player.uid;
-  const iWonRound = !!player && !!winnerId && winnerId === player.id;
-  const headerText = matchWon
-    ? (iWonMatch ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
-    : (iWonRound ? 'You won the round!' : `${winnerName} won the round!`);
+  const iWonMatch = Boolean(player && match?.matchWinnerUid && match.matchWinnerUid === player.uid);
+  const iWonRound = Boolean(player && winnerId && winnerId === player.id);
+  const iWon = matchWon ? iWonMatch : iWonRound;
+  const championName = (matchWon ? match?.matchWinnerName : winnerName) ?? 'Nobody';
 
   // Match scoreboard (cumulative points across rounds), highest first. Keyed by
   // seat uid server-side, so it survives reconnects and never merges two players
   // who happen to share a name.
-  const scoreboard: ScoreEntry[] = match
-    ? Object.entries(match.scores)
-        .map(([uid, entry]) => {
-          // Prefer the live seat for the label (it tracks renames); fall back to
-          // the banked name for players who have since left the room.
-          const p = room?.players.find((pl) => pl.uid === uid);
-          return {
-            uid,
-            name: p?.name ?? entry.name,
-            playerId: p?.profileId ?? entry.playerId ?? null,
-            score: entry.points,
-          };
-        })
-        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-    : [];
+  const scoreboard: ScoreEntry[] = useMemo(() => {
+    if (!match) return [];
+    return Object.entries(match.scores)
+      .map(([uid, entry]) => {
+        // Prefer the live seat for the label (it tracks renames); fall back to
+        // the banked name for players who have since left the room.
+        const p = room?.players.find((pl) => pl.uid === uid);
+        const hand = p ? playerCards[p.seatNumber] : undefined;
+        return {
+          uid,
+          name: p?.name ?? entry.name,
+          playerId: p?.profileId ?? entry.playerId ?? null,
+          score: entry.points,
+          avatar: p?.avatar ?? null,
+          cardsLeft: hand ? hand.length : null,
+          isBot: Boolean(p?.isBot),
+        };
+      })
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  }, [match, room?.players, playerCards]);
+
+  // The champion's seat, for the hero avatar. Matched by uid at match end and by
+  // socket id at round end, mirroring how the store reports each winner.
+  const champion = useMemo(() => {
+    if (!room) return undefined;
+    return matchWon
+      ? room.players.find((p) => p.uid === match?.matchWinnerUid)
+      : room.players.find((p) => p.id === winnerId);
+  }, [room, matchWon, match?.matchWinnerUid, winnerId]);
+
+  if (!open) return null;
+
+  const isHost = player?.isHost ?? false;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 pointer-events-auto overflow-hidden p-4">
-      {/* Confetti canvas animation */}
-      <ConfettiCanvas />
-
-      <div
-        ref={endDialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="game-over-title"
-        className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-5 sm:p-7 flex flex-col items-center gap-4 sm:gap-5 max-w-sm w-full text-center z-20 relative max-h-[90dvh] overflow-y-auto short:p-4 short:gap-2 short:max-w-md short:max-h-[94dvh]"
-      >
-        {/* Trophy badge is pure decoration — the first thing to go when a
-            landscape phone leaves no room for the scoreboard below it. */}
-        <div className="w-16 h-16 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] animate-bounce short:hidden">
-          <Trophy size={30} className="fill-white/30" />
-        </div>
-        <div>
-          <h2 id="game-over-title" className="font-arcade text-3xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm animate-pulse short:text-xl">
-            {matchWon ? 'Match Over!' : `Round ${match?.round ?? 1}`}
-          </h2>
-          <p className="font-rounded font-bold text-white text-md mt-1 inline-flex items-center gap-1.5">
-            <PartyPopper size={16} className="text-yellow-300" />
-            {headerText}
+    <Modal
+      open={open}
+      // Not dismissible: the round is over and the way out is an explicit
+      // choice between another round and leaving the table.
+      onClose={() => {}}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+      size="md"
+      labelledBy="end-of-round-title"
+      zIndex={50}
+      underlay={<ConfettiCanvas />}
+    >
+      {/* Two regions, two orientations. `short:` is the landscape-phone case
+          (max-height: 500px), where a stacked hero would leave nothing for the
+          standings. */}
+      <div className="flex min-h-0 flex-1 flex-col short:flex-row">
+        {/* ── Hero: the winner, and nothing that competes with them ───── */}
+        <div className="relative shrink-0 overflow-hidden border-b-2 border-white/10 bg-gradient-to-b from-yellow-500/15 to-transparent px-4 py-3 text-center short:w-[13.5rem] short:border-b-0 short:border-r-2 short:px-3 short:py-2.5 short:flex short:flex-col short:justify-center">
+          <p className="font-rounded text-[10px] font-bold uppercase tracking-[0.18em] text-yellow-200/70">
+            {matchWon ? 'Match Over' : `Round ${match?.round ?? 1} Complete`}
           </p>
+
+          <div className="mt-1.5 flex flex-col items-center gap-1.5">
+            <span className="relative ui-reveal">
+              <PresetAvatar avatarKey={champion?.avatar} size={54} />
+              {/* The crown is the glyph that says "winner" without relying on
+                  the gold tint alone. */}
+              <span className="absolute -right-1 -top-1 grid h-6 w-6 place-items-center rounded-full border-2 border-black/50 bg-gradient-to-b from-yellow-300 to-amber-500">
+                <Trophy size={12} className="text-[#1a1033]" aria-hidden="true" />
+              </span>
+            </span>
+
+            <h2
+              id="end-of-round-title"
+              className="font-arcade arcade-stroke-uno-sm text-[clamp(1.05rem,0.85rem+1.4vw,1.6rem)] uppercase leading-tight tracking-wide text-yellow-300"
+            >
+              {iWon ? (matchWon ? 'You win the match!' : 'You won the round!') : championName}
+            </h2>
+            {!iWon && (
+              <p className="font-rounded text-[11px] font-bold text-white/60">
+                {matchWon ? 'wins the match' : 'won the round'}
+              </p>
+            )}
+          </div>
+
           {!matchWon && (
-            <p className="font-rounded font-semibold text-lime-300 text-xs mt-1">
-              +{roundPoints} points banked · first to {target} wins
+            <p className="font-rounded mt-1.5 text-[10px] font-bold leading-snug text-lime-300">
+              +{roundPoints} banked · first to {target} wins
+            </p>
+          )}
+          {matchWon && (
+            <p className="font-rounded mt-1.5 text-[10px] font-bold leading-snug text-white/45">
+              {match?.round ?? 1} {(match?.round ?? 1) === 1 ? 'round' : 'rounds'} played · target {target}
             </p>
           )}
         </div>
 
-        {/* Running Match Scoreboard */}
-        <div className="w-full border-t-2 border-b-2 border-white/20 py-3 my-0.5 space-y-2 max-h-52 overflow-y-auto short:py-2 short:space-y-1 short:max-h-28">
-          <span className="font-arcade text-[10px] uppercase tracking-widest text-yellow-200 block text-left mb-1">
-            Match Scoreboard · to {target}
-          </span>
+        {/* ── Standings ───────────────────────────────────────────────── */}
+        <ModalBody className="ui-body-tight">
+          <SectionLabel
+            icon={<Trophy size={11} />}
+            trailing={
+              <span className="font-rounded text-[9px] font-bold uppercase tracking-wide text-white/35">
+                to {target}
+              </span>
+            }
+          >
+            Standings
+          </SectionLabel>
+
           {scoreboard.map((entry, idx) => (
             <ScoreRow
               key={entry.uid}
@@ -170,40 +276,51 @@ export const EndOfRound: React.FC = () => {
               rank={idx + 1}
               target={target}
               isMe={entry.uid === player?.uid}
-              justWonRound={!matchWon && !!match?.lastRound?.winnerUid && match.lastRound.winnerUid === entry.uid}
+              justWonRound={
+                !matchWon && Boolean(match?.lastRound?.winnerUid) &&
+                match?.lastRound?.winnerUid === entry.uid
+              }
               roundPoints={roundPoints}
             />
           ))}
-        </div>
-
-        {/* Round / Match Loop Buttons */}
-        <div className="w-full space-y-2">
-          {isHost ? (
-            <button
-              disabled={isProcessing}
-              onClick={() => {
-                setIsProcessing(true);
-                startGame();
-              }}
-              className="btn-arcade w-full bg-gradient-to-b from-lime-400 to-green-600 text-white py-3 px-6 text-sm uppercase disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 short:py-2 short:text-xs"
-            >
-              <RefreshCw size={16} /> {matchWon ? 'New Match' : 'Next Round'}
-            </button>
-          ) : (
-            <div className="w-full py-2.5 px-4 rounded-full bg-white/5 border-2 border-white/15 text-center animate-pulse font-rounded font-bold text-[10px] uppercase tracking-widest text-yellow-200 inline-flex items-center justify-center gap-1.5">
-              <Hourglass size={12} /> {matchWon ? 'Waiting for host to start a new match...' : 'Waiting for host to start next round...'}
-            </div>
-          )}
-
-          <button
-            onClick={exitTable}
-            className="btn-arcade w-full bg-gradient-to-b from-rose-500 to-red-700 text-white py-3 px-4 text-xs uppercase short:py-2 short:text-[11px]"
-          >
-            Exit to Menu
-          </button>
-        </div>
+        </ModalBody>
       </div>
-    </div>
+
+      <ModalFooter>
+        <Button
+          tone="danger"
+          size="sm"
+          onClick={exitTable}
+          icon={<DoorOpen size={13} />}
+        >
+          Exit
+        </Button>
+
+        {isHost ? (
+          <Button
+            tone="primary"
+            size="sm"
+            disabled={isProcessing}
+            onClick={() => {
+              setIsProcessing(true);
+              startGame();
+            }}
+            icon={<RefreshCw size={13} />}
+            className="ml-auto"
+          >
+            {matchWon ? 'New Match' : 'Next Round'}
+          </Button>
+        ) : (
+          <span
+            className="font-rounded ml-auto inline-flex items-center gap-1.5 text-right text-[10px] font-bold uppercase tracking-wide text-yellow-200/80"
+            role="status"
+          >
+            <Hourglass size={12} className="shrink-0 animate-pulse" aria-hidden="true" />
+            {matchWon ? 'Waiting for a new match…' : 'Waiting for the next round…'}
+          </span>
+        )}
+      </ModalFooter>
+    </Modal>
   );
 };
 

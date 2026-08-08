@@ -11,16 +11,21 @@
  * Nothing here re-derives a rule, so the card can never offer an action the
  * server would refuse.
  *
+ * Action hierarchy — the point of the redesign. A friend row used to carry three
+ * equally-loud icon buttons and left the player to guess which one mattered. Now
+ * exactly ONE action is a labelled button (the thing you most likely want: join
+ * them if they're joinable, otherwise invite them), anything else is a quiet icon,
+ * and "Remove" is always the quietest control in the row.
+ *
  * Memoized on its props: a presence tick for one friend re-renders that one row,
  * not the whole list.
  */
 
 import React from 'react';
-import { motion } from 'framer-motion';
 import { DoorOpen, Mailbox, Send, UserMinus } from 'lucide-react';
-import { PresetAvatar } from '../profile/PresetAvatar';
-import { PresenceDot, isLive, presenceLabel, presenceTextClass } from './PresenceDot';
-import { PlayerIdTag } from './PlayerIdTag';
+import { SocialRow } from './SocialRow';
+import { isLive, presenceLabel, presenceTextClass } from './PresenceDot';
+import { Button, IconButton } from '../ui/kit';
 import { formatRelative } from '../../lib/profile/format';
 import type { FriendSummary, PresenceView } from '../../types/social';
 
@@ -56,98 +61,100 @@ const FriendCardBase: React.FC<FriendCardProps> = ({
   // then decides enabled vs. disabled, so a full table still shows the affordance
   // (greyed) rather than silently hiding it.
   const showJoin = Boolean(presence.roomCode);
+  const showInvite = live && canInvite;
+
+  // Context line: status, then the single most useful detail — where they are
+  // (room code / arena) while live, how long ago while offline.
+  const meta = (
+    <>
+      {presenceLabel(presence.status)}
+      {presence.status === 'offline' && presence.lastSeenAt
+        ? ` · ${formatRelative(presence.lastSeenAt, now)}`
+        : ''}
+      {live && presence.roomCode ? ` · #${presence.roomCode}` : ''}
+      {live && !presence.roomCode && presence.arena ? ` · ${presence.arena}` : ''}
+    </>
+  );
 
   return (
-    <motion.div
-      layout="position"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-      className="chip-arcade bg-white/5 hover:bg-white/[0.09] transition-colors flex items-center gap-3 py-2.5 px-3"
+    <SocialRow
+      profileId={friend.profileId}
+      displayName={friend.displayName}
+      avatarUrl={friend.avatarUrl}
+      status={presence.status}
+      live={live}
+      meta={meta}
+      metaClass={presenceTextClass(presence.status)}
+      onOpenProfile={onOpenProfile}
     >
-      {/* Identity — the whole block opens the full profile. */}
-      <button
-        type="button"
-        onClick={() => onOpenProfile(friend.profileId)}
-        className="flex items-center gap-3 min-w-0 flex-1 text-left cursor-pointer"
-        aria-label={`View ${friend.displayName}'s profile`}
-      >
-        <span className="relative shrink-0">
-          <PresetAvatar avatarKey={friend.avatarUrl} size={40} />
-          <span className="absolute -bottom-0.5 -right-0.5">
-            <PresenceDot status={presence.status} size={12} halo={live} />
+      {/* Primary: join them if there's a table to join. */}
+      {showJoin && (
+        <Button
+          tone="success"
+          size="sm"
+          disabled={!presence.joinable}
+          onClick={() => onJoin(friend.profileId)}
+          icon={<DoorOpen size={13} aria-hidden="true" />}
+          title={
+            presence.joinable
+              ? presence.joinAsSpectator
+                ? 'Join as spectator'
+                : 'Join their game'
+              : 'That room can’t take anyone else right now'
+          }
+          aria-label={`Join ${friend.displayName}`}
+        >
+          <span className="tiny:hidden">
+            {presence.joinAsSpectator ? 'Watch' : 'Join'}
           </span>
-        </span>
+        </Button>
+      )}
 
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-1.5">
-            <span className="font-rounded font-bold text-white text-sm truncate">{friend.displayName}</span>
-            <PlayerIdTag id={friend.profileId} className="text-white/35" />
-          </span>
-          <span className={`block font-rounded text-[0.66rem] truncate ${presenceTextClass(presence.status)}`}>
-            {presenceLabel(presence.status)}
-            {presence.status === 'offline' && presence.lastSeenAt
-              ? ` · ${formatRelative(presence.lastSeenAt, now)}`
-              : ''}
-            {presence.arena && live ? ` · ${presence.arena}` : ''}
-          </span>
-        </span>
-      </button>
-
-      {/* Actions. */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        {showJoin && (
-          <button
-            type="button"
-            onClick={() => onJoin(friend.profileId)}
-            disabled={!presence.joinable}
-            title={
-              presence.joinable
-                ? presence.joinAsSpectator
-                  ? 'Join as spectator'
-                  : 'Join game'
-                : 'That room can’t take anyone else right now'
-            }
-            className={`chip-arcade w-8 h-8 flex items-center justify-center transition-opacity ${
-              presence.joinable
-                ? 'bg-gradient-to-b from-lime-400 to-green-600 text-white cursor-pointer'
-                : 'bg-white/5 text-white/25 cursor-not-allowed'
-            }`}
-            aria-label={`Join ${friend.displayName}`}
-          >
-            <DoorOpen size={14} />
-          </button>
-        )}
-
-        {live && canInvite && (
-          <button
-            type="button"
-            onClick={() => onInvite(friend.profileId)}
+      {/* Invite: labelled when it's the only action, an icon when Join already
+          owns the emphasis. */}
+      {showInvite &&
+        (showJoin ? (
+          <IconButton
+            tone={invited ? 'primary' : 'info'}
             disabled={invited}
-            title={invited ? 'Invite sent' : 'Invite to your table'}
-            className={`chip-arcade w-8 h-8 flex items-center justify-center ${
+            onClick={() => onInvite(friend.profileId)}
+            label={
               invited
-                ? 'bg-white/5 text-yellow-300/70 cursor-not-allowed'
-                : 'bg-gradient-to-b from-sky-500 to-blue-700 text-white cursor-pointer'
-            }`}
-            aria-label={invited ? `Invite already sent to ${friend.displayName}` : `Invite ${friend.displayName}`}
+                ? `Invite already sent to ${friend.displayName}`
+                : `Invite ${friend.displayName} to your table`
+            }
+            title={invited ? 'Invite sent' : 'Invite to your table'}
           >
             {invited ? <Mailbox size={14} /> : <Send size={14} />}
-          </button>
-        )}
+          </IconButton>
+        ) : (
+          <Button
+            tone="info"
+            size="sm"
+            disabled={invited}
+            onClick={() => onInvite(friend.profileId)}
+            icon={invited ? <Mailbox size={13} /> : <Send size={13} />}
+            title={invited ? 'Invite sent' : 'Invite to your table'}
+            aria-label={
+              invited
+                ? `Invite already sent to ${friend.displayName}`
+                : `Invite ${friend.displayName} to your table`
+            }
+          >
+            <span className="tiny:hidden">{invited ? 'Sent' : 'Invite'}</span>
+          </Button>
+        ))}
 
-        <button
-          type="button"
-          onClick={() => onRemove(friend.profileId)}
-          title="Remove friend"
-          className="chip-arcade w-8 h-8 flex items-center justify-center bg-white/5 text-white/40 hover:text-rose-400 hover:bg-rose-500/15 transition-colors cursor-pointer"
-          aria-label={`Remove ${friend.displayName} from friends`}
-        >
-          <UserMinus size={14} />
-        </button>
-      </div>
-    </motion.div>
+      {/* Destructive, and therefore the quietest thing in the row. */}
+      <IconButton
+        onClick={() => onRemove(friend.profileId)}
+        label={`Remove ${friend.displayName} from friends`}
+        title="Remove friend"
+        className="hover:!border-rose-400/40 hover:!bg-rose-500/15 hover:!text-rose-300"
+      >
+        <UserMinus size={14} />
+      </IconButton>
+    </SocialRow>
   );
 };
 

@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { Shuffle } from 'lucide-react';
+import { Check, Shuffle } from 'lucide-react';
 import { ArenaMeta, ArenaSelection } from '../../lib/arenas/types';
 import { ARENA_LIST } from '../../lib/arenas/registry';
 
@@ -98,6 +98,24 @@ function Motif({ motif, accent, accent2 }: { motif: ArenaMeta['motif']; accent: 
   }
 }
 
+/**
+ * The tick that marks the chosen world. Selection used to be carried by border
+ * colour and a glow alone, which is exactly the "colour as the only signal"
+ * failure — a glyph makes it readable regardless of colour vision, and the
+ * `aria-pressed` on the button carries it to a screen reader.
+ */
+function SelectedTick({ accent }: { accent: string }) {
+  return (
+    <span
+      className="absolute right-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full border-2 border-black/50 shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
+      style={{ background: accent, color: '#0b1020' }}
+      aria-hidden="true"
+    >
+      <Check size={11} strokeWidth={4} />
+    </span>
+  );
+}
+
 export function ArenaPreview({
   meta,
   selected,
@@ -116,17 +134,21 @@ export function ArenaPreview({
       disabled={disabled}
       aria-pressed={selected}
       aria-label={`${meta.name}: ${meta.description}`}
-      className={`group relative rounded-2xl overflow-hidden border-2 text-left transition-transform ${
+      className={`group relative overflow-hidden border-2 text-left transition-transform ${
         disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:scale-[1.03]'
       }`}
       style={{
+        borderRadius: 'var(--ui-radius-md)',
         borderColor: selected ? meta.accent : 'rgba(255,255,255,0.18)',
         boxShadow: selected ? `0 0 0 2px ${meta.accent}, 0 0 20px ${meta.accent}66` : undefined,
       }}
     >
-      {/* Gradient backdrop */}
+      {selected && <SelectedTick accent={meta.accent} />}
+
+      {/* Gradient backdrop. Shorter on landscape phones, where a 4:3 thumbnail
+          per card would push the grid past a ~390px-tall viewport. */}
       <div
-        className="aspect-[4/3] w-full relative"
+        className="relative aspect-[4/3] w-full short:aspect-[16/9]"
         style={{ background: `linear-gradient(160deg, ${meta.gradient[0]}, ${meta.gradient[1]}, ${meta.gradient[2]})` }}
       >
         <Motif motif={meta.motif} accent={meta.accent} accent2={meta.accent2} />
@@ -138,11 +160,13 @@ export function ArenaPreview({
       </div>
 
       {/* Label bar */}
-      <div className="px-2.5 py-2 bg-black/70">
-        <div className="font-arcade text-[10px] uppercase tracking-wide text-white truncate" style={{ color: selected ? meta.accent : '#fff' }}>
+      <div className="bg-black/70 px-2.5 py-1.5">
+        <div className="font-arcade truncate text-[10px] uppercase tracking-wide text-white" style={{ color: selected ? meta.accent : '#fff' }}>
           {meta.name}
         </div>
-        <div className="font-rounded text-[9px] leading-tight text-white/60 mt-0.5 line-clamp-2">{meta.description}</div>
+        <div className="font-rounded mt-0.5 line-clamp-2 text-[9px] leading-tight text-white/60 short:hidden">
+          {meta.description}
+        </div>
       </div>
     </button>
   );
@@ -157,23 +181,27 @@ function RandomCard({ selected, disabled, onClick }: { selected: boolean; disabl
       disabled={disabled}
       aria-pressed={selected}
       aria-label="Random arena — a surprise themed world chosen for you"
-      className={`group relative rounded-2xl overflow-hidden border-2 text-left transition-transform ${
+      className={`group relative overflow-hidden border-2 text-left transition-transform ${
         disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:scale-[1.03]'
       }`}
       style={{
+        borderRadius: 'var(--ui-radius-md)',
         borderColor: selected ? '#ffd34d' : 'rgba(255,255,255,0.18)',
         boxShadow: selected ? '0 0 0 2px #ffd34d, 0 0 20px #ffd34d66' : undefined,
       }}
     >
-      <div className="aspect-[4/3] w-full relative flex items-center justify-center bg-[conic-gradient(from_0deg,#5fd0ff,#8ff06a,#a8ecff,#ff4fd8,#ff7a2f,#5fd0ff)]">
+      {selected && <SelectedTick accent="#ffd34d" />}
+      <div className="relative flex aspect-[4/3] w-full items-center justify-center bg-[conic-gradient(from_0deg,#5fd0ff,#8ff06a,#a8ecff,#ff4fd8,#ff7a2f,#5fd0ff)] short:aspect-[16/9]">
         <div className="absolute inset-0 bg-black/40" />
         <Shuffle size={30} className="relative text-white drop-shadow" />
       </div>
-      <div className="px-2.5 py-2 bg-black/70">
+      <div className="bg-black/70 px-2.5 py-1.5">
         <div className="font-arcade text-[10px] uppercase tracking-wide" style={{ color: selected ? '#ffd34d' : '#fff' }}>
           Random
         </div>
-        <div className="font-rounded text-[9px] leading-tight text-white/60 mt-0.5 line-clamp-2">A surprise themed world.</div>
+        <div className="font-rounded mt-0.5 line-clamp-2 text-[9px] leading-tight text-white/60 short:hidden">
+          A surprise themed world.
+        </div>
       </div>
     </button>
   );
@@ -183,6 +211,10 @@ function RandomCard({ selected, disabled, onClick }: { selected: boolean; disabl
  * Selectable arena grid, shared by the create modal and the lobby re-picker.
  * `value` is the current selection (a concrete id or `random`); `onChange` fires
  * with the picked selection.
+ *
+ * The column count is content-aware rather than a scaled-down desktop grid: two
+ * across on a phone, three once there is room, and four on a landscape phone
+ * where width is plentiful and height is the scarce axis.
  */
 export function ArenaGrid({
   value,
@@ -196,7 +228,7 @@ export function ArenaGrid({
   includeRandom?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:short:grid-cols-4 short:gap-2">
       {includeRandom && <RandomCard selected={value === 'random'} disabled={disabled} onClick={() => onChange('random')} />}
       {ARENA_LIST.map((meta) => (
         <ArenaPreview key={meta.id} meta={meta} selected={value === meta.id} disabled={disabled} onClick={() => onChange(meta.id)} />

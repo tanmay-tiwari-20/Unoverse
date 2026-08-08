@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Copy, Share2, X } from 'lucide-react';
+import { Check, Copy, Link2, Share2, Ticket, Users } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
+import { Button, IconButton, Modal, ModalBody, ModalFooter, ModalHeader, SectionLabel } from '../ui/kit';
 
 export interface InviteModalProps {
   open: boolean;
@@ -17,6 +17,14 @@ export interface InviteModalProps {
  * the OS share sheet where one exists (mobile). The link points at the landing
  * page with `?room=`, so a recipient still passes through the name prompt
  * instead of being dropped into a table unnamed.
+ *
+ * Structure follows the two things a player actually does here, in the order
+ * they do them: READ the code out loud, or SEND the link. The old version gave
+ * three identically-loud full-width arcade buttons equal weight, so neither
+ * task led; now the code is the hero (large, selectable, with its own copy
+ * affordance), the link sits under it as a real, verifiable value rather than
+ * an invisible thing a button promises to copy, and Share is the single primary
+ * action in the footer.
  */
 export const InviteModal: React.FC<InviteModalProps> = ({ open, onClose, roomId }) => {
   const room = useGameStore((s) => s.room);
@@ -26,6 +34,13 @@ export const InviteModal: React.FC<InviteModalProps> = ({ open, onClose, roomId 
 
   const inviteLink = () =>
     `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
+
+  // Same value, but safe to render: the panel only mounts once `open` is true,
+  // which is never the case during SSR, so this cannot desync on hydration.
+  const shownLink =
+    typeof window === 'undefined'
+      ? ''
+      : `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
 
   const handleCopyCodeOnly = () => {
     if (!roomId) return;
@@ -63,81 +78,84 @@ export const InviteModal: React.FC<InviteModalProps> = ({ open, onClose, roomId 
     }
   };
 
+  const code = room?.code ?? roomId.toUpperCase();
+
   return (
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-auto p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 15 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-            className="w-full max-w-md panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 relative text-white max-h-[76dvh] overflow-y-auto custom-scrollbar short:max-w-lg short:max-h-[80dvh] short:p-4"
-          >
-            {/* Close Button */}
-            <button
-              onClick={onClose}
-              className="absolute top-3 right-3 chip-arcade w-8 h-8 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700 hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-              title="Close"
-              aria-label="Close invite modal"
+    <Modal open={open} onClose={onClose} size="sm" labelledBy="invite-title">
+      <ModalHeader
+        id="invite-title"
+        title="Invite Friends"
+        subtitle="Anyone with the code can join this table"
+        icon={<Users size={18} aria-hidden="true" />}
+        onClose={onClose}
+        closeLabel="Close invite"
+      />
+
+      <ModalBody>
+        {/* ---- The code. The one thing you read out over voice chat, so it is
+             the largest element on the surface and stays selectable. ---- */}
+        <section className="flex flex-col gap-1.5">
+          <SectionLabel icon={<Ticket size={11} aria-hidden="true" />}>Lobby code</SectionLabel>
+          <div className="ui-code flex items-center gap-2 py-2 pl-3 pr-2">
+            <span
+              className="font-arcade min-w-0 flex-1 select-all text-center text-[clamp(1.5rem,1.1rem+3vw,2.25rem)] leading-none tracking-[0.18em] text-yellow-300"
+              /* Read as one word, not six letters, by a screen reader. */
+              aria-label={`Lobby code ${code}`}
             >
-              <X size={14} />
-            </button>
+              {code}
+            </span>
+            <IconButton
+              label={copiedCode ? 'Lobby code copied' : 'Copy lobby code'}
+              tone={copiedCode ? 'success' : 'ghost'}
+              onClick={handleCopyCodeOnly}
+            >
+              {copiedCode ? <Check size={16} strokeWidth={3} /> : <Copy size={16} />}
+            </IconButton>
+          </div>
+        </section>
 
-            <h3 className="font-arcade text-lg sm:text-xl text-yellow-400 tracking-wider mb-6 text-center uppercase arcade-stroke-uno-sm short:text-base short:mb-3">
-              Invite Friends
-            </h3>
+        {/* ---- The link. Shown, not just promised — a read-only field you can
+             verify, select by hand, or copy with one tap. ---- */}
+        <section className="flex flex-col gap-1.5">
+          <SectionLabel icon={<Link2 size={11} aria-hidden="true" />}>Invite link</SectionLabel>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={shownLink}
+              aria-label="Invite link"
+              onFocus={(e) => e.currentTarget.select()}
+              className="ui-input min-w-0 flex-1 px-2.5 text-[11px]"
+              style={{ height: 'var(--ui-tap)' }}
+            />
+            <IconButton
+              label={copiedLink ? 'Invite link copied' : 'Copy invite link'}
+              tone={copiedLink ? 'success' : 'ghost'}
+              onClick={handleCopyLinkOnly}
+            >
+              {copiedLink ? <Check size={16} strokeWidth={3} /> : <Copy size={16} />}
+            </IconButton>
+          </div>
+          <p className="font-rounded px-0.5 text-[10px] font-bold leading-snug text-white/40">
+            The link opens the lobby and asks for their name first — nobody lands at the table
+            unnamed.
+          </p>
+        </section>
+      </ModalBody>
 
-            <div className="flex flex-col items-center gap-6">
-              {/* Lobby Code Display */}
-              <div className="flex flex-col items-center gap-2 w-full">
-                <span className="font-arcade text-[10px] tracking-wider text-slate-400 uppercase">
-                  Lobby Code
-                </span>
-                <div className="font-arcade text-3xl sm:text-4xl text-yellow-300 tracking-widest text-center py-2.5 px-7 bg-black/40 border border-neutral-800 rounded-lg select-all">
-                  {room?.code}
-                </div>
-              </div>
-
-              {/* Stack of action buttons */}
-              <div className="w-full flex flex-col gap-3">
-                <button
-                  onClick={handleCopyCodeOnly}
-                  className={`btn-arcade py-3 text-xs uppercase cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 font-arcade tracking-wider bg-gradient-to-b ${
-                    copiedCode
-                      ? 'from-lime-400 to-green-600 text-white'
-                      : 'from-blue-400 to-blue-600 text-white hover:border-yellow-400'
-                  }`}
-                >
-                  {copiedCode ? <Check size={14} className="stroke-[3]" /> : <Copy size={14} />}
-                  {copiedCode ? 'Code Copied!' : 'Copy Code'}
-                </button>
-
-                <button
-                  onClick={handleCopyLinkOnly}
-                  className={`btn-arcade py-3 text-xs uppercase cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 font-arcade tracking-wider bg-gradient-to-b ${
-                    copiedLink
-                      ? 'from-lime-400 to-green-600 text-white'
-                      : 'from-fuchsia-500 to-purple-700 text-white hover:border-yellow-400'
-                  }`}
-                >
-                  {copiedLink ? <Check size={14} className="stroke-[3]" /> : <Copy size={14} />}
-                  {copiedLink ? 'Link Copied!' : 'Copy Invite Link'}
-                </button>
-
-                <button
-                  onClick={handleShareLink}
-                  className="btn-arcade py-3 text-xs uppercase cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-transform flex items-center justify-center gap-2 font-arcade tracking-wider bg-gradient-to-b from-amber-500 to-orange-600 text-white hover:border-yellow-400"
-                >
-                  <Share2 size={14} />
-                  Share Invite
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
+      <ModalFooter>
+        <Button tone="neutral" onClick={onClose} className="flex-1">
+          Done
+        </Button>
+        <Button
+          tone="primary"
+          onClick={handleShareLink}
+          icon={<Share2 size={15} aria-hidden="true" />}
+          className="flex-1"
+        >
+          Share
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 };
 

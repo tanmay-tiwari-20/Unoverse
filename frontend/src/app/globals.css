@@ -1,24 +1,47 @@
 @import "tailwindcss";
 
-/* Height-aware variant for landscape phones. Fires below 500px of viewport
-   height (covers landscape phones at ~390-430px but never tablets/desktop).
-   Use it to override width-based `sm:`/`md:` classes, which fire on a landscape
-   phone because it is wide, and so apply desktop sizing to a cramped vertical
-   space. Example: `sm:text-7xl short:text-5xl`
 
-   Deliberately written with `max-height` rather than the `height < 500px` range
-   syntax: the range form round-trips badly through the PostCSS/Turbopack CSS
-   parser here and emits a bare `height < 500px {` block that fails to parse. */
 @custom-variant short (@media (max-height: 499.98px));
+@custom-variant tiny (@media (max-width: 380.98px));
 
 :root {
   --background: #030712; /* Deep slate-950 */
   --foreground: #f9fafb; /* gray-50 */
   --card-bg: rgba(17, 24, 39, 0.7); /* glassmorphic dark gray */
   --card-border: rgba(255, 255, 255, 0.08);
-  /* Clearance under the bottom-pinned lobby action bar. Added on top of the
-     safe-area inset rather than replacing it, so a home-bar phone keeps both. */
   --action-bar-gap: 1.25rem;
+
+  /* Inner padding of a modal body / panel. */
+  --ui-pad: clamp(0.75rem, 0.45rem + 1.4vw, 1.5rem);
+  /* Gap between stacked sections inside a modal. */
+  --ui-gap: clamp(0.625rem, 0.4rem + 1vw, 1.25rem);
+  /* Gap between rows inside a list. */
+  --ui-gap-tight: clamp(0.375rem, 0.28rem + 0.4vw, 0.625rem);
+  /* Height of a modal header / footer bar. */
+  --ui-bar-pad-y: clamp(0.5rem, 0.35rem + 0.6vw, 0.9rem);
+  --ui-bar-pad-x: clamp(0.75rem, 0.5rem + 1.2vw, 1.5rem);
+  /* Corner radii — one family, three sizes. */
+  --ui-radius-lg: 26px; /* panels / modals */
+  --ui-radius-md: 18px; /* cards, list rows, tiles */
+  --ui-radius-sm: 12px; /* inputs, small chips */
+  /* Minimum comfortable tap target. */
+  --ui-tap: 40px;
+  /* Backdrop tint — dark enough to focus the modal, light enough that the
+     3D arena still reads behind it. */
+  --ui-scrim: rgba(2, 4, 10, 0.62);
+}
+
+@media (max-height: 499.98px) {
+  :root {
+    --ui-pad: 0.7rem;
+    --ui-gap: 0.5rem;
+    --ui-gap-tight: 0.3rem;
+    --ui-bar-pad-y: 0.35rem;
+    --ui-bar-pad-x: 0.7rem;
+    --ui-radius-lg: 20px;
+    --ui-radius-md: 14px;
+    --ui-tap: 34px;
+  }
 }
 
 /* Landscape phones trade some of that clearance back for table height, but
@@ -127,6 +150,32 @@ input {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Opt-in scrollbar for panel bodies. This class was in use across the modals
+   long before it had a definition, so scroll areas fell back to the global
+   bar above — including on Firefox, which never got one at all. Defining it
+   properly gives every panel the same slim, unobtrusive track, and reserves
+   the gutter (`scrollbar-gutter`) so content does not shift by 6px the moment
+   a list grows past its container. */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  overscroll-behavior: contain;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Custom Glow Utilities */
@@ -376,12 +425,538 @@ select:focus-visible {
 }
 
 /* ------------------------------------------------------------------ */
-/* Accessibility: Reduced Motion                                       */
-/* When the OS has prefers-reduced-motion: reduce, kill all CSS         */
-/* animations and transitions globally. Framer Motion is handled        */
-/* separately via <MotionConfig reducedMotion="user">, and Three.js     */
-/* useFrame loops are gated by the useReducedMotion() hook.             */
+/* SHARED UI KIT                                                       */
+/* The structural layer under the five redesigned surfaces (scoreboard, */
+/* friends, settings, profile, results). It reuses the arcade materials */
+/* defined above — same glass, same white border, same hard drop        */
+/* shadow, same palette — and adds only STRUCTURE: consistent sizing,   */
+/* density, radii and states. Nothing here introduces a new colour.     */
 /* ------------------------------------------------------------------ */
+
+/* --- Modal / panel shell ------------------------------------------- */
+
+/* Backdrop. Deliberately lighter than the old `bg-black/60 + blur-sm`: the
+   3D arena should stay legible behind a modal so the game never feels
+   replaced by a web page. The blur is kept small — a large radius over a
+   full-screen WebGL canvas is the single most expensive thing a modal can
+   do on a phone. */
+.ui-scrim {
+  background: var(--ui-scrim);
+  backdrop-filter: blur(6px) saturate(0.9);
+  -webkit-backdrop-filter: blur(6px) saturate(0.9);
+}
+
+/* The panel itself. Same materials as `panel-arcade`, but with the fluid
+   radius and a slightly thinner border so dense list content doesn't lose
+   4px of width per side on a phone. */
+.ui-panel {
+  position: relative;
+  border-radius: var(--ui-radius-lg);
+  border: 3px solid rgba(255, 255, 255, 0.82);
+  background: linear-gradient(to bottom, rgba(23, 23, 23, 0.97), rgba(0, 0, 0, 0.97));
+  box-shadow:
+    0 10px 0 0 rgba(0, 0, 0, 0.3),
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 3px 0 0 rgba(255, 255, 255, 0.16);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Never wider or taller than the viewport, whatever the size prop says, and
+     always inside the notch/home-bar. This is the guarantee that no modal can
+     overflow on an unusual aspect ratio. */
+  max-width: 100%;
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem);
+  overflow: hidden;
+}
+
+/* Size ramp. `min()` against `100%` (not a vw unit) keeps the panel inside its
+   already safe-area-padded flex parent, so a wide max never causes horizontal
+   scroll on a narrow screen. */
+.ui-panel-sm { width: min(24rem, 100%); }
+.ui-panel-md { width: min(32rem, 100%); }
+.ui-panel-lg { width: min(46rem, 100%); }
+.ui-panel-xl { width: min(64rem, 100%); }
+
+/* Docked (side-drawer) and bottom-sheet forms of the same panel. Written as
+   real classes rather than Tailwind overrides because everything in this file
+   is unlayered, so it outranks Tailwind's `@layer utilities` — a
+   `rounded-r-none` utility would silently lose to `.ui-panel`. */
+.ui-panel-dock {
+  height: 100%;
+  max-height: 100%;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right-width: 0;
+}
+.ui-panel-sheet {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-width: 0;
+  /* Leave the top of the screen visible: a sheet that reaches the status bar
+     reads as a page, not a panel over a game. */
+  max-height: calc(100dvh - env(safe-area-inset-top) - 3rem);
+}
+/* Side drawer width — between `sm` and `md`. Wide enough for avatar + name +
+   two actions, narrow enough that the table stays the main thing on screen.
+   Declared after the size ramp so it wins when both are applied. */
+.ui-panel-drawer { width: min(26rem, 100%); }
+
+/* Header / footer bars. One geometry for all five surfaces. */
+.ui-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: var(--ui-bar-pad-y) var(--ui-bar-pad-x);
+}
+.ui-bar-top {
+  border-bottom: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(220, 38, 38, 0.16);
+}
+.ui-bar-bottom {
+  border-top: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.45);
+  padding-bottom: max(var(--ui-bar-pad-y), env(safe-area-inset-bottom));
+}
+
+.ui-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--ui-pad);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap);
+}
+.ui-body-flush {
+  padding: 0;
+}
+.ui-body-tight {
+  padding: 0.5rem;
+  gap: var(--ui-gap-tight);
+}
+
+.ui-card {
+  border-radius: var(--ui-radius-md);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.ui-card-hover:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.ui-card-self {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(96, 165, 250, 0.5);
+}
+.ui-card-lead {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(253, 224, 71, 0.55);
+}
+.ui-card-active {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(52, 211, 153, 0.55);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 0 14px rgba(16, 185, 129, 0.22);
+}
+
+.ui-tile {
+  border-radius: var(--ui-radius-md);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  padding: clamp(0.4rem, 0.3rem + 0.4vw, 0.7rem) 0.35rem;
+  text-align: center;
+  min-width: 0;
+}
+
+.ui-section-label {
+  font-family: var(--font-arcade), "Lilita One", system-ui, sans-serif;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ui-divider {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+
+.ui-segment {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+.ui-segment-item {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 999px;
+  padding: 0.3rem 0.4rem;
+  font-family: var(--font-rounded), "Fredoka", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  transition: color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+  cursor: pointer;
+}
+.ui-segment-item:hover:not([aria-checked="true"]):not([aria-selected="true"]) {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.07);
+}
+.ui-segment-item[aria-checked="true"],
+.ui-segment-item[aria-selected="true"] {
+  color: #1a1033;
+  background: linear-gradient(to bottom, #facc15, #d97706);
+  box-shadow: 0 2px 0 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.45);
+}
+.ui-segment-item:active {
+  transform: translateY(1px);
+}
+
+.ui-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+.ui-range::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--range-fill, #38bdf8) 0%,
+    var(--range-fill, #38bdf8) var(--range-pct, 50%),
+    rgba(255, 255, 255, 0.12) var(--range-pct, 50%),
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  border: 1px solid rgba(0, 0, 0, 0.45);
+}
+.ui-range::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.45);
+}
+.ui-range::-moz-range-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--range-fill, #38bdf8);
+}
+.ui-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 3px solid rgba(0, 0, 0, 0.55);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  transition: transform 0.1s ease;
+}
+.ui-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 3px solid rgba(0, 0, 0, 0.55);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.ui-range:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.ui-range:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-input {
+  width: 100%;
+  border-radius: var(--ui-radius-sm);
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  font-family: var(--font-rounded), "Fredoka", system-ui, sans-serif;
+  font-weight: 700;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.ui-input::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 600;
+}
+.ui-input:focus {
+  outline: none;
+  border-color: #facc15;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Inline status note — "rules are locked", "host only", "room is full". Lives
+   here rather than as Tailwind utilities on `.ui-card` because everything in
+   this file is unlayered: a `border-amber-400/40` utility would silently lose
+   to `.ui-card`'s `border` shorthand. Every tone is paired with an icon and a
+   sentence at the call site, so the colour is never the only signal. */
+.ui-note {
+  border-radius: var(--ui-radius-md);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+}
+.ui-note-info {
+  border-color: rgba(56, 189, 248, 0.38);
+  background: rgba(56, 189, 248, 0.1);
+  color: #bae6fd;
+}
+.ui-note-good {
+  border-color: rgba(163, 230, 53, 0.38);
+  background: rgba(132, 204, 22, 0.1);
+  color: #d9f99d;
+}
+.ui-note-warn {
+  border-color: rgba(251, 191, 36, 0.42);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fde68a;
+}
+.ui-note-bad {
+  border-color: rgba(251, 113, 133, 0.42);
+  background: rgba(244, 63, 94, 0.1);
+  color: #fecdd3;
+}
+
+/* A value you are meant to read out loud or copy — the lobby code, the invite
+   link. Recessed rather than raised, so it reads as content, not a button. */
+.ui-code {
+  border-radius: var(--ui-radius-md);
+  border: 2px dashed rgba(255, 255, 255, 0.24);
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+/* --- In-game HUD ------------------------------------------------------ */
+/* The permanent overlay is the one part of the UI that is ALWAYS on top of the
+   live table, so it gets a quieter material than the modals: darker glass, a
+   hairline border, no arcade drop-shadow. The loud `chip-arcade` treatment is
+   reserved for things you deliberately reach for (Start, Fill & Play). Using it
+   for the ambient furniture as well is what made the table read as a pile of
+   floating panels. */
+
+/* Background only — no border, no radius, no padding, so callers keep control
+   of those. That matters because this stylesheet is UNLAYERED and any property
+   set here would outrank the equivalent Tailwind utility. */
+.ui-hud-glass {
+  background: rgba(6, 9, 18, 0.58);
+  /* Modest blur on purpose: a wide radius over a full-screen WebGL canvas is
+     the most expensive thing an overlay can do on a phone. */
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+}
+
+/* Pill geometry for HUD surfaces. The radius lives here rather than in a
+   `rounded-full` utility for one specific reason: the global `:focus-visible`
+   rule sets a `border-radius` of its own, and utilities are layered — so a
+   keyboard-focused pill would square off to 8px for as long as it held focus.
+   Border COLOUR is left out so callers still tint it per state. */
+.ui-hud-pill {
+  border-radius: 9999px;
+  border-width: 1px;
+  border-style: solid;
+}
+
+/* The control cluster: one tray instead of six separate buttons, so a corner of
+   the screen reads as a single piece of chrome. */
+.ui-hud-tray {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* A button inside a tray. Sized from --ui-tap, so it shrinks with everything
+   else on a landscape phone instead of needing its own breakpoint. */
+.ui-hud-btn {
+  position: relative;
+  width: var(--ui-tap);
+  height: var(--ui-tap);
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease;
+}
+.ui-hud-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+.ui-hud-btn:active {
+  transform: translateY(1px);
+}
+.ui-hud-btn:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+/* 360px-class phones. Six 40px buttons plus the invite and scoreboard chips do
+   not fit across 360px, and the left cluster would wrap into a second row that
+   covers more of the table than the tray saves. 36px keeps the header on one
+   line and still clears the 36px the old chips used. Declared BEFORE the
+   modifiers below so `-wide` and `-sm` still win — a media query adds no
+   specificity, so source order is the only thing deciding this. */
+@media (max-width: 380.98px) {
+  .ui-hud-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .ui-hud-tray {
+    gap: 0;
+    padding: 0.2rem;
+  }
+}
+
+/* Tone modifiers. Each carries its own :hover so it survives the base hover
+   rule. Every tone is paired with a different GLYPH in the markup — mic vs
+   mic-off, headphones vs headphone-off — so none of them is the only signal of
+   state. */
+.ui-hud-btn-on {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(125, 211, 252, 0.5);
+  color: #e0f2fe;
+}
+.ui-hud-btn-on:hover {
+  background: rgba(56, 189, 248, 0.34);
+}
+.ui-hud-btn-live {
+  background: rgba(74, 222, 128, 0.2);
+  border-color: rgba(134, 239, 172, 0.5);
+  color: #dcfce7;
+}
+.ui-hud-btn-live:hover {
+  background: rgba(74, 222, 128, 0.32);
+}
+.ui-hud-btn-off {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: rgba(253, 164, 175, 0.45);
+  color: #ffe4e6;
+}
+.ui-hud-btn-off:hover {
+  background: rgba(244, 63, 94, 0.3);
+}
+.ui-hud-btn-danger {
+  color: rgba(253, 164, 175, 0.9);
+}
+.ui-hud-btn-danger:hover {
+  background: rgba(244, 63, 94, 0.26);
+  color: #ffffff;
+}
+
+/* Labelled variant — same button, auto width for an icon + word. Declared
+   after the base so its `width: auto` wins. */
+.ui-hud-btn-wide {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.7rem;
+  white-space: nowrap;
+}
+
+/* Small square variant for steppers (bot +/-), which sit inside a tray that is
+   already at tap height and would look oversized at the full 40px. */
+.ui-hud-btn-sm {
+  width: calc(var(--ui-tap) - 12px);
+  height: calc(var(--ui-tap) - 12px);
+}
+.ui-hud-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ui-hud-btn:disabled:hover {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* Hairline between groups inside a tray — separates "exit the table" from the
+   toggles beside it, and the bot stepper from Rules/Arena. */
+.ui-hud-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.3rem 0.15rem;
+  background: rgba(255, 255, 255, 0.16);
+  flex-shrink: 0;
+}
+
+/* Divider between segments of the lobby status strip. */
+.ui-hud-dot {
+  width: 1px;
+  height: 0.85rem;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* --- Motion ---------------------------------------------------------- */
+
+/* Panel content swapping between tabs. Short and directional so a tab change
+   reads as a change without costing a frame of gameplay. */
+@keyframes ui-tab-in {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: none; }
+}
+.ui-tab-in {
+  animation: ui-tab-in 0.18s ease-out both;
+}
+
+@keyframes ui-reveal {
+  0% { opacity: 0; transform: scale(0.82); }
+  60% { transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.ui-reveal {
+  animation: ui-reveal 0.45s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+@keyframes ui-sheen {
+  0% { transform: translateX(-120%) skewX(-18deg); }
+  100% { transform: translateX(320%) skewX(-18deg); }
+}
+.ui-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+  animation: ui-sheen 2.6s ease-in-out 0.5s infinite;
+  pointer-events: none;
+}
+
+.ui-bump {
+  animation: hud-count-bump 0.4s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

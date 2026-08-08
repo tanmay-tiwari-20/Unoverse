@@ -8,6 +8,13 @@ import { useGameStore } from '../../store/useGameStore';
 /**
  * Transient notification stack (top-right). Announced politely so screen
  * readers pick up server feedback without stealing focus from the table.
+ *
+ * Sits ABOVE the modal band (1000–2100). Toasts are the confirmation that an
+ * action inside a dialog actually landed — "Arena set to Nebula", "House rules
+ * reset" — and both of those are fired from a modal that would otherwise cover
+ * them. Still below ConnectionOverlay (3000) and the rotate prompt (10000):
+ * when the socket is down or the phone is the wrong way round, nothing else
+ * matters.
  */
 export const ToastStack: React.FC = () => {
   const toasts = useGameStore((s) => s.toasts);
@@ -15,7 +22,7 @@ export const ToastStack: React.FC = () => {
 
   return (
     <div
-      className="fixed top-16 sm:top-4 right-2 sm:right-4 z-[999] flex flex-col gap-2 pointer-events-none max-w-[72vw] sm:max-w-sm w-full safe-x"
+      className="fixed top-16 sm:top-4 right-2 sm:right-4 z-[2500] flex flex-col gap-2 pointer-events-none max-w-[72vw] sm:max-w-sm w-full safe-x"
       role="status"
       aria-live="polite"
       aria-atomic="false"

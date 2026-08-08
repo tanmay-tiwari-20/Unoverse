@@ -6,7 +6,7 @@
  * ============================================================================
  *
  * "X came online", "Y accepted your friend request", "Z started playing". Sits
- * BELOW the gameplay toast stack (which owns `top-4 … z-[999]`) and at a lower
+ * BELOW the gameplay toast stack (which owns `top-4 … z-[2500]`) and at a lower
  * z-index, so a social nicety can never cover a turn warning or an error the
  * player has to act on.
  *

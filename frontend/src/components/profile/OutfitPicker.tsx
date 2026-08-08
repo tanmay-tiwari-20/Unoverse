@@ -15,6 +15,11 @@
  * currently selected. It is driven straight off the controlled `value`, so the
  * mannequin re-skins on the same render as the swatch highlight — no local
  * mirror of the selection, nothing to keep in sync.
+ *
+ * `showPreview={false}` suppresses it for hosts that already show a bigger
+ * mannequin of their own (the profile modal's hero). That is a PERFORMANCE
+ * contract, not a styling one: two `PreviewStage`s means two WebGL contexts on a
+ * screen that only ever needs one.
  */
 import React from "react";
 import { motion } from "framer-motion";
@@ -26,9 +31,11 @@ interface OutfitPickerProps {
   value: string;
   onChange: (key: string) => void;
   disabled?: boolean;
+  /** Render the built-in 3D preview above the grid. Default true. */
+  showPreview?: boolean;
 }
 
-export function OutfitPicker({ value, onChange, disabled }: OutfitPickerProps) {
+export function OutfitPicker({ value, onChange, disabled, showPreview = true }: OutfitPickerProps) {
   // Same catalog lookup the stage does internally — used here only for the
   // preview's backdrop tint and caption, so those track the selection too.
   const selectedOutfit = getOutfit(value);
@@ -37,19 +44,21 @@ export function OutfitPicker({ value, onChange, disabled }: OutfitPickerProps) {
     <div className="flex flex-col gap-3">
       {/* Live preview. The stage paints no background of its own, so the
           outfit's own gradient shows through behind the character. */}
-      <div
-        className={`relative overflow-hidden rounded-2xl border-[3px] border-white/20 bg-gradient-to-b ${selectedOutfit.gradient} shadow-[0_3px_0_0_rgba(0,0,0,0.3)]`}
-      >
-        <div className="absolute inset-0 bg-black/25" />
-        <PreviewStage
-          // Remount-free re-skin: the key is data, not identity.
-          outfitKey={value}
-          className="relative h-48 w-full sm:h-56"
-        />
-        <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/45 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white/85">
-          {selectedOutfit.label}
-        </span>
-      </div>
+      {showPreview && (
+        <div
+          className={`relative overflow-hidden rounded-2xl border-[3px] border-white/20 bg-gradient-to-b ${selectedOutfit.gradient} shadow-[0_3px_0_0_rgba(0,0,0,0.3)]`}
+        >
+          <div className="absolute inset-0 bg-black/25" />
+          <PreviewStage
+            // Remount-free re-skin: the key is data, not identity.
+            outfitKey={value}
+            className="relative h-48 w-full sm:h-56"
+          />
+          <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/45 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white/85">
+            {selectedOutfit.label}
+          </span>
+        </div>
+      )}
 
       <div
         role="radiogroup"

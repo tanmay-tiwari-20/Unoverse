@@ -1,22 +1,54 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useMemo, useState } from "react";
 import { useSettingsStore } from "../../store/useSettingsStore";
-import { X, Bug, Keyboard, Info, Send, Layers, BookOpen, Sparkles, Wrench, SlidersHorizontal } from "lucide-react";
+import {
+  Bug,
+  Keyboard,
+  Info,
+  Send,
+  Layers,
+  BookOpen,
+  Sparkles,
+  Wrench,
+  SlidersHorizontal,
+  MousePointerClick,
+  ListChecks,
+} from "lucide-react";
 import { useGameStore } from "../../store/useGameStore";
-import { useDialogA11y } from "../../hooks/useDialogA11y";
+import {
+  Badge,
+  Button,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  Notice,
+  SectionLabel,
+  type BadgeTone,
+  type ModalSize,
+} from "./kit";
 import {
   normalizeHouseRules,
   getActiveRuleExplanations,
   ActiveRuleKind,
 } from "../../lib/houseRules";
 
+/**
+ * The four reference/utility dialogs — bug report, controls, about, and the
+ * how-to-play sheet. They all sit in the shared kit `Modal`, so the scrim,
+ * viewport-safe sizing, focus trap, Escape handling and open/close motion are
+ * identical to Settings, Friends, the arena picker and the roster. `ModalBase`
+ * is now just the small amount of shape they have in common.
+ */
 interface ModalBaseProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  subtitle?: React.ReactNode;
   icon: React.ComponentType<{ size?: number; className?: string }>;
+  size?: ModalSize;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -24,55 +56,27 @@ const ModalBase = ({
   isOpen,
   onClose,
   title,
+  subtitle,
   icon: Icon,
+  size = "md",
+  footer,
   children,
 }: ModalBaseProps) => {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = `help-modal-${title.replace(/\s+/g, "-").toLowerCase()}`;
 
-  // Focus trap + initial focus + focus restore + Escape-to-close.
-  useDialogA11y(dialogRef, isOpen, onClose);
-
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6"
-          onClick={onClose}
-        >
-          <motion.div
-            ref={dialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            tabIndex={-1}
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[88dvh]"
-          >
-            <div className="flex items-center justify-between px-6 py-4 border-b-2 border-white/15 bg-red-600/20 short:px-4 short:py-2">
-              <h2 id={titleId} className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm flex items-center gap-2">
-                <Icon size={20} className="text-white" /> {title}
-              </h2>
-              <button
-                onClick={onClose}
-                className="chip-arcade w-9 h-9 flex items-center justify-center text-white bg-gradient-to-b from-rose-500 to-red-700 cursor-pointer"
-                aria-label={`Close ${title.toLowerCase()}`}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 short:p-4">{children}</div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <Modal open={isOpen} onClose={onClose} size={size} labelledBy={titleId}>
+      <ModalHeader
+        id={titleId}
+        title={title}
+        subtitle={subtitle}
+        icon={<Icon size={18} />}
+        onClose={onClose}
+        closeLabel={`Close ${title.toLowerCase()}`}
+      />
+      <ModalBody>{children}</ModalBody>
+      {footer && <ModalFooter>{footer}</ModalFooter>}
+    </Modal>
   );
 };
 
@@ -92,14 +96,12 @@ export const ReportBugModal = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: report }),
-      }).catch((e) =>
-        console.error("No real endpoint yet, but simulated success"),
-      );
+      }).catch(() => console.error("No real endpoint yet, but simulated success"));
 
       addToast("Bug report sent successfully!", "success");
       setReport("");
       setIsReportBugOpen(false);
-    } catch (e) {
+    } catch {
       addToast("Failed to send bug report", "error");
     } finally {
       setSending(false);
@@ -111,31 +113,46 @@ export const ReportBugModal = () => {
       isOpen={isReportBugOpen}
       onClose={() => setIsReportBugOpen(false)}
       title="Report Bug"
+      subtitle="Found a glitch? Tell us what happened"
       icon={Bug}
-    >
-      <div className="flex flex-col gap-4">
-        <p className="text-sm text-slate-300">
-          Found a glitch or issue? Let us know so we can fix it.
-        </p>
-        <textarea
-          value={report}
-          onChange={(e) => setReport(e.target.value)}
-          placeholder="Describe the issue you encountered..."
-          className="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-blue-500 resize-none"
-        />
-        <div className="flex justify-end mt-2">
-          <button
+      footer={
+        <>
+          <span className="flex-1" />
+          <Button
+            tone="primary"
             onClick={handleSubmit}
             disabled={sending || !report.trim()}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:bg-slate-800 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-colors"
+            icon={<Send size={14} aria-hidden="true" />}
           >
-            {sending ? "Sending..." : "Submit"} <Send size={14} />
-          </button>
-        </div>
-      </div>
+            {sending ? "Sending…" : "Submit"}
+          </Button>
+        </>
+      }
+    >
+      <label
+        htmlFor="bug-report-text"
+        className="font-rounded text-[11px] font-bold leading-snug text-white/60"
+      >
+        What went wrong? The more specific the better — what you did, what you expected, and what
+        happened instead.
+      </label>
+      <textarea
+        id="bug-report-text"
+        value={report}
+        onChange={(e) => setReport(e.target.value)}
+        placeholder="Describe the issue you encountered..."
+        className="ui-input h-32 resize-none p-3 text-[12px] leading-snug"
+      />
     </ModalBase>
   );
 };
+
+const CONTROLS: { keys: string; action: string }[] = [
+  { keys: "Drag / Swipe", action: "Rotate the camera" },
+  { keys: "Scroll / Pinch", action: "Zoom in and out" },
+  { keys: "Click card", action: "Play that card" },
+  { keys: "Esc", action: "Close menus" },
+];
 
 export const ControlsModal = () => {
   const { isControlsOpen, setIsControlsOpen } = useSettingsStore();
@@ -145,34 +162,30 @@ export const ControlsModal = () => {
       isOpen={isControlsOpen}
       onClose={() => setIsControlsOpen(false)}
       title="Controls"
+      subtitle="Same on mouse and touch"
       icon={Keyboard}
+      size="sm"
     >
-      <div className="space-y-4">
-        <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-          <span className="text-sm text-slate-300 font-bold uppercase tracking-wider">
-            Drag / Swipe
-          </span>
-          <span className="text-xs text-slate-400">Rotate Camera</span>
-        </div>
-        <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-          <span className="text-sm text-slate-300 font-bold uppercase tracking-wider">
-            Scroll / Pinch
-          </span>
-          <span className="text-xs text-slate-400">Zoom In/Out</span>
-        </div>
-        <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-          <span className="text-sm text-slate-300 font-bold uppercase tracking-wider">
-            Click Card
-          </span>
-          <span className="text-xs text-slate-400">Play Card</span>
-        </div>
-        <div className="flex justify-between items-center py-2 border-b border-slate-800/50">
-          <span className="text-sm text-slate-300 font-bold uppercase tracking-wider">
-            ESC
-          </span>
-          <span className="text-xs text-slate-400">Close Menus</span>
-        </div>
-      </div>
+      <SectionLabel icon={<MousePointerClick size={11} aria-hidden="true" />}>
+        At the table
+      </SectionLabel>
+      <ul className="ui-card overflow-hidden">
+        {CONTROLS.map((c, i) => (
+          <li
+            key={c.keys}
+            className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+              i === 0 ? "" : "border-t border-white/[0.07]"
+            }`}
+          >
+            <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-1 text-[10px] uppercase tracking-wide text-white/90">
+              {c.keys}
+            </span>
+            <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/60">
+              {c.action}
+            </span>
+          </li>
+        ))}
+      </ul>
     </ModalBase>
   );
 };
@@ -186,20 +199,21 @@ export const AboutModal = () => {
       onClose={() => setIsAboutOpen(false)}
       title="About"
       icon={Info}
+      size="sm"
     >
-      <div className="flex flex-col items-center justify-center gap-4 text-center py-4">
-        <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-red-700 rounded-2xl flex items-center justify-center shadow-[0_0_30px_rgba(220,38,38,0.4)] border border-white/10 mb-2">
-          <Layers size={30} className="text-white" />
+      <div className="flex flex-col items-center justify-center gap-3 py-2 text-center">
+        <div className="mb-1 grid h-16 w-16 place-items-center rounded-2xl border-2 border-white/15 bg-gradient-to-br from-red-500 to-red-700 shadow-[0_0_30px_rgba(220,38,38,0.4)]">
+          <Layers size={30} className="text-white" aria-hidden="true" />
         </div>
-        <h3 className="text-xl font-black uppercase tracking-widest text-white">
+        <h3 className="font-arcade arcade-stroke-sm text-lg uppercase tracking-widest text-white">
           Unoverse
         </h3>
-        <p className="text-sm text-slate-400 leading-relaxed">
-          An immersive 3D real-time multiplayer UNO game. Sit around a virtual
-          table with friends, play with a fully server-authoritative rules
-          engine, react with emotes, and talk over built-in WebRTC voice chat.
+        <p className="font-rounded max-w-[38ch] text-[12px] font-bold leading-relaxed text-white/55">
+          An immersive 3D real-time multiplayer UNO game. Sit around a virtual table with friends,
+          play with a fully server-authoritative rules engine, react with emotes, and talk over
+          built-in WebRTC voice chat.
         </p>
-        <p className="text-[10px] text-slate-500 font-mono mt-4">v1.0.0-beta</p>
+        <p className="font-arcade mt-2 text-[10px] tracking-widest text-white/30">v1.0.0-beta</p>
       </div>
     </ModalBase>
   );
@@ -215,11 +229,15 @@ const CORE_RULES: { t: string; d: string }[] = [
 ];
 
 // Small colored tag per rule kind so standard-rule changes vs. extra mechanics
-// vs. configurable values are visually distinct and easy to scan.
-const KIND_TAG: Record<ActiveRuleKind, { label: string; cls: string; Icon: React.ComponentType<{ size?: number; className?: string }> }> = {
-  addon: { label: "Extra", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", Icon: Sparkles },
-  modifier: { label: "Modified", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30", Icon: Wrench },
-  config: { label: "Setting", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30", Icon: SlidersHorizontal },
+// vs. configurable values are visually distinct and easy to scan. Each carries a
+// glyph and a word, so the distinction never rests on colour alone.
+const KIND_TAG: Record<
+  ActiveRuleKind,
+  { label: string; tone: BadgeTone; Icon: React.ComponentType<{ size?: number; className?: string }> }
+> = {
+  addon: { label: "Extra", tone: "good", Icon: Sparkles },
+  modifier: { label: "Modified", tone: "gold", Icon: Wrench },
+  config: { label: "Setting", tone: "info", Icon: SlidersHorizontal },
 };
 
 export const RulesModal = () => {
@@ -233,67 +251,77 @@ export const RulesModal = () => {
       isOpen={isRulesOpen}
       onClose={() => setIsRulesOpen(false)}
       title="How to Play"
+      subtitle={
+        activeRules.length === 0
+          ? "Standard rules at this table"
+          : `${activeRules.length} house rule${activeRules.length === 1 ? "" : "s"} active at this table`
+      }
       icon={BookOpen}
     >
-      <div className="space-y-6">
-        {/* Core / standard rules */}
-        <section>
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 border-b border-slate-800/60 pb-2">
-            The Basics
-          </h3>
-          <ul className="space-y-2.5">
-            {CORE_RULES.map((r) => (
-              <li key={r.t} className="flex gap-2.5">
-                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" aria-hidden="true" />
-                <p className="text-[13px] leading-snug text-slate-300">
-                  <span className="font-bold text-white">{r.t}.</span>{" "}
-                  <span className="font-rounded">{r.d}</span>
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {/* Core / standard rules. One card, divider-separated rows — the old
+          version was a loose bullet list, which read as prose rather than as
+          six things you can look up. */}
+      <section className="flex flex-col gap-1.5">
+        <SectionLabel icon={<ListChecks size={11} aria-hidden="true" />}>The basics</SectionLabel>
+        <ul className="ui-card overflow-hidden">
+          {CORE_RULES.map((r, i) => (
+            <li
+              key={r.t}
+              className={`px-3 py-2 ${i === 0 ? "" : "border-t border-white/[0.07]"}`}
+            >
+              <p className="font-rounded text-[12px] leading-snug text-white/60">
+                <span className="font-bold text-white">{r.t}.</span> {r.d}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
 
-        {/* Dynamic house rules for THIS lobby */}
-        <section>
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-yellow-300 mb-1 flex items-center gap-2 border-b border-yellow-900/40 pb-2">
-            <Sparkles size={12} /> House Rules in This Lobby
-          </h3>
-          <p className="text-[10px] text-slate-500 font-rounded mb-3 mt-1">
-            The host has these rules active right now. They can only be changed from the lobby.
-          </p>
+      {/* Dynamic house rules for THIS lobby */}
+      <section className="flex flex-col gap-1.5">
+        <SectionLabel
+          icon={<Sparkles size={11} aria-hidden="true" />}
+          trailing={
+            activeRules.length > 0 ? (
+              <span className="font-arcade text-[11px] tabular-nums text-yellow-300">
+                {activeRules.length}
+              </span>
+            ) : undefined
+          }
+        >
+          House rules here
+        </SectionLabel>
 
-          {activeRules.length === 0 ? (
-            <p className="text-[12px] text-slate-400 font-rounded italic py-2">
-              Standard rules only — no special house rules are active.
+        {activeRules.length === 0 ? (
+          <Notice tone="info" icon={<Info size={13} aria-hidden="true" />}>
+            Standard rules only — no special house rules are active in this lobby.
+          </Notice>
+        ) : (
+          <>
+            <p className="font-rounded px-0.5 text-[10px] font-bold leading-snug text-white/40">
+              The host has these active right now. They can only be changed from the lobby.
             </p>
-          ) : (
-            <ul className="space-y-2">
+            <ul className="flex flex-col" style={{ gap: "var(--ui-gap-tight)" }}>
               {activeRules.map((rule) => {
                 const tag = KIND_TAG[rule.kind];
                 return (
-                  <li
-                    key={rule.key}
-                    className="rounded-xl bg-slate-900/50 border border-slate-800 p-3"
-                  >
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="text-[12px] font-bold uppercase tracking-wide text-white">
+                  <li key={rule.key} className="ui-card px-3 py-2">
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <span className="font-rounded text-[12px] font-bold uppercase tracking-wide text-white">
                         {rule.label}
                       </span>
-                      <span className={`inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${tag.cls}`}>
-                        <tag.Icon size={9} /> {tag.label}
-                      </span>
+                      <Badge tone={tag.tone} icon={<tag.Icon size={9} aria-hidden="true" />}>
+                        {tag.label}
+                      </Badge>
                     </div>
-                    <p className="text-[12px] leading-snug text-slate-400 font-rounded">
-                      {rule.text}
-                    </p>
+                    <p className="font-rounded text-[12px] leading-snug text-white/55">{rule.text}</p>
                   </li>
                 );
               })}
             </ul>
-          )}
-        </section>
-      </div>
+          </>
+        )}
+      </section>
     </ModalBase>
   );
 };

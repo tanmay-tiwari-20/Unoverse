@@ -6,9 +6,10 @@
  * ============================================================================
  *
  * Search rows and request rows differ only in which action buttons they carry,
- * so they share one row and take their buttons as children. Keeping them
- * together means the avatar/name/status geometry can never drift between the
- * two tabs.
+ * so they share one row and take their buttons as children. Both now render
+ * through `SocialRow`, which means the avatar / name / Player ID / status
+ * geometry is literally the same component the friends list uses and cannot
+ * drift between tabs.
  *
  * As with `FriendCard`, the SERVER decides what is possible: search rows read
  * `relationship` and `canSendRequest` straight from the payload rather than
@@ -16,10 +17,8 @@
  */
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { PresetAvatar } from '../profile/PresetAvatar';
-import { PresenceDot, isLive, presenceLabel, presenceTextClass } from './PresenceDot';
-import { PlayerIdTag } from './PlayerIdTag';
+import { SocialRow } from './SocialRow';
+import { isLive, presenceLabel, presenceTextClass } from './PresenceDot';
 import { formatRelative } from '../../lib/profile/format';
 import type { PlayerSummary, PresenceView } from '../../types/social';
 
@@ -46,48 +45,28 @@ const PlayerRowBase: React.FC<PlayerRowProps> = ({
   const view = presence ?? player.presence;
   const live = isLive(view.status);
 
+  const meta = subtitle ?? (
+    <>
+      {presenceLabel(view.status)}
+      {view.status === 'offline' && view.lastSeenAt
+        ? ` · ${formatRelative(view.lastSeenAt, now)}`
+        : ''}
+    </>
+  );
+
   return (
-    <motion.div
-      layout="position"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-      className="chip-arcade bg-white/5 hover:bg-white/[0.09] transition-colors flex items-center gap-3 py-2.5 px-3"
+    <SocialRow
+      profileId={player.profileId}
+      displayName={player.displayName}
+      avatarUrl={player.avatarUrl}
+      status={view.status}
+      live={live}
+      meta={meta}
+      metaClass={subtitle ? 'text-white/45' : presenceTextClass(view.status)}
+      onOpenProfile={onOpenProfile}
     >
-      <button
-        type="button"
-        onClick={() => onOpenProfile(player.profileId)}
-        className="flex items-center gap-3 min-w-0 flex-1 text-left cursor-pointer"
-        aria-label={`View ${player.displayName}'s profile`}
-      >
-        <span className="relative shrink-0">
-          <PresetAvatar avatarKey={player.avatarUrl} size={40} />
-          <span className="absolute -bottom-0.5 -right-0.5">
-            <PresenceDot status={view.status} size={12} halo={live} />
-          </span>
-        </span>
-
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-1.5">
-            <span className="font-rounded font-bold text-white text-sm truncate">{player.displayName}</span>
-            <PlayerIdTag id={player.profileId} className="text-white/35" />
-          </span>
-          {subtitle ? (
-            <span className="block font-rounded text-[0.66rem] text-white/45 truncate">{subtitle}</span>
-          ) : (
-            <span className={`block font-rounded text-[0.66rem] truncate ${presenceTextClass(view.status)}`}>
-              {presenceLabel(view.status)}
-              {view.status === 'offline' && view.lastSeenAt
-                ? ` · ${formatRelative(view.lastSeenAt, now)}`
-                : ''}
-            </span>
-          )}
-        </span>
-      </button>
-
-      <div className="flex items-center gap-1.5 shrink-0">{children}</div>
-    </motion.div>
+      {children}
+    </SocialRow>
   );
 };
 
