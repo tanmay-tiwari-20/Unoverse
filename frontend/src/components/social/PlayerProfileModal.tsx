@@ -31,7 +31,7 @@ import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Trophy, Flame, History, Swords, Layers, DoorOpen, Send, UserPlus, UserMinus,
-  Check, Clock, EyeOff, Ban, Map as MapIcon, Users, Copy,
+  Check, Clock, EyeOff, Ban, Map as MapIcon, Users,
 } from 'lucide-react';
 import { useDialogA11y } from '../../hooks/useDialogA11y';
 import { useNow } from '../../hooks/useNow';
@@ -43,6 +43,7 @@ import {
 } from '../../lib/social/socialClient';
 import { PresetAvatar } from '../profile/PresetAvatar';
 import { PresenceDot, isLive, presenceLabel, presenceTextClass } from './PresenceDot';
+import { PlayerIdTag } from './PlayerIdTag';
 import { getArenaMeta } from '../../lib/arenas/registry';
 import {
   formatWinRate, formatPlayTime, formatDuration, formatDate, formatRelative, formatPlacement,
@@ -221,7 +222,9 @@ export const PlayerProfileModal: React.FC = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-1.5 flex-wrap">
                         <span className="font-arcade text-2xl text-white truncate">{profile.displayName}</span>
-                        <span className="font-rounded font-bold text-white/45 text-sm">#{profile.tag}</span>
+                        {/* Player ID, not the legacy tag: names repeat, this does
+                            not. Muted and one size down so the name still leads. */}
+                        <PlayerIdTag id={profile.profileId} copyable size="text-sm" />
                       </div>
                       {presence && (
                         <span className={`block font-rounded text-xs font-bold ${presenceTextClass(presence.status)}`}>
@@ -231,7 +234,6 @@ export const PlayerProfileModal: React.FC = () => {
                             : ''}
                         </span>
                       )}
-                      <PlayerIdLine profileId={profile.profileId} />
                     </div>
                   </div>
 
@@ -429,32 +431,6 @@ export const PlayerProfileModal: React.FC = () => {
     </AnimatePresence>
   );
 };
-
-/** Copyable Player ID, matching the owner-profile modal's affordance. */
-function PlayerIdLine({ profileId }: { profileId: string }) {
-  const [copied, setCopied] = React.useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(profileId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard may be unavailable; the id is still visible to read.
-    }
-  };
-  return (
-    <button
-      onClick={copy}
-      className="mt-0.5 inline-flex items-center gap-1.5 font-rounded text-[0.66rem] text-white/40 hover:text-white/70 transition-colors cursor-pointer"
-      title={profileId}
-      aria-label="Copy Player ID"
-    >
-      <span className="uppercase tracking-wide">ID</span>
-      <span className="font-mono truncate max-w-[9rem]">{profileId}</span>
-      {copied ? <Check size={11} className="text-lime-400" /> : <Copy size={11} />}
-    </button>
-  );
-}
 
 function ProfileSkeleton() {
   return (

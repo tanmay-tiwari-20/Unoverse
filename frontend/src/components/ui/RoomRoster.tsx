@@ -146,7 +146,7 @@ export const RoomRoster: React.FC = () => {
                       <Crown size={12} className="text-yellow-300 shrink-0" aria-label="Host" />
                     )}
                     {/* Bots have no voice connection — nothing to mute */}
-                    {!p.isBot && <PeerMuteButton name={p.name} isLocal={isLocal} />}
+                    {!p.isBot && <PeerMuteButton uid={p.uid} name={p.name} isLocal={isLocal} />}
                   </li>
                 );
               })}
@@ -174,9 +174,10 @@ export const RoomRoster: React.FC = () => {
               {spectatorCount > 0 ? (
                 <ul className="mt-1 space-y-1" aria-label="Spectators">
                   {spectators.map((s) => {
-                    // The local spectator is identified by name (stable across
-                    // socket reconnects, matching how players are matched).
-                    const isLocalSpec = isSpectator && !!spectator && s.name === spectator.name;
+                    // The local spectator is identified by seat uid: stable across
+                    // socket reconnects like the name was, but unique even when two
+                    // spectators share a display name.
+                    const isLocalSpec = isSpectator && !!spectator && s.uid === spectator.uid;
                     return (
                       <li
                         key={s.id}
@@ -189,7 +190,7 @@ export const RoomRoster: React.FC = () => {
                           {s.name}
                           {isLocalSpec && <span className="text-cyan-300"> (You)</span>}
                         </span>
-                        <PeerMuteButton name={s.name} isLocal={isLocalSpec} />
+                        <PeerMuteButton uid={s.uid} name={s.name} isLocal={isLocalSpec} />
                       </li>
                     );
                   })}

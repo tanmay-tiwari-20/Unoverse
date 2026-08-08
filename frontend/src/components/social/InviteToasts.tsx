@@ -27,6 +27,7 @@ import { useGameStore } from '../../store/useGameStore';
 import { useSocialStore } from '../../store/useSocialStore';
 import { acceptInvite, declineInvite } from '../../lib/social/socialClient';
 import { PresetAvatar } from '../profile/PresetAvatar';
+import { PlayerIdTag } from './PlayerIdTag';
 import { getArenaMeta } from '../../lib/arenas/registry';
 import type { InviteView } from '../../types/social';
 
@@ -113,7 +114,7 @@ function InviteCard({
         <div className="min-w-0 flex-1">
           <div className="font-rounded font-bold text-white text-sm truncate flex items-baseline gap-1.5">
             <span className="truncate">{invite.from.displayName}</span>
-            <span className="font-rounded text-[0.6rem] text-white/35 shrink-0">#{invite.from.tag}</span>
+            <PlayerIdTag id={invite.from.profileId} className="text-white/35" />
           </div>
           <div className="font-rounded text-[0.68rem] text-white/55 truncate flex items-center gap-1">
             <DoorOpen size={11} className="text-white/40 shrink-0" />

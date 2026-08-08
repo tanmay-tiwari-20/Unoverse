@@ -235,8 +235,8 @@ interface SeatDescriptor {
 export const WebGLSeats: React.FC = () => {
   // NARROWED SUBSCRIPTION (perf): re-render ONLY when the seat-relevant slice of
   // the room actually changes. We subscribe to a cheap primitive SIGNATURE built
-  // from just the fields that affect seating — each occupant's id/name/outfit and
-  // their order, the active-turn id, and the local player's identity. A room swap
+  // from just the fields that affect seating — each occupant's id/uid/name/outfit
+  // and their order, the active-turn id, and the local player's identity. A room swap
   // that leaves these identical (a chat message, another player's ready flag, a
   // house-rule edit) yields the SAME string, so `Object.is` bails the re-render
   // and the entire 3D seat tree is left untouched. Every room broadcast mints
@@ -246,9 +246,9 @@ export const WebGLSeats: React.FC = () => {
     const r = state.room;
     if (!r) return '';
     const roster = (r.players || [])
-      .map((p) => `${p.id}~${p.name}~${p.outfit ?? ''}`)
+      .map((p) => `${p.id}~${p.uid}~${p.name}~${p.outfit ?? ''}`)
       .join('|');
-    return `${roster}#${state.currentPlayerId ?? ''}#${state.player?.id ?? ''}#${state.player?.name ?? ''}`;
+    return `${roster}#${state.currentPlayerId ?? ''}#${state.player?.id ?? ''}#${state.player?.uid ?? ''}`;
   });
 
   // Defer the seat signature in lockstep with RoomEnvironment's deferred player
@@ -286,9 +286,10 @@ export const WebGLSeats: React.FC = () => {
 
     const out: SeatDescriptor[] = [];
     playersList.forEach((occupant, idx) => {
-      // Skip the local player (first person). Name match is resilient to socket
-      // reconnects — unchanged from the original.
-      if (occupant.name === player?.name) return;
+      // Skip the local player (first person). Matched on the stable seat uid,
+      // which survives socket reconnects like the name did — and, unlike the
+      // name, cannot collide with an opponent who chose the same one.
+      if (occupant.uid === player?.uid) return;
 
       // Seat angle — local player anchored at angle 0 (unchanged math).
       const relativeIndex = (idx - safeLocalIndex + numPlayers) % numPlayers;

@@ -529,7 +529,9 @@ app.post('/api/rooms', createRoomLimiter, (req, res) => {
 app.post('/api/rooms/quickplay', createRoomLimiter, (req, res) => {
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-    const matched = roomManager.findQuickPlayRoom(name || undefined);
+    // The name is only ever echoed into the log line below — matchmaking picks a
+    // table on capacity and age, never on who is already sitting there by name.
+    const matched = roomManager.findQuickPlayRoom();
     if (matched) {
       logger.debug(`[QUICKPLAY] Matched "${name}" into public room ${matched.code}`);
       res.status(200).json({ code: matched.code, created: false });
@@ -545,8 +547,12 @@ app.post('/api/rooms/quickplay', createRoomLimiter, (req, res) => {
 });
 
 // Join Room API (Validation step)
+//
+// A PREDICTION, not a decision: it tells the client what will most likely happen
+// so the UI can warn early. The authoritative gate is roomManager.joinRoom, and
+// this reads its numbers from the same helper so the two cannot drift.
 app.post('/api/rooms/join', (req, res) => {
-  const { code, name } = req.body;
+  const { code, name, secret, profileId, profileSecret } = req.body;
 
   if (!code || !name) {
     res.status(400).json({ error: 'Room code and display name are required' });
@@ -562,10 +568,21 @@ app.post('/api/rooms/join', (req, res) => {
     return;
   }
 
-  // If the player is reconnecting with the same name (as a seated player OR an
-  // existing spectator), let them through and predict their existing role.
-  const reconnectingAsPlayer = room.players.some(p => p.name.toLowerCase() === name.toLowerCase());
-  const reconnectingAsSpectator = room.spectators?.some(s => s.name.toLowerCase() === name.toLowerCase()) ?? false;
+  // Predict reconnection the same way joinRoom decides it: by IDENTITY. A
+  // verified Player ID, or the per-seat secret — never by display name, which
+  // two people in this room may legitimately share. Someone arriving with a name
+  // that matches a seated player but no credentials is a different person, and is
+  // predicted (correctly) as a new joiner.
+  const identity =
+    typeof profileId === 'string' && typeof profileSecret === 'string'
+      ? resolveProfileIdentity(profileId, profileSecret)
+      : undefined;
+  const seatSecret = typeof secret === 'string' ? secret : undefined;
+  const heldBy = <T extends { secret: string; profileId?: string }>(m: T): boolean =>
+    (!!identity && m.profileId === identity.profileId) || (!!seatSecret && m.secret === seatSecret);
+
+  const reconnectingAsPlayer = room.players.some((p) => !p.isBot && heldBy(p));
+  const reconnectingAsSpectator = room.spectators?.some(heldBy) ?? false;
 
   // Capacity numbers come from the SAME roomManager helper the join gate uses,
   // so this pre-check can never drift from the authoritative decision.
@@ -767,7 +784,10 @@ function resolveProfileIdentity(
 io.on('connection', (socket) => {
   logger.debug(`[Socket] Client connected: ${socket.id}`);
 
-  // Track room code on the socket object for easier disconnect handling
+  // Track room code on the socket object for easier disconnect handling.
+  // `currentName` is a LOG LABEL only — never an identity, never used to find a
+  // seat. It mirrors the server's own record of the seat's display name so log
+  // lines stay truthful after a rename.
   let currentRoomCode: string | null = null;
   let currentName: string | null = null;
 
@@ -837,11 +857,11 @@ io.on('connection', (socket) => {
       const { player, isSpectator } = roomManager.joinRoom(room.code, name, socket.id, undefined, identity);
 
       currentRoomCode = room.code;
-      currentName = name;
+      currentName = player?.name ?? name;
       socket.join(room.code);
       socialEnterRoom(socket.id, room.code);
 
-      logger.debug(`[Socket] Host ${name} (${socket.id}) created and joined room ${room.code}`);
+      logger.debug(`[Socket] Host ${currentName} (${socket.id}) created and joined room ${room.code}`);
 
       // The owner receives their own player object including its private secret;
       // the room is sanitized so no other player's secret is exposed.
@@ -865,14 +885,14 @@ io.on('connection', (socket) => {
       const { room, player, isSpectator, spectator } = roomManager.joinRoom(upperCode, name, socket.id, secret, identity);
 
       currentRoomCode = upperCode;
-      currentName = name;
+      currentName = player?.name ?? spectator?.name ?? name;
       socket.join(upperCode);
       socialEnterRoom(socket.id, upperCode);
 
       if (isSpectator) {
-        logger.debug(`[Socket] Spectator ${name} (${socket.id}) joined room ${upperCode}`);
+        logger.debug(`[Socket] Spectator ${currentName} (${socket.id}) joined room ${upperCode}`);
       } else {
-        logger.debug(`[Socket] Player ${name} (${socket.id}) joined room ${upperCode} at Seat ${player?.seatNumber}`);
+        logger.debug(`[Socket] Player ${currentName} (${socket.id}) joined room ${upperCode} at Seat ${player?.seatNumber}`);
       }
 
       // Notify the joining socket. Their own player/spectator object keeps its
@@ -880,8 +900,8 @@ io.on('connection', (socket) => {
       socket.emit('joined-successfully', { room: roomManager.publicRoom(room), player, isSpectator, spectator });
 
       if (isSpectator) {
-        // Notify others that a spectator joined
-        socket.to(upperCode).emit('spectator-joined', { name, id: socket.id });
+        // Notify others that a spectator joined (under the SERVER's sanitized name).
+        socket.to(upperCode).emit('spectator-joined', { name: currentName, id: socket.id });
       } else if (player) {
         // Notify others that a player joined (without the secret)
         socket.to(upperCode).emit('player-joined', roomManager.publicPlayer(player));
@@ -1107,10 +1127,13 @@ io.on('connection', (socket) => {
         const finalized = roomManager.finalizeRound(currentRoomCode);
         // Re-broadcast so clients receive the updated match scores with the ended state.
         broadcastGameState(currentRoomCode);
-        logger.debug(`[Socket] Round in room ${currentRoomCode} ended. Winner: ${currentName}`);
+        logger.debug(`[Socket] Round in room ${currentRoomCode} ended. Winner: ${player?.name ?? 'Unknown'}`);
         io.to(currentRoomCode).emit('game-ended', {
           winnerId: socket.id,
-          winnerName: currentName,
+          // Display name read from the SEAT, not from what this client told us its
+          // name was at join time — the seat is the server's own record.
+          winnerName: player?.name ?? null,
+          winnerUid: player?.uid ?? null,
           roundResult: finalized?.result ?? null,
           matchWon: finalized?.matchWon ?? false,
           match: room.match ?? null,

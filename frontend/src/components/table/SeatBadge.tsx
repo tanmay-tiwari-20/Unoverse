@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Bot, Mic, VolumeX } from 'lucide-react';
-import { useVoiceStore, localMuteKey } from '../../store/useVoiceStore';
+import { useVoiceStore } from '../../store/useVoiceStore';
 
 /**
  * The single, world-anchored badge that represents one opponent seat.
@@ -24,6 +24,9 @@ import { useVoiceStore, localMuteKey } from '../../store/useVoiceStore';
 export interface SeatBadgeProps {
   /** Socket/bot id — keys the per-peer voice status subscription. */
   playerId: string;
+  /** Stable seat uid — keys this client's personal mute, which the display name
+   *  cannot: two opponents may share a name. */
+  uid: string;
   name: string;
   cardCount: number;
   isActiveTurn: boolean;
@@ -36,6 +39,7 @@ export interface SeatBadgeProps {
 
 const SeatBadgeInner: React.FC<SeatBadgeProps> = ({
   playerId,
+  uid,
   name,
   cardCount,
   isActiveTurn,
@@ -47,7 +51,7 @@ const SeatBadgeInner: React.FC<SeatBadgeProps> = ({
   // fresh object only for the peer that changed, another peer speaking does not
   // change this selector's result → no re-render here.
   const voiceStatus = useVoiceStore((s) => s.peerStatuses[playerId]);
-  const isMutedByMe = useVoiceStore((s) => !!s.locallyMutedPeers[localMuteKey(name)]);
+  const isMutedByMe = useVoiceStore((s) => !!s.locallyMutedPeers[uid]);
   const isSpeaking = (voiceStatus?.isSpeaking ?? false) && !isMutedByMe;
 
   // A player is in an "UNO situation" when they hold a single card, or the server

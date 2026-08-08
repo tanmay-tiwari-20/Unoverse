@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useGameStore } from '../store/useGameStore';
-import { useVoiceStore, localMuteKey } from '../store/useVoiceStore';
+import { useVoiceStore } from '../store/useVoiceStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getIceServers } from '../lib/voice/iceServers';
 import { logger } from '../utils/logger';
@@ -48,15 +48,18 @@ interface SignalPayload {
   signalData: SignalData;
 }
 
-// Resolve a peer's stable name key from the live roster (players + spectators).
-// Personal mutes are keyed by name, not socket id, so they survive reconnects.
-const peerNameKey = (peerId: string): string | null => {
+// Resolve a peer's stable seat uid from the live roster (players + spectators).
+// Personal mutes are keyed by that uid rather than the socket id, so they survive
+// the peer reconnecting — and rather than the display name, which two people at
+// the table may share.
+const peerSeatUid = (peerId: string): string | null => {
   const r = useGameStore.getState().room;
   if (!r) return null;
-  const name =
-    r.players.find((p) => p.id === peerId)?.name ??
-    r.spectators?.find((s) => s.id === peerId)?.name;
-  return name ? localMuteKey(name) : null;
+  return (
+    r.players.find((p) => p.id === peerId)?.uid ??
+    r.spectators?.find((s) => s.id === peerId)?.uid ??
+    null
+  );
 };
 
 interface PeerEntry {
@@ -108,7 +111,7 @@ export const useVoiceChat = () => {
   const applyAudioOutput = useCallback((peerId: string, entry: { audioEl: HTMLAudioElement | null }) => {
     if (!entry.audioEl) return;
     const { isSpeakerEnabled, locallyMutedPeers } = useVoiceStore.getState();
-    const key = peerNameKey(peerId);
+    const key = peerSeatUid(peerId);
     const personallyMuted = !!(key && locallyMutedPeers[key]);
     entry.audioEl.muted = !isSpeakerEnabled || personallyMuted;
     const settings = useSettingsStore.getState();
@@ -461,18 +464,18 @@ export const useVoiceChat = () => {
         if (!ids.has(id)) useVoiceStore.getState().removePeerStatus(id);
       });
 
-      // Prune personal mutes for participants who left the room entirely (name
-      // no longer in the roster). A peer merely reconnecting keeps their roster
-      // entry, so their mute survives; a genuinely new joiner reusing the name
-      // later starts unmuted.
+      // Prune personal mutes for participants who left the room entirely (seat
+      // uid no longer in the roster). A peer merely reconnecting keeps their seat,
+      // so their mute survives; a later joiner gets a fresh uid and therefore
+      // starts unmuted even if they happen to pick the same name.
       const r = useGameStore.getState().room;
       if (r) {
-        const nameKeys = new Set<string>([
-          ...r.players.map((p) => localMuteKey(p.name)),
-          ...(r.spectators ?? []).map((s) => localMuteKey(s.name)),
+        const seatUids = new Set<string>([
+          ...r.players.map((p) => p.uid),
+          ...(r.spectators ?? []).map((s) => s.uid),
         ]);
         Object.keys(useVoiceStore.getState().locallyMutedPeers).forEach((key) => {
-          if (!nameKeys.has(key)) useVoiceStore.getState().setPeerLocalMute(key, false);
+          if (!seatUids.has(key)) useVoiceStore.getState().setPeerLocalMute(key, false);
         });
       }
 

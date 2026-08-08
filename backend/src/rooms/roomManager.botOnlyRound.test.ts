@@ -18,6 +18,13 @@ const seatHost = () => {
   return room;
 };
 
+/** Banked points for a seat. The scoreboard is keyed by seat uid, not by name. */
+const pointsOf = (code: string, socketId: string): number | undefined => {
+  const room = roomManager.getRoom(code)!;
+  const player = room.players.find((p) => p.id === socketId)!;
+  return room.match?.scores[player.uid]?.points;
+};
+
 describe('bot-only round completion (room level)', () => {
   beforeEach(() => {
     roomManager.setStore(new MemoryRoomStore());
@@ -56,7 +63,7 @@ describe('bot-only round completion (room level)', () => {
     expect(finalized.result.winnerName).toBe('Host');
     expect(finalized.result.pointsAwarded).toBe(79);
     expect(finalized.matchWon).toBe(false);
-    expect(roomManager.getRoom(code)!.match!.scores.host).toBe(79);
+    expect(pointsOf(code, hostId)).toBe(79);
 
     roomManager.leaveRoom(hostId);
   });
@@ -81,12 +88,12 @@ describe('bot-only round completion (room level)', () => {
     room.game = playCardAction(game, started.players, hostId, last.id);
     expect(room.game.status).toBe('ended');
     roomManager.finalizeRound(code);
-    expect(roomManager.getRoom(code)!.match!.scores.host).toBe(13);
+    expect(pointsOf(code, hostId)).toBe(13);
 
     // Multiple rounds: the next round starts clean with the score carried over.
     const next = roomManager.startGame(code, hostId);
     expect(next.match!.round).toBe(2);
-    expect(next.match!.scores.host).toBe(13);
+    expect(pointsOf(code, hostId)).toBe(13);
     expect(next.game!.status).toBe('playing');
     started.players.forEach((p) => expect(next.game!.hands[p.id]).toHaveLength(7));
 

@@ -20,6 +20,25 @@ function endRoundWith(code: string, winnerId: string, opponentHands: Record<stri
   game.hands = { [winnerId]: [], ...opponentHands };
 }
 
+/**
+ * Read a seat's banked points. Scores are keyed by the seat's `uid`, never by
+ * name — two players can share a display name, so a name-keyed scoreboard would
+ * silently merge their points.
+ */
+function pointsOf(code: string, socketId: string): number | undefined {
+  const room = roomManager.getRoom(code)!;
+  const player = room.players.find((p) => p.id === socketId)!;
+  return room.match?.scores[player.uid]?.points;
+}
+
+/** The scoreboard as `{ displayName: points }`, for whole-board assertions. */
+function boardOf(code: string): Record<string, number> {
+  const room = roomManager.getRoom(code)!;
+  const out: Record<string, number> = {};
+  for (const entry of Object.values(room.match!.scores)) out[entry.name] = entry.points;
+  return out;
+}
+
 describe('Match scoring across rounds', () => {
   beforeEach(() => {
     roomManager.setStore(new MemoryRoomStore());
@@ -38,7 +57,7 @@ describe('Match scoring across rounds', () => {
     expect(room.match).toBeDefined();
     expect(room.match!.round).toBe(1);
     expect(room.match!.targetScore).toBe(500);
-    expect(room.match!.scores).toEqual({ alice: 0, bob: 0 });
+    expect(boardOf(code)).toEqual({ Alice: 0, Bob: 0 });
   });
 
   it('banks the winner the sum of opponents’ cards and advances rounds', () => {
@@ -51,12 +70,12 @@ describe('Match scoring across rounds', () => {
     expect(r1.result.pointsAwarded).toBe(29);
     expect(r1.result.winnerName).toBe('Alice');
     expect(r1.matchWon).toBe(false);
-    expect(roomManager.getRoom(code)!.match!.scores.alice).toBe(29);
+    expect(pointsOf(code, 'a1')).toBe(29);
 
     // Next round: scores carry over, round increments.
     const room = roomManager.startGame(code, 'a1');
     expect(room.match!.round).toBe(2);
-    expect(room.match!.scores.alice).toBe(29);
+    expect(pointsOf(code, 'a1')).toBe(29);
     expect(room.match!.lastRound).toBeNull();
   });
 
@@ -66,7 +85,7 @@ describe('Match scoring across rounds', () => {
     endRoundWith(code, 'a1', { b1: [card('red', '5')] });
     roomManager.finalizeRound(code);
     roomManager.finalizeRound(code); // second call — should be a no-op
-    expect(roomManager.getRoom(code)!.match!.scores.alice).toBe(5);
+    expect(pointsOf(code, 'a1')).toBe(5);
   });
 
   it('declares a match winner once someone reaches the target score', () => {
@@ -80,11 +99,15 @@ describe('Match scoring across rounds', () => {
     const r = roomManager.finalizeRound(code)!;
     expect(r.matchWon).toBe(true);
     expect(room.match!.matchWinnerName).toBe('Alice');
+    // The seat, not just the label, is recorded as the winner.
+    const alice = room.players.find((p) => p.id === 'a1')!;
+    expect(room.match!.matchWinnerUid).toBe(alice.uid);
 
     // Starting again after a won match resets scores to a fresh match.
     const fresh = roomManager.startGame(code, 'a1');
     expect(fresh.match!.matchWinnerName).toBeNull();
+    expect(fresh.match!.matchWinnerUid).toBeNull();
     expect(fresh.match!.round).toBe(1);
-    expect(fresh.match!.scores).toEqual({ alice: 0, bob: 0 });
+    expect(boardOf(code)).toEqual({ Alice: 0, Bob: 0 });
   });
 });

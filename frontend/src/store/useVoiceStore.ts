@@ -8,23 +8,24 @@ interface PeerStatus {
 /**
  * Local mutes are PERSONAL: they only silence a peer's incoming audio on this
  * client and are never sent to the server or other players. They are keyed by
- * LOWERCASED participant name — the same stable identity the backend uses for
- * reconnection — so a mute survives the peer's socket id changing on reconnect.
+ * the peer's stable SEAT UID — minted server-side and preserved across that
+ * peer's reconnects — so a mute survives their socket id changing.
+ *
+ * Deliberately NOT the display name: two people at one table may legitimately
+ * share a name, and muting one of them must never silence the other.
  */
-export const localMuteKey = (name: string): string => name.trim().toLowerCase();
-
 interface VoiceState {
   isMicEnabled: boolean;
   isSpeakerEnabled: boolean;
   peerStatuses: Record<string, PeerStatus>;
-  /** Peers this client has personally muted (key: lowercased name -> true). */
+  /** Peers this client has personally muted (key: seat uid -> true). */
   locallyMutedPeers: Record<string, true>;
 
   setMicEnabled: (enabled: boolean) => void;
   setSpeakerEnabled: (enabled: boolean) => void;
   updatePeerStatus: (playerId: string, statusUpdate: Partial<PeerStatus>) => void;
   removePeerStatus: (playerId: string) => void;
-  setPeerLocalMute: (nameKey: string, muted: boolean) => void;
+  setPeerLocalMute: (seatUid: string, muted: boolean) => void;
   resetVoiceState: () => void;
 }
 
@@ -54,10 +55,10 @@ export const useVoiceStore = create<VoiceState>((set) => ({
     return { peerStatuses: newStatuses };
   }),
 
-  setPeerLocalMute: (nameKey, muted) => set((state) => {
+  setPeerLocalMute: (seatUid, muted) => set((state) => {
     const next = { ...state.locallyMutedPeers };
-    if (muted) next[nameKey] = true;
-    else delete next[nameKey];
+    if (muted) next[seatUid] = true;
+    else delete next[seatUid];
     return { locallyMutedPeers: next };
   }),
 

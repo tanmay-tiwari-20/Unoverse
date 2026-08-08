@@ -23,6 +23,35 @@ const LandingScene = dynamic(
   { ssr: false },
 );
 
+/**
+ * Read back the per-session seat secret the gameplay layer stores on first join.
+ * Mirrors `loadSecret` in `useSocket.ts` EXACTLY — same key shape, same silent
+ * failure on unavailable storage. Duplicated (rather than exported from the hook)
+ * so the landing page never pulls in the gameplay hook module; the key format is
+ * the contract between them.
+ */
+function loadSeatSecret(code: string, name: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return (
+      sessionStorage.getItem(
+        `unoverse:secret:${code.toUpperCase()}:${name.trim().toLowerCase()}`,
+      ) || undefined
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** The durable profile identity, mirroring `profileCreds` in `useSocket.ts`.
+ *  `{}` when no profile exists yet — profile-less play still works. Read via
+ *  `getState()` rather than a subscription: the secret is never rendered, so
+ *  subscribing to it would only cost re-renders. */
+function profileCreds(): { profileId?: string; profileSecret?: string } {
+  const { profileId, profileSecret } = useProfileStore.getState();
+  return profileId && profileSecret ? { profileId, profileSecret } : {};
+}
+
 export default function LandingPage() {
   const router = useRouter();
   
@@ -200,6 +229,13 @@ export default function LandingPage() {
         body: JSON.stringify({
           code: roomCode.trim().toUpperCase(),
           name: displayName.trim(),
+          // Identity rides along so the server can predict RECONNECTION rather
+          // than a fresh join: the per-seat secret (if this browser ever held a
+          // seat in this room) plus the durable profile credentials. The server
+          // verifies both and keys everything off the Player ID — the name is
+          // never used for matching.
+          secret: loadSeatSecret(roomCode.trim(), displayName.trim()),
+          ...profileCreds(),
         }),
       });
 

@@ -20,6 +20,7 @@ import { motion } from 'framer-motion';
 import { DoorOpen, Mailbox, Send, UserMinus } from 'lucide-react';
 import { PresetAvatar } from '../profile/PresetAvatar';
 import { PresenceDot, isLive, presenceLabel, presenceTextClass } from './PresenceDot';
+import { PlayerIdTag } from './PlayerIdTag';
 import { formatRelative } from '../../lib/profile/format';
 import type { FriendSummary, PresenceView } from '../../types/social';
 
@@ -82,7 +83,7 @@ const FriendCardBase: React.FC<FriendCardProps> = ({
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5">
             <span className="font-rounded font-bold text-white text-sm truncate">{friend.displayName}</span>
-            <span className="font-rounded text-[0.62rem] text-white/35 shrink-0">#{friend.tag}</span>
+            <PlayerIdTag id={friend.profileId} className="text-white/35" />
           </span>
           <span className={`block font-rounded text-[0.66rem] truncate ${presenceTextClass(presence.status)}`}>
             {presenceLabel(presence.status)}

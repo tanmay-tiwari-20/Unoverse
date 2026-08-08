@@ -37,9 +37,10 @@ export const socialHelloSchema = z.object({
 });
 
 /**
- * Player search. Accepts a display name, a `Name#TAG`, a bare `#TAG` or a raw
- * profile id — the parsing lives in `profileManager.searchProfiles`, so the
- * schema only bounds the length. `limit` is optional and clamped again server-side.
+ * Player search. Accepts a display name, a `Name#TAG`, a bare `#TAG` or a Player
+ * ID (with or without the leading `#`) — the parsing lives in
+ * `profileManager.searchProfiles`, so the schema only bounds the length. `limit`
+ * is optional and clamped again server-side.
  */
 export const socialSearchSchema = z.object({
   query: z.string().trim().min(1).max(64),

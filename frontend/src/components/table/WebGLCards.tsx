@@ -230,6 +230,7 @@ export const WebGLCards: React.FC = () => {
             <Html position={[0, 0.15, 0]} center zIndexRange={[100, 0]}>
               <SeatBadge
                 playerId={occupant.id}
+                uid={occupant.uid}
                 name={occupant.name}
                 cardCount={cardCount}
                 isActiveTurn={isActiveTurn}

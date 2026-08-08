@@ -7,13 +7,26 @@ import { soundManager } from '../utils/soundManager';
 import { logger } from '../utils/logger';
 
 // Match = a running series of rounds played to a target score. Mirrors the
-// backend MatchState (scores keyed by lowercased player name).
+// backend MatchState.
+//
+// Scores are keyed by SEAT UID, never by name: two players in one room may share
+// a display name, and a name-keyed board would silently add their points
+// together. `name` inside the entry is the label to render; `playerId` is the
+// permanent Player ID when the seat belongs to a profile (absent for bots and
+// profile-less guests).
+export interface MatchScore {
+  name: string;
+  points: number;
+  playerId?: string | null;
+}
+
 export interface MatchState {
-  scores: Record<string, number>;
+  scores: Record<string, MatchScore>;
   targetScore: number;
   round: number;
-  lastRound: { round: number; winnerName: string; pointsAwarded: number } | null;
+  lastRound: { round: number; winnerName: string; winnerUid?: string | null; pointsAwarded: number } | null;
   matchWinnerName: string | null;
+  matchWinnerUid?: string | null;
 }
 
 // A single real-time chat message, server-stamped (mirrors the reaction payload).

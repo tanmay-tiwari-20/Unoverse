@@ -315,6 +315,15 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
   const meId = (): string | null => presenceManager.profileForSocket(socket.id);
 
   /**
+   * Canonicalize a client-supplied target id into the profile's permanent Player
+   * ID. A client that has not refreshed since the migration still holds a legacy
+   * id, and an id used as a delivery address (`emitToProfile`) or a notification
+   * subject only reaches anyone if it is the canonical one. Unknown ids pass
+   * through so the manager below still produces its own "no longer exists".
+   */
+  const target = (id: string): string => profileManager.resolveId(id) ?? id;
+
+  /**
    * Run a handler with an authenticated identity, translating a rejected intent
    * into `social:error`. `SocialError` messages are written for players and pass
    * through verbatim; anything else is logged and replaced with a generic
@@ -378,31 +387,36 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
       return;
     }
 
-    const cameOnline = presenceManager.bind(socket.id, profileId);
-    profileManager.touchLastSeen(profileId);
+    // Bind the profile's OWN Player ID, not the string the client sent. A client
+    // that hasn't refreshed since the Player ID migration still holds its legacy
+    // id, and binding that would file the same person under two presence keys —
+    // their friends would see them offline while they were online.
+    const me = profile.id;
+    const cameOnline = presenceManager.bind(socket.id, me);
+    profileManager.touchLastSeen(me);
 
     // A client that joined its room before saying hello (deep link straight into
     // a lobby) still lands with the right status.
     const roomCode = getRoomCode();
-    if (roomCode) presenceManager.setRoom(profileId, roomCode);
+    if (roomCode) presenceManager.setRoom(me, roomCode);
 
-    socket.emit('social:snapshot', socialManager.snapshotFor(profileId));
-    pushFriendPresence(profileId);
+    socket.emit('social:snapshot', socialManager.snapshotFor(me));
+    pushFriendPresence(me);
 
     // Re-deliver anything still live that they would otherwise have missed —
     // an invite sent while they were mid-reconnect.
-    for (const invite of socialManager.invitesFor(profileId)) {
-      const view = socialManager.inviteView(invite, profileId);
+    for (const invite of socialManager.invitesFor(me)) {
+      const view = socialManager.inviteView(invite, me);
       if (view) socket.emit('social:invite', view);
     }
 
-    broadcastPresence(profileId);
+    broadcastPresence(me);
     if (cameOnline) {
-      for (const friendId of socialManager.friendIdsOf(profileId)) {
-        notify(friendId, 'friend-online', profileId);
+      for (const friendId of socialManager.friendIdsOf(me)) {
+        notify(friendId, 'friend-online', me);
       }
     }
-    logger.debug(`[SOCIAL] ${profile.displayName}#${profile.tag} bound to socket ${socket.id}`);
+    logger.debug(`[SOCIAL] ${profile.displayName} #${me} bound to socket ${socket.id}`);
   }));
 
   // ---- Discovery ----------------------------------------------------------
@@ -417,16 +431,17 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
   }));
 
   /** Lazy-load the expensive half of a profile — only when someone opens it. */
-  on('social:inspect', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:inspect', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('inspect', (profileId) => {
-      socket.emit('social:profile', socialManager.inspect(profileId, targetId));
+      socket.emit('social:profile', socialManager.inspect(profileId, target(rawTarget)));
     })();
   }));
 
   // ---- Friend graph -------------------------------------------------------
 
-  on('social:friend-request', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:friend-request', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('friend-request', (profileId) => {
+      const targetId = target(rawTarget);
       const { affected, autoAccepted } = socialManager.sendRequest(profileId, targetId);
       pushSnapshots(affected);
       if (autoAccepted) {
@@ -442,8 +457,9 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
     })();
   }));
 
-  on('social:friend-accept', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:friend-accept', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('friend-accept', (profileId) => {
+      const targetId = target(rawTarget);
       pushSnapshots(socialManager.acceptRequest(profileId, targetId).affected);
       notify(targetId, 'friend-request-accepted', profileId);
       // Each now sees the other's live presence for the first time.
@@ -452,40 +468,41 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
     })();
   }));
 
-  on('social:friend-decline', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:friend-decline', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('friend-decline', (profileId) => {
-      pushSnapshots(socialManager.declineRequest(profileId, targetId).affected);
+      pushSnapshots(socialManager.declineRequest(profileId, target(rawTarget)).affected);
     })();
   }));
 
-  on('social:friend-cancel', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:friend-cancel', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('friend-cancel', (profileId) => {
-      pushSnapshots(socialManager.cancelRequest(profileId, targetId).affected);
+      pushSnapshots(socialManager.cancelRequest(profileId, target(rawTarget)).affected);
     })();
   }));
 
-  on('social:friend-remove', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:friend-remove', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('friend-remove', (profileId) => {
-      pushSnapshots(socialManager.removeFriend(profileId, targetId).affected);
+      pushSnapshots(socialManager.removeFriend(profileId, target(rawTarget)).affected);
     })();
   }));
 
-  on('social:block', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:block', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('block', (profileId) => {
-      pushSnapshots(socialManager.block(profileId, targetId).affected);
+      pushSnapshots(socialManager.block(profileId, target(rawTarget)).affected);
     })();
   }));
 
-  on('social:unblock', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:unblock', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('unblock', (profileId) => {
-      pushSnapshots(socialManager.unblock(profileId, targetId).affected);
+      pushSnapshots(socialManager.unblock(profileId, target(rawTarget)).affected);
     })();
   }));
 
   // ---- Invitations --------------------------------------------------------
 
-  on('social:invite', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:invite', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('invite', (profileId) => {
+      const targetId = target(rawTarget);
       // The room comes from the sender's live presence inside createInvite, so
       // the payload naming a room is impossible by construction.
       const view = socialManager.createInvite(profileId, targetId);
@@ -531,10 +548,10 @@ export function attachSocial(io: Server, socket: Socket, bindings: SocialBinding
   // ---- Join a friend ------------------------------------------------------
 
   /** "Take me to my friend's game" — no room code ever typed by the player. */
-  on('social:join-friend', guard(socialTargetSchema, ({ profileId: targetId }) => {
+  on('social:join-friend', guard(socialTargetSchema, ({ profileId: rawTarget }) => {
     withMe('join-friend', (profileId) => {
-      const target = socialManager.joinFriend(profileId, targetId);
-      socket.emit('social:join-target', { ...target, via: 'friend' });
+      const destination = socialManager.joinFriend(profileId, target(rawTarget));
+      socket.emit('social:join-target', { ...destination, via: 'friend' });
     })();
   }));
 

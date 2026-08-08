@@ -14,7 +14,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  X, Pencil, RotateCcw, Copy, Check, Trophy, Swords, Layers, Hand,
+  X, Pencil, RotateCcw, Trophy, Swords, Layers, Hand,
   Zap, Flame, ShieldCheck, ShieldX, History, AlertCircle, Save, ArrowLeft,
 } from "lucide-react";
 import { useProfileStore } from "../../store/useProfileStore";
@@ -22,6 +22,7 @@ import { useDialogA11y } from "../../hooks/useDialogA11y";
 import { PresetAvatar } from "./PresetAvatar";
 import { AvatarPicker } from "./AvatarPicker";
 import { OutfitPicker } from "./OutfitPicker";
+import { PlayerIdTag } from "../social/PlayerIdTag";
 import { DEFAULT_OUTFIT_KEY } from "../../lib/cosmetics/outfits";
 import type { ProfileStats } from "../../types/profile";
 import {
@@ -81,7 +82,6 @@ export function ProfileModal() {
 
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [confirmReset, setConfirmReset] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // Edit-mode draft state.
   const [draftName, setDraftName] = useState("");
@@ -113,7 +113,6 @@ export function ProfileModal() {
 
   // Prefer the server view; fall back to cached identity for first paint.
   const displayName = cached?.displayName ?? cachedName ?? "Player";
-  const tag = cached?.tag ?? "";
   const avatarKey = cached?.avatarUrl ?? cachedAvatar ?? null;
   const outfitKey = cached?.outfit ?? cachedOutfit ?? DEFAULT_OUTFIT_KEY;
   const stats: ProfileStats | null = cached?.stats ?? null;
@@ -132,17 +131,6 @@ export function ProfileModal() {
   const handleReset = async () => {
     await resetProfile();
     if (!useProfileStore.getState().error) setConfirmReset(false);
-  };
-
-  const copyId = async () => {
-    if (!profileId) return;
-    try {
-      await navigator.clipboard.writeText(profileId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard may be unavailable; silently ignore
-    }
   };
 
   const matchesLost = stats ? Math.max(0, stats.matchesPlayed - stats.matchesWon) : 0;
@@ -264,18 +252,11 @@ export function ProfileModal() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-1.5 flex-wrap">
                         <span className="font-arcade text-2xl text-white truncate">{displayName}</span>
-                        {tag && <span className="font-rounded font-bold text-white/45 text-sm">#{tag}</span>}
+                        {/* The short Player ID replaces the old tag chip here: it is
+                            what a friend types to find you, so it is the one worth
+                            showing. Copyable, but never louder than the name. */}
+                        <PlayerIdTag id={profileId} copyable size="text-sm" />
                       </div>
-                      <button
-                        onClick={copyId}
-                        className="mt-1 inline-flex items-center gap-1.5 font-rounded text-[0.68rem] text-white/50 hover:text-white/80 transition-colors cursor-pointer"
-                        aria-label="Copy Player ID"
-                        title={profileId ?? undefined}
-                      >
-                        <span className="uppercase tracking-wide">ID</span>
-                        <span className="font-mono truncate max-w-[10rem]">{profileId ?? "—"}</span>
-                        {copied ? <Check size={12} className="text-lime-400" /> : <Copy size={12} />}
-                      </button>
                     </div>
                     <button
                       onClick={() => setMode("edit")}

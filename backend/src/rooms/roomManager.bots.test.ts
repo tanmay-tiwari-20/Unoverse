@@ -111,7 +111,7 @@ describe('quick play matchmaking', () => {
     const fuller = seatHost('public');
     roomManager.joinRoom(fuller.code, 'Second', `s-${fuller.code}`);
 
-    const matched = roomManager.findQuickPlayRoom('Newbie');
+    const matched = roomManager.findQuickPlayRoom();
     expect(matched?.code).toBe(fuller.code);
     // Consume the sparse room too so later tests aren't affected.
     roomManager.leaveRoom(`h-${sparse.code}`);
@@ -128,7 +128,7 @@ describe('quick play matchmaking', () => {
 
     const empty = roomManager.createRoom('public'); // no human ever joined
 
-    const matched = roomManager.findQuickPlayRoom('Newbie');
+    const matched = roomManager.findQuickPlayRoom();
     expect(matched).toBeNull();
 
     roomManager.leaveRoom(`h-${privateRoom.code}`);
@@ -141,7 +141,7 @@ describe('quick play matchmaking', () => {
     roomManager.updateHouseRules(room.code, `h-${room.code}`, { maxPlayers: 2 });
     roomManager.addBots(room.code, `h-${room.code}`, 1);
 
-    const matched = roomManager.findQuickPlayRoom('Newbie');
+    const matched = roomManager.findQuickPlayRoom();
     expect(matched?.code).toBe(room.code);
 
     const { isSpectator } = roomManager.joinRoom(room.code, 'Newbie', `n-${room.code}`);
@@ -152,11 +152,22 @@ describe('quick play matchmaking', () => {
     roomManager.leaveRoom(`n-${room.code}`);
   });
 
-  it('skips rooms where the requested name is already taken', () => {
+  it('matches a room that already holds someone with the same name', () => {
+    // Names are display labels, not identity: quick play must not refuse a lobby
+    // just because another "Host" is sitting in it. The two are distinguished by
+    // their permanent Player ID, and seating is by seat uid.
     const room = seatHost('public');
-    expect(roomManager.findQuickPlayRoom('Host')).toBeNull();
-    expect(roomManager.findQuickPlayRoom('SomeoneElse')?.code).toBe(room.code);
+    expect(roomManager.findQuickPlayRoom()?.code).toBe(room.code);
+
+    const { isSpectator } = roomManager.joinRoom(room.code, 'Host', `dup-${room.code}`);
+    expect(isSpectator).toBe(false);
+    expect(room.players.filter((p) => p.name === 'Host')).toHaveLength(2);
+    // Same label, different seats — nothing was merged.
+    const [first, second] = room.players.filter((p) => p.name === 'Host');
+    expect(first.uid).not.toBe(second.uid);
+
     roomManager.leaveRoom(`h-${room.code}`);
+    roomManager.leaveRoom(`dup-${room.code}`);
   });
 
   it('sweeps abandoned humanless rooms past the age threshold', () => {

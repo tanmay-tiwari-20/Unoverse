@@ -71,9 +71,24 @@ class SocialManager {
     return p;
   }
 
+  /**
+   * Canonical Player ID for a caller-supplied reference.
+   *
+   * A client that has not refreshed since the Player ID migration may still hold
+   * a legacy id, and `getProfile()` accepts it. But every id we STORE in an edge
+   * or COMPARE against a stored one has to be the profile's own permanent Player
+   * ID, or the same person ends up on both sides of the graph under two names.
+   * Unknown references pass through untouched so the caller's own existence guard
+   * still produces its message.
+   */
+  private canon(ref: string): string {
+    return profileManager.resolveId(ref) ?? ref;
+  }
+
   public areFriends(a: string, b: string): boolean {
     const pa = profileManager.getProfile(a);
-    return !!pa && pa.social.friends.some((f) => f.id === b);
+    const bId = this.canon(b);
+    return !!pa && pa.social.friends.some((f) => f.id === bId);
   }
 
   /** Ids of everyone this profile is friends with. The fan-out set for a
@@ -85,21 +100,25 @@ class SocialManager {
 
   public hasBlocked(ownerId: string, otherId: string): boolean {
     const p = profileManager.getProfile(ownerId);
-    return !!p && p.social.blocked.includes(otherId);
+    return !!p && p.social.blocked.includes(this.canon(otherId));
   }
 
   /** How `viewerId` is related to `subjectId`. Block state wins over everything
    *  else so a blocked pair can never be offered a friend action. */
   public relationship(viewerId: string | null, subjectId: string): RelationshipState {
     if (!viewerId) return 'none';
-    if (viewerId === subjectId) return 'self';
     const viewer = profileManager.getProfile(viewerId);
     if (!viewer) return 'none';
-    if (viewer.social.blocked.includes(subjectId)) return 'blocked';
-    if (this.hasBlocked(subjectId, viewerId)) return 'blocked-by';
-    if (viewer.social.friends.some((f) => f.id === subjectId)) return 'friends';
-    if (viewer.social.outgoing.some((r) => r.id === subjectId)) return 'request-sent';
-    if (viewer.social.incoming.some((r) => r.id === subjectId)) return 'request-received';
+    // Compare canonical ids: a viewer holding a legacy id for themselves is still
+    // themselves, and must not be offered a friend button pointing at their own
+    // profile.
+    const subject = this.canon(subjectId);
+    if (viewer.id === subject) return 'self';
+    if (viewer.social.blocked.includes(subject)) return 'blocked';
+    if (this.hasBlocked(subject, viewer.id)) return 'blocked-by';
+    if (viewer.social.friends.some((f) => f.id === subject)) return 'friends';
+    if (viewer.social.outgoing.some((r) => r.id === subject)) return 'request-sent';
+    if (viewer.social.incoming.some((r) => r.id === subject)) return 'request-received';
     return 'none';
   }
 
@@ -110,10 +129,11 @@ class SocialManager {
    * the server would refuse.
    */
   public canSendRequest(viewerId: string | null, subjectId: string): boolean {
-    if (!viewerId || viewerId === subjectId) return false;
+    if (!viewerId) return false;
+    const viewer = profileManager.getProfile(viewerId);
     const subject = profileManager.getProfile(subjectId);
-    if (!subject) return false;
-    const rel = this.relationship(viewerId, subjectId);
+    if (!viewer || !subject || viewer.id === subject.id) return false;
+    const rel = this.relationship(viewer.id, subject.id);
     if (rel !== 'none') return false;
 
     switch (subject.privacy.friendRequests) {
@@ -148,7 +168,8 @@ class SocialManager {
   public summaryOf(subjectId: string, viewerId: string | null): PlayerSummary | null {
     const subject = profileManager.getProfile(subjectId);
     if (!subject) return null;
-    const isFriend = !!viewerId && (viewerId === subjectId || this.areFriends(viewerId, subjectId));
+    const viewer = viewerId ? this.canon(viewerId) : null;
+    const isFriend = !!viewer && (viewer === subject.id || this.areFriends(viewer, subject.id));
     const showOutfit = subject.privacy.showOutfit !== false || isFriend;
     return {
       profileId: subject.id,
@@ -170,7 +191,7 @@ class SocialManager {
 
     const friends: FriendSummary[] = [];
     for (const link of me.social.friends) {
-      const s = this.summaryOf(link.id, viewerId);
+      const s = this.summaryOf(link.id, me.id);
       if (s) friends.push({ ...s, since: link.since });
     }
     // Online first, then by status weight, then alphabetical — the ordering a
@@ -185,7 +206,7 @@ class SocialManager {
     const mapRequests = (list: { id: string; at: number }[]): RequestSummary[] => {
       const out: RequestSummary[] = [];
       for (const r of list) {
-        const s = this.summaryOf(r.id, viewerId);
+        const s = this.summaryOf(r.id, me.id);
         if (s) out.push({ ...s, at: r.at });
       }
       return out.sort((a, b) => b.at - a.at); // newest first
@@ -193,7 +214,7 @@ class SocialManager {
 
     const blocked: PlayerSummary[] = [];
     for (const id of me.social.blocked) {
-      const s = this.summaryOf(id, viewerId);
+      const s = this.summaryOf(id, me.id);
       if (s) blocked.push(s);
     }
 
@@ -213,8 +234,9 @@ class SocialManager {
    */
   public inspect(viewerId: string | null, subjectId: string): InspectedProfile {
     const subject = this.require(subjectId);
-    const isSelf = viewerId === subjectId;
-    const isFriend = isSelf || (!!viewerId && this.areFriends(viewerId, subjectId));
+    const viewer = viewerId ? this.canon(viewerId) : null;
+    const isSelf = viewer === subject.id;
+    const isFriend = isSelf || (!!viewer && this.areFriends(viewer, subject.id));
     const privacy = subject.privacy;
 
     // Self and friends always see everything; privacy gates non-friends only.
@@ -239,8 +261,8 @@ class SocialManager {
       recentMatches,
       favoriteArena: this.favoriteArena(recentMatches),
       presence: presenceManager.viewFor(subject.id, isFriend),
-      relationship: this.relationship(viewerId, subjectId),
-      canSendRequest: this.canSendRequest(viewerId, subjectId),
+      relationship: this.relationship(viewer, subject.id),
+      canSendRequest: this.canSendRequest(viewer, subject.id),
       hidden: { matchHistory: hideHistory, outfit: hideOutfit, onlineStatus: hideOnline },
     };
   }
@@ -275,14 +297,15 @@ class SocialManager {
    */
   public search(viewerId: string | null, query: string, limit = SOCIAL_CONFIG.searchLimit): SearchResult[] {
     const hits = profileManager.searchProfiles(query, limit + 5);
+    const viewer = viewerId ? this.canon(viewerId) : null;
     const out: SearchResult[] = [];
     for (const p of hits) {
-      if (viewerId && p.id !== viewerId) {
-        if (this.hasBlocked(p.id, viewerId) || this.hasBlocked(viewerId, p.id)) continue;
+      if (viewer && p.id !== viewer) {
+        if (this.hasBlocked(p.id, viewer) || this.hasBlocked(viewer, p.id)) continue;
       }
-      const summary = this.summaryOf(p.id, viewerId);
+      const summary = this.summaryOf(p.id, viewer);
       if (!summary) continue;
-      out.push({ ...summary, relationship: this.relationship(viewerId, p.id) });
+      out.push({ ...summary, relationship: this.relationship(viewer, p.id) });
       if (out.length >= limit) break;
     }
     return out;
@@ -311,34 +334,37 @@ class SocialManager {
    * resolve.
    */
   public sendRequest(fromId: string, toId: string): MutationResult & { autoAccepted: boolean } {
-    if (fromId === toId) throw new SocialError('You cannot add yourself as a friend.');
     const from = this.require(fromId);
     const to = this.require(toId);
+    // From here down, only the profiles' own Player IDs are used. The caller's
+    // strings may be legacy aliases, and an edge written from one of those would
+    // never match the edge written from the other side.
+    if (from.id === to.id) throw new SocialError('You cannot add yourself as a friend.');
 
-    if (from.social.blocked.includes(toId)) {
+    if (from.social.blocked.includes(to.id)) {
       throw new SocialError('You have blocked this player. Unblock them first.');
     }
-    if (to.social.blocked.includes(fromId)) {
+    if (to.social.blocked.includes(from.id)) {
       // Deliberately vague: confirming a block would leak it to the blocked user.
       throw new SocialError('This player is not accepting friend requests.');
     }
-    if (from.social.friends.some((f) => f.id === toId)) {
+    if (from.social.friends.some((f) => f.id === to.id)) {
       throw new SocialError('You are already friends with this player.');
     }
-    if (from.social.outgoing.some((r) => r.id === toId)) {
+    if (from.social.outgoing.some((r) => r.id === to.id)) {
       throw new SocialError('You already have a pending request to this player.');
     }
 
     // Crossed requests resolve into a friendship rather than a deadlock.
-    if (from.social.incoming.some((r) => r.id === toId)) {
-      const result = this.acceptRequest(fromId, toId);
+    if (from.social.incoming.some((r) => r.id === to.id)) {
+      const result = this.acceptRequest(from.id, to.id);
       return { ...result, autoAccepted: true };
     }
 
     if (to.privacy.friendRequests === 'nobody') {
       throw new SocialError('This player is not accepting friend requests.');
     }
-    if (to.privacy.friendRequests === 'friends-of-friends' && !this.hasMutualFriend(fromId, toId)) {
+    if (to.privacy.friendRequests === 'friends-of-friends' && !this.hasMutualFriend(from.id, to.id)) {
       throw new SocialError('This player only accepts requests from friends of friends.');
     }
     if (from.social.outgoing.length >= SOCIAL_CONFIG.maxOutgoingRequests) {
@@ -349,22 +375,22 @@ class SocialManager {
     }
 
     const at = Date.now();
-    from.social.outgoing.push({ id: toId, at });
-    to.social.incoming.push({ id: fromId, at });
+    from.social.outgoing.push({ id: to.id, at });
+    to.social.incoming.push({ id: from.id, at });
     // Bound the receiver's inbox: the oldest pending request is dropped (and its
     // matching outgoing edge with it) so neither side keeps a dangling half-edge.
     while (to.social.incoming.length > SOCIAL_CONFIG.maxIncomingRequests) {
       const dropped = to.social.incoming.shift()!;
       const sender = profileManager.getProfile(dropped.id);
       if (sender) {
-        sender.social.outgoing = sender.social.outgoing.filter((r) => r.id !== toId);
+        sender.social.outgoing = sender.social.outgoing.filter((r) => r.id !== to.id);
         this.save(sender);
       }
     }
 
     this.save(from, to);
-    logger.debug(`[SOCIAL] Friend request ${from.displayName}#${from.tag} -> ${to.displayName}#${to.tag}`);
-    return { affected: [fromId, toId], autoAccepted: false };
+    logger.debug(`[SOCIAL] Friend request ${from.displayName} #${from.id} -> ${to.displayName} #${to.id}`);
+    return { affected: [from.id, to.id], autoAccepted: false };
   }
 
   /** Accept a pending incoming request. Creates the mutual friendship and clears
@@ -373,7 +399,7 @@ class SocialManager {
     const me = this.require(meId);
     const other = this.require(otherId);
 
-    if (!me.social.incoming.some((r) => r.id === otherId)) {
+    if (!me.social.incoming.some((r) => r.id === other.id)) {
       throw new SocialError('That friend request is no longer available.');
     }
     if (me.social.friends.length >= SOCIAL_CONFIG.maxFriends) {
@@ -386,50 +412,50 @@ class SocialManager {
     this.clearPending(me, other);
 
     const since = Date.now();
-    if (!me.social.friends.some((f) => f.id === otherId)) me.social.friends.push({ id: otherId, since });
-    if (!other.social.friends.some((f) => f.id === meId)) other.social.friends.push({ id: meId, since });
+    if (!me.social.friends.some((f) => f.id === other.id)) me.social.friends.push({ id: other.id, since });
+    if (!other.social.friends.some((f) => f.id === me.id)) other.social.friends.push({ id: me.id, since });
 
     this.save(me, other);
-    logger.debug(`[SOCIAL] Friendship formed: ${me.displayName}#${me.tag} <-> ${other.displayName}#${other.tag}`);
-    return { affected: [meId, otherId] };
+    logger.debug(`[SOCIAL] Friendship formed: ${me.displayName} #${me.id} <-> ${other.displayName} #${other.id}`);
+    return { affected: [me.id, other.id] };
   }
 
   /** Decline an incoming request (recipient side). */
   public declineRequest(meId: string, otherId: string): MutationResult {
     const me = this.require(meId);
     const other = this.require(otherId);
-    if (!me.social.incoming.some((r) => r.id === otherId)) {
+    if (!me.social.incoming.some((r) => r.id === other.id)) {
       throw new SocialError('That friend request is no longer available.');
     }
     this.clearPending(me, other);
     this.save(me, other);
-    return { affected: [meId, otherId] };
+    return { affected: [me.id, other.id] };
   }
 
   /** Cancel an outgoing request (sender side). */
   public cancelRequest(meId: string, otherId: string): MutationResult {
     const me = this.require(meId);
     const other = this.require(otherId);
-    if (!me.social.outgoing.some((r) => r.id === otherId)) {
+    if (!me.social.outgoing.some((r) => r.id === other.id)) {
       throw new SocialError('That request has already been resolved.');
     }
     this.clearPending(me, other);
     this.save(me, other);
-    return { affected: [meId, otherId] };
+    return { affected: [me.id, other.id] };
   }
 
   /** Remove an established friendship (both directions). */
   public removeFriend(meId: string, otherId: string): MutationResult {
     const me = this.require(meId);
     const other = this.require(otherId);
-    if (!me.social.friends.some((f) => f.id === otherId)) {
+    if (!me.social.friends.some((f) => f.id === other.id)) {
       throw new SocialError('You are not friends with this player.');
     }
-    me.social.friends = me.social.friends.filter((f) => f.id !== otherId);
-    other.social.friends = other.social.friends.filter((f) => f.id !== meId);
+    me.social.friends = me.social.friends.filter((f) => f.id !== other.id);
+    other.social.friends = other.social.friends.filter((f) => f.id !== me.id);
     this.save(me, other);
-    logger.debug(`[SOCIAL] Friendship removed: ${me.displayName}#${me.tag} -x- ${other.displayName}#${other.tag}`);
-    return { affected: [meId, otherId] };
+    logger.debug(`[SOCIAL] Friendship removed: ${me.displayName} #${me.id} -x- ${other.displayName} #${other.id}`);
+    return { affected: [me.id, other.id] };
   }
 
   /**
@@ -438,29 +464,30 @@ class SocialManager {
    * `blocked`, so this one method is the whole enforcement story.
    */
   public block(meId: string, otherId: string): MutationResult {
-    if (meId === otherId) throw new SocialError('You cannot block yourself.');
     const me = this.require(meId);
     const other = this.require(otherId);
+    if (me.id === other.id) throw new SocialError('You cannot block yourself.');
 
-    me.social.friends = me.social.friends.filter((f) => f.id !== otherId);
-    other.social.friends = other.social.friends.filter((f) => f.id !== meId);
+    me.social.friends = me.social.friends.filter((f) => f.id !== other.id);
+    other.social.friends = other.social.friends.filter((f) => f.id !== me.id);
     this.clearPending(me, other);
     this.clearPending(other, me);
-    if (!me.social.blocked.includes(otherId)) me.social.blocked.push(otherId);
+    if (!me.social.blocked.includes(other.id)) me.social.blocked.push(other.id);
 
     // Any live invitation between the pair is void the moment a block lands.
-    this.dropInvitesBetween(meId, otherId);
+    this.dropInvitesBetween(me.id, other.id);
 
     this.save(me, other);
-    return { affected: [meId, otherId] };
+    return { affected: [me.id, other.id] };
   }
 
   public unblock(meId: string, otherId: string): MutationResult {
     const me = this.require(meId);
-    if (!me.social.blocked.includes(otherId)) return { affected: [meId] };
-    me.social.blocked = me.social.blocked.filter((id) => id !== otherId);
+    const other = this.canon(otherId);
+    if (!me.social.blocked.includes(other)) return { affected: [me.id] };
+    me.social.blocked = me.social.blocked.filter((id) => id !== other);
     this.save(me);
-    return { affected: [meId, otherId] };
+    return { affected: [me.id, other] };
   }
 
   /** Drop the pending request edges between two profiles, in both directions.
@@ -493,33 +520,33 @@ class SocialManager {
    * cannot invite someone into a room it is not actually in.
    */
   public createInvite(fromId: string, toId: string): InviteView {
-    if (fromId === toId) throw new SocialError('You cannot invite yourself.');
     const from = this.require(fromId);
-    this.require(toId);
+    const to = this.require(toId);
+    if (from.id === to.id) throw new SocialError('You cannot invite yourself.');
 
-    if (!this.areFriends(fromId, toId)) {
+    if (!this.areFriends(from.id, to.id)) {
       throw new SocialError('You can only invite friends.');
     }
-    if (this.hasBlocked(toId, fromId) || this.hasBlocked(fromId, toId)) {
+    if (this.hasBlocked(to.id, from.id) || this.hasBlocked(from.id, to.id)) {
       throw new SocialError('You cannot invite this player.');
     }
-    if (!presenceManager.isOnline(toId)) {
+    if (!presenceManager.isOnline(to.id)) {
       throw new SocialError('That friend is offline right now.');
     }
 
-    const roomCode = presenceManager.roomOf(fromId);
+    const roomCode = presenceManager.roomOf(from.id);
     if (!roomCode) throw new SocialError('You need to be in a room before you can invite someone.');
     const room = roomManager.getRoom(roomCode);
     if (!room) throw new SocialError('Your room no longer exists.');
 
-    const mine = [...this.invites.values()].filter((i) => i.fromId === fromId);
+    const mine = [...this.invites.values()].filter((i) => i.fromId === from.id);
     if (mine.length >= SOCIAL_CONFIG.maxOutgoingInvites) {
       throw new SocialError('You have too many pending invites. Wait for them to expire.');
     }
     // One live invite per (sender, recipient, room) — re-inviting refreshes the
     // existing one instead of stacking duplicate popups on the recipient.
     for (const existing of mine) {
-      if (existing.toId === toId && existing.roomCode === room.code) {
+      if (existing.toId === to.id && existing.roomCode === room.code) {
         this.cancelInvite(existing.id);
         break;
       }
@@ -528,8 +555,8 @@ class SocialManager {
     const now = Date.now();
     const invite: GameInvite = {
       id: randomUUID(),
-      fromId,
-      toId,
+      fromId: from.id,
+      toId: to.id,
       roomCode: room.code,
       createdAt: now,
       expiresAt: now + SOCIAL_CONFIG.inviteTtlMs,
@@ -543,8 +570,8 @@ class SocialManager {
     timer.unref?.();
     this.inviteTimers.set(invite.id, timer);
 
-    logger.debug(`[SOCIAL] Invite ${from.displayName}#${from.tag} -> ${toId} for room ${room.code}`);
-    return this.inviteView(invite, toId)!;
+    logger.debug(`[SOCIAL] Invite ${from.displayName} #${from.id} -> #${to.id} for room ${room.code}`);
+    return this.inviteView(invite, to.id)!;
   }
 
   /** Resolve an invite into the shape the recipient renders. */
@@ -588,7 +615,8 @@ class SocialManager {
 
   /** Every live invite addressed to a player (re-sent when they reconnect). */
   public invitesFor(toId: string): GameInvite[] {
-    return [...this.invites.values()].filter((i) => i.toId === toId);
+    const me = this.canon(toId);
+    return [...this.invites.values()].filter((i) => i.toId === me);
   }
 
   /**
@@ -600,18 +628,19 @@ class SocialManager {
    * authority on seats, spectators and reconnection.
    */
   public acceptInvite(meId: string, inviteId: string): { roomCode: string; asSpectator: boolean } {
+    const me = this.canon(meId);
     const invite = this.invites.get(inviteId);
-    if (!invite || invite.toId !== meId) {
+    if (!invite || invite.toId !== me) {
       throw new SocialError('That invite has expired.');
     }
     this.cancelInvite(inviteId);
-    return this.resolveJoinTarget(meId, invite.roomCode);
+    return this.resolveJoinTarget(me, invite.roomCode);
   }
 
   /** Decline an invitation. Returns the sender so they can be told. */
   public declineInvite(meId: string, inviteId: string): GameInvite {
     const invite = this.invites.get(inviteId);
-    if (!invite || invite.toId !== meId) {
+    if (!invite || invite.toId !== this.canon(meId)) {
       throw new SocialError('That invite has expired.');
     }
     this.cancelInvite(inviteId);
@@ -638,6 +667,7 @@ class SocialManager {
     const room = roomManager.getRoom(roomCode);
     if (!room) throw new SocialError('That room no longer exists.');
 
+    const me = this.canon(meId);
     const capacity = roomManager.getCapacityInfo(room);
     // A lobby still holding bots has a seat: joinRoom hands a bot's seat to an
     // arriving human, so don't tell them they'll be a spectator.
@@ -645,9 +675,11 @@ class SocialManager {
     const seatAvailable = room.status === 'lobby' && (!capacity.isFull || botSeatAvailable);
 
     // Already seated in this room under this profile — a rejoin, always allowed.
+    // Matched on Player ID, never on name: two players called "Tanmay" in one
+    // room are two different people and only one of them is us.
     const alreadyIn =
-      room.players.some((p) => p.profileId === meId) ||
-      presenceManager.roomOf(meId) === room.code;
+      room.players.some((p) => !!p.profileId && p.profileId === me) ||
+      presenceManager.roomOf(me) === room.code;
     if (alreadyIn) return { roomCode: room.code, asSpectator: false };
 
     if (seatAvailable) return { roomCode: room.code, asSpectator: false };
@@ -666,18 +698,19 @@ class SocialManager {
   /** "Join my friend" by profile id — friendship + privacy checked, then the
    *  same capacity resolution as an invite. */
   public joinFriend(meId: string, friendId: string): { roomCode: string; asSpectator: boolean } {
-    if (meId === friendId) throw new SocialError('You cannot join yourself.');
-    if (!this.areFriends(meId, friendId)) throw new SocialError('You can only join friends.');
-
+    const me = this.canon(meId);
     const friend = this.require(friendId);
+    if (me === friend.id) throw new SocialError('You cannot join yourself.');
+    if (!this.areFriends(me, friend.id)) throw new SocialError('You can only join friends.');
+
     if (friend.privacy.allowFriendJoin === false) {
       throw new SocialError('This player does not allow friends to join their games.');
     }
-    if (this.hasBlocked(friendId, meId)) throw new SocialError('You cannot join this player.');
+    if (this.hasBlocked(friend.id, me)) throw new SocialError('You cannot join this player.');
 
-    const roomCode = presenceManager.roomOf(friendId);
+    const roomCode = presenceManager.roomOf(friend.id);
     if (!roomCode) throw new SocialError('That friend is not in a game right now.');
-    return this.resolveJoinTarget(meId, roomCode);
+    return this.resolveJoinTarget(me, roomCode);
   }
 
   // =========================================================================

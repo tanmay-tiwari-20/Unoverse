@@ -308,7 +308,7 @@ export const FriendsPanel: React.FC = () => {
                     <EmptyState
                       icon={Search}
                       title="Find players"
-                      hint="Search by username, #tag or full Player ID."
+                      hint="Search by username or Player ID. Names can repeat — the #ID on each result is unique."
                     />
                   ) : searchLoading && searchResults.length === 0 ? (
                     <Skeleton />

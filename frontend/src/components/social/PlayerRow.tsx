@@ -19,6 +19,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { PresetAvatar } from '../profile/PresetAvatar';
 import { PresenceDot, isLive, presenceLabel, presenceTextClass } from './PresenceDot';
+import { PlayerIdTag } from './PlayerIdTag';
 import { formatRelative } from '../../lib/profile/format';
 import type { PlayerSummary, PresenceView } from '../../types/social';
 
@@ -70,7 +71,7 @@ const PlayerRowBase: React.FC<PlayerRowProps> = ({
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5">
             <span className="font-rounded font-bold text-white text-sm truncate">{player.displayName}</span>
-            <span className="font-rounded text-[0.62rem] text-white/35 shrink-0">#{player.tag}</span>
+            <PlayerIdTag id={player.profileId} className="text-white/35" />
           </span>
           {subtitle ? (
             <span className="block font-rounded text-[0.66rem] text-white/45 truncate">{subtitle}</span>

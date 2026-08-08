@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Volume2, VolumeX } from 'lucide-react';
-import { useVoiceStore, localMuteKey } from '../../store/useVoiceStore';
+import { useVoiceStore } from '../../store/useVoiceStore';
 
 /**
  * Personal (local-only) mute toggle for ONE remote participant in the voice/chat
@@ -11,17 +11,19 @@ import { useVoiceStore, localMuteKey } from '../../store/useVoiceStore';
  * and the underlying WebRTC connection stays untouched (the voice hook simply
  * mutes the peer's audio element).
  *
- * Mutes are keyed by the participant's stable name, so they persist across the
- * peer's reconnects for as long as this user stays in the room. Never rendered
- * for the local user — you cannot personally mute yourself.
+ * Mutes are keyed by the participant's stable seat uid, so they persist across
+ * the peer's reconnects for as long as this user stays in the room. The name is
+ * taken only for the label: two people at the table may share one, and muting
+ * one of them must not silence the other. Never rendered for the local user —
+ * you cannot personally mute yourself.
  */
 export const PeerMuteButton: React.FC<{
+  uid: string;
   name: string;
   isLocal: boolean;
   className?: string;
-}> = ({ name, isLocal, className = '' }) => {
-  const key = localMuteKey(name);
-  const isMutedByMe = useVoiceStore((s) => !!s.locallyMutedPeers[key]);
+}> = ({ uid, name, isLocal, className = '' }) => {
+  const isMutedByMe = useVoiceStore((s) => !!s.locallyMutedPeers[uid]);
   const setPeerLocalMute = useVoiceStore((s) => s.setPeerLocalMute);
 
   if (isLocal) return null;
@@ -30,7 +32,7 @@ export const PeerMuteButton: React.FC<{
     <button
       onClick={(e) => {
         e.stopPropagation();
-        setPeerLocalMute(key, !isMutedByMe);
+        setPeerLocalMute(uid, !isMutedByMe);
       }}
       title={isMutedByMe ? `Unmute ${name} (only for you)` : `Mute ${name} (only for you)`}
       aria-label={isMutedByMe ? `Unmute ${name} for yourself` : `Mute ${name} for yourself`}

@@ -9,11 +9,23 @@ import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
 import { pickBotName } from '../bots/botNames';
 import { profileManager } from '../profiles/profileManager';
-import { MatchRecord, MatchPlayerRecord, emptyRoundDelta } from '../profiles/profileTypes';
+import { MatchRecord, MatchPlayerRecord, emptyRoundDelta, sanitizeDisplayName } from '../profiles/profileTypes';
 import { PROFILE_CONFIG } from '../config/serverConfig';
 
 export interface Player {
   id: string; // Socket ID (or a synthetic `bot:` id for server-side bots)
+  /**
+   * Stable SEAT identity, minted server-side when the seat is taken and unchanged
+   * for as long as the seat is held — across reconnects, renames and restarts.
+   *
+   * This is what room-scoped bookkeeping keys on (match scores, disconnect
+   * timers): the socket `id` churns on every reconnect, and `name` is a label two
+   * players may share, so neither can carry the score. It is NOT a player
+   * identity — `profileId` is; a seat handle is meaningless outside its room, and
+   * bots and profile-less guests need one too. Safe to broadcast (unlike
+   * `secret`, which is also seat-stable but private).
+   */
+  uid: string;
   name: string;
   seatNumber: number; // 1 to maxPlayers (house rule; default 6)
   isHost: boolean;
@@ -40,28 +52,52 @@ export type RoomVisibility = 'public' | 'private';
 
 export interface Spectator {
   id: string; // Socket ID
+  /** Stable slot identity — the spectator analog of `Player.uid`. */
+  uid: string;
   name: string;
   secret: string; // Private per-session token. Never broadcast to other clients.
+  /** Verified persistent-profile identity, when one was presented on join. */
+  profileId?: string;
 }
 
 /** One completed round's result, kept for the end-of-round summary UI. */
 export interface RoundResult {
   round: number;
+  /** Seat that won the round — the identity half. Optional only for results
+   *  persisted before seat uids existed. */
+  winnerUid?: string;
+  /** The winner's display name at the time. DISPLAY ONLY: two players may share
+   *  it, so never match on this to decide who won. */
   winnerName: string;
   pointsAwarded: number;
 }
 
+/** One seat's running total in a match. The name rides along so a scoreboard
+ *  still reads correctly after that player leaves the room. */
+export interface MatchScore {
+  /** Display name when the points were last banked. Never an identity. */
+  name: string;
+  points: number;
+  /** The seat holder's permanent Player ID, when they had a profile. */
+  playerId?: string | null;
+}
+
 /**
- * Match = a series of rounds played to a target score. Scores are keyed by
- * LOWERCASED player name (the same stable identity used for reconnection), so a
- * player's running total survives disconnects, reseating and server restarts.
+ * Match = a series of rounds played to a target score.
+ *
+ * Scores are keyed by the stable SEAT uid, not by name: two players called
+ * "Tanmay" hold two seats and two separate totals, and a player who renames or
+ * reconnects keeps the one total they were building. (Scores were name-keyed
+ * before duplicate names were allowed; `hydrate` migrates those snapshots.)
  */
 export interface MatchState {
-  scores: Record<string, number>; // lowercased name -> cumulative points
+  scores: Record<string, MatchScore>; // seat uid -> running total
   targetScore: number;
   round: number;                  // 1-based index of the current/last round
   lastRound: RoundResult | null;  // result of the round that just ended
-  matchWinnerName: string | null; // set once someone reaches targetScore
+  /** Seat that won the match — the identity half; set with matchWinnerName. */
+  matchWinnerUid?: string | null;
+  matchWinnerName: string | null; // display name of the match winner
   // Epoch ms the match began. Used to record match duration for profile stats.
   matchStartedAt?: number;
 }
@@ -93,7 +129,9 @@ export interface Room {
 
 class RoomManager {
   private rooms: Map<string, Room> = new Map();
-  // Map key: `${roomCode}:${playerName}` -> NodeJS.Timeout
+  // Map key: `${roomCode}:${seatUid}` -> NodeJS.Timeout. Keyed on the stable seat
+  // uid rather than the player's name, so two same-named players in one room get
+  // two independent grace periods instead of clobbering each other's timer.
   private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
 
   // Durable storage (write-through). Defaults to a no-op memory store so the
@@ -114,8 +152,8 @@ class RoomManager {
   /**
    * Rehydrate all persisted rooms into memory on startup. Any game that was in
    * progress when the server stopped is restored; players reconnect with their
-   * name + secret and resume. Timers are NOT restored (they re-arm naturally on
-   * the next broadcast / grace period).
+   * profile / secret and resume. Timers are NOT restored (they re-arm naturally
+   * on the next broadcast / grace period).
    */
   public async hydrate(): Promise<void> {
     const rooms = await this.store.loadAll();
@@ -125,10 +163,73 @@ class RoomManager {
       room.houseRules = normalizeHouseRules(room.houseRules);
       // Rooms persisted before arenas existed default to the classic world.
       room.arena = resolveArena(room.arena);
+      // Seats persisted before seat uids existed get one now, and a name-keyed
+      // scoreboard is re-keyed onto them, so an in-progress match survives the
+      // upgrade with every running total intact.
+      this.backfillSeatIdentity(room);
       this.rooms.set(room.code.toUpperCase(), room);
     }
     if (rooms.length) {
       logger.info(`[STORE] Rehydrated ${rooms.length} room(s) from persistence.`);
+    }
+  }
+
+  /**
+   * Give every seat in a rehydrated room a stable uid and move any legacy,
+   * name-keyed scoreboard onto those uids.
+   *
+   * Legacy scores were `Record<lowercasedName, number>`. Each key is matched back
+   * to the seat that holds that name; totals whose player is no longer seated are
+   * kept under a synthetic uid so the scoreboard still shows them (the same thing
+   * that happened before, when the name itself was the key). Where two seats now
+   * share a name only one can inherit the single stored total — unavoidable, since
+   * the old format never distinguished them — and the other starts from zero.
+   */
+  private backfillSeatIdentity(room: Room): void {
+    for (const p of room.players) {
+      if (!p.uid) p.uid = randomUUID();
+    }
+    for (const s of room.spectators ?? []) {
+      if (!s.uid) s.uid = randomUUID();
+    }
+
+    const match = room.match as (MatchState & { scores: Record<string, unknown> }) | undefined;
+    if (!match?.scores) return;
+
+    const claimed = new Set<string>();
+    const migrated: Record<string, MatchScore> = {};
+    for (const [key, value] of Object.entries(match.scores)) {
+      // Already migrated: the value is a MatchScore object, not a bare number.
+      if (value && typeof value === 'object') {
+        migrated[key] = value as MatchScore;
+        continue;
+      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+      const seat = room.players.find(
+        (p) => p.name.toLowerCase() === key && !claimed.has(p.uid)
+      );
+      if (seat) claimed.add(seat.uid);
+      migrated[seat ? seat.uid : randomUUID()] = {
+        name: seat ? seat.name : key,
+        points: value,
+        playerId: seat?.profileId ?? null,
+      };
+    }
+    match.scores = migrated;
+
+    // The winner was recorded by name only; recover the seat where it is
+    // unambiguous, and leave it unset when it is not.
+    if (match.matchWinnerName && !match.matchWinnerUid) {
+      const winners = room.players.filter(
+        (p) => p.name.toLowerCase() === match.matchWinnerName!.toLowerCase()
+      );
+      if (winners.length === 1) match.matchWinnerUid = winners[0].uid;
+    }
+    if (match.lastRound && !match.lastRound.winnerUid && match.lastRound.winnerName) {
+      const winners = room.players.filter(
+        (p) => p.name.toLowerCase() === match.lastRound!.winnerName.toLowerCase()
+      );
+      if (winners.length === 1) match.lastRound.winnerUid = winners[0].uid;
     }
   }
 
@@ -282,13 +383,6 @@ class RoomManager {
     return this.rooms.size;
   }
 
-  // Check if a player name is unique in a room
-  public isNameUnique(room: Room, name: string): boolean {
-    return !room.players.some(
-      (p) => p.name.toLowerCase() === name.toLowerCase()
-    );
-  }
-
   // ---- Bots -----------------------------------------------------------------
 
   /** Seated human players (bots excluded). */
@@ -334,6 +428,7 @@ class RoomManager {
       ];
       const bot: Player = {
         id: `bot:${randomUUID()}`,
+        uid: randomUUID(),
         name: pickBotName(takenNames),
         seatNumber,
         isHost: false,
@@ -378,11 +473,13 @@ class RoomManager {
    *   - lobby rooms (game not started) with at least one human waiting
    *   - a free seat, or a bot seat that can be handed to the human
    *   - most humans already waiting first (fill tables faster), then oldest
-   * Rooms where `playerName` is already taken are skipped so the join can't be
-   * rejected as a name collision. Returns null when no room qualifies (the
-   * caller creates a fresh public room).
+   * Returns null when no room qualifies (the caller creates a fresh public room).
+   *
+   * A room is NEVER skipped because someone there shares the requesting player's
+   * name — names are labels, and a table with a "Tanmay" at it is a perfectly
+   * good table for another Tanmay. Seats are told apart by identity, not spelling.
    */
-  public findQuickPlayRoom(playerName?: string): Room | null {
+  public findQuickPlayRoom(): Room | null {
     const candidates: Room[] = [];
     for (const room of this.rooms.values()) {
       if (room.visibility !== 'public') continue;
@@ -398,14 +495,6 @@ class RoomManager {
       const hasFreeSeat = room.players.length < maxPlayers;
       const hasReplaceableBot = room.players.some((p) => p.isBot);
       if (!hasFreeSeat && !hasReplaceableBot) continue;
-
-      if (
-        playerName &&
-        (room.players.some((p) => p.name.toLowerCase() === playerName.toLowerCase()) ||
-          room.spectators?.some((s) => s.name.toLowerCase() === playerName.toLowerCase()))
-      ) {
-        continue;
-      }
 
       candidates.push(room);
     }
@@ -529,7 +618,7 @@ class RoomManager {
     socketId: string,
     roomCode: string,
     onExpired: (result: { room: Room | null; leftPlayer: Player | null; leftSpectator: Spectator | null; gameStopped: boolean }) => void
-  ): { playerName: string; isPlayer: boolean } | null {
+  ): { playerName: string; uid: string; isPlayer: boolean } | null {
     const upperCode = roomCode.toUpperCase();
     const room = this.rooms.get(upperCode);
     if (!room) return null;
@@ -539,9 +628,12 @@ class RoomManager {
 
     if (!player && !spectator) return null;
 
-    const name = player ? player.name : spectator!.name;
+    const member = player ?? spectator!;
+    const name = member.name;
     const isPlayer = !!player;
-    const key = `${upperCode}:${name.toLowerCase()}`;
+    // Keyed by seat uid: with duplicate names allowed, a name-keyed timer would
+    // let one player's disconnect cancel their namesake's grace period.
+    const key = `${upperCode}:${member.uid}`;
 
     // Rejoin support can be disabled via house rules — skip the grace period so the
     // seat is freed immediately on disconnect.
@@ -554,7 +646,7 @@ class RoomManager {
       clearTimeout(this.disconnectTimers.get(key));
     }
 
-    logger.debug(`[GRACE_PERIOD_START] Starting 60s disconnect grace period for ${isPlayer ? 'Player' : 'Spectator'} ${name} in Room ${upperCode}`);
+    logger.debug(`[GRACE_PERIOD_START] Starting 60s disconnect grace period for ${isPlayer ? 'Player' : 'Spectator'} ${name} (seat ${member.uid}) in Room ${upperCode}`);
 
     const timer = setTimeout(() => {
       this.disconnectTimers.delete(key);
@@ -570,7 +662,55 @@ class RoomManager {
 
     this.disconnectTimers.set(key, timer);
 
-    return { playerName: name, isPlayer };
+    return { playerName: name, uid: member.uid, isPlayer };
+  }
+
+  /** Cancel a seat's pending disconnect timer, if one is armed. */
+  private cancelDisconnectTimer(roomCode: string, uid: string): boolean {
+    const key = `${roomCode.toUpperCase()}:${uid}`;
+    const timer = this.disconnectTimers.get(key);
+    if (!timer) return false;
+    clearTimeout(timer);
+    this.disconnectTimers.delete(key);
+    return true;
+  }
+
+  /**
+   * Find the seat a returning member already holds, by IDENTITY.
+   *
+   * Two things can prove you are the person who left, in priority order:
+   *
+   *   1. A verified Player ID. The socket layer has already checked the profile
+   *      secret before handing it here, so this is a genuine identity claim and
+   *      survives a rename between sessions.
+   *   2. The per-seat `secret` issued when the seat was taken. This covers guests
+   *      with no profile; the secret is private to the seat's owner, so holding
+   *      it is proof of ownership.
+   *
+   * The display name is NOT one of them, and is never even consulted. It used to
+   * be the primary key, which is exactly what made two players called "Tanmay"
+   * collide: the second was told the name was taken, or worse, handed the first
+   * one's seat. Someone with neither proof is simply a new player, and gets a
+   * new seat next to their namesake.
+   */
+  private findReturningMember(
+    room: Room,
+    secret?: string,
+    profileId?: string
+  ): { player?: Player; spectator?: Spectator } {
+    if (profileId) {
+      const player = room.players.find((p) => !p.isBot && p.profileId === profileId);
+      if (player) return { player };
+      const spectator = room.spectators?.find((s) => s.profileId === profileId);
+      if (spectator) return { spectator };
+    }
+    if (secret) {
+      const player = room.players.find((p) => !p.isBot && p.secret === secret);
+      if (player) return { player };
+      const spectator = room.spectators?.find((s) => s.secret === secret);
+      if (spectator) return { spectator };
+    }
+    return {};
   }
 
   // Join an existing room via Socket connection
@@ -595,47 +735,52 @@ class RoomManager {
       throw new Error('Room not found');
     }
 
-    logger.debug(`[ROOM_JOIN_REQUEST] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${upperCode}, Status: ${room.status}`);
+    // Display name only — never used to find, match or reject a seat below.
+    const displayName = sanitizeDisplayName(playerName) || 'Player';
+
+    logger.debug(`[ROOM_JOIN_REQUEST] Name: ${displayName}, Player: ${profile?.profileId ?? 'guest'}, Socket: ${playerSocketId}, Room: ${upperCode}, Status: ${room.status}`);
     logger.debug(`[ROOM_PLAYER_COUNT] Room: ${upperCode}, Count: ${room.players.length}`);
     // Active-player capacity is host-configurable via house rules (default 6). It
     // is the single source of truth for how many players may hold a seat.
     const { maxPlayers } = this.getCapacityInfo(room);
     logger.debug(`[ROOM_CAPACITY] Room: ${upperCode}, Capacity: ${maxPlayers}`);
 
-    // Cancel any active disconnect timer for this player/spectator
-    const timerKey = `${upperCode}:${playerName.toLowerCase()}`;
-    if (this.disconnectTimers.has(timerKey)) {
-      clearTimeout(this.disconnectTimers.get(timerKey)!);
-      this.disconnectTimers.delete(timerKey);
-      logger.debug(`[GRACE_PERIOD_CANCEL] Reconnection detected. Cancelled disconnect grace period for ${playerName} in Room ${upperCode}`);
-    }
+    // Reconnection, resolved by identity (Player ID, then per-seat secret).
+    const returning = this.findReturningMember(room, secret, profile?.profileId);
+    const existingPlayer = returning.player;
 
-    // Check if a player with this name already exists in the room (Reconnection Case)
-    const existingPlayerByName = room.players.find(
-      (p) => p.name.toLowerCase() === playerName.toLowerCase()
-    );
-
-    if (existingPlayerByName) {
-      // Identity check: a name-based reconnection is only honoured if the caller
-      // proves ownership with the matching per-session secret. This blocks a
-      // stranger from stealing a seat (and possibly host) by reusing a name.
-      if (!secret || secret !== existingPlayerByName.secret) {
-        logger.debug(`[JOIN_REJECTED] Name "${playerName}" is already taken in room ${room.code} (secret mismatch).`);
-        throw new Error('That name is already taken in this room. Please choose another.');
+    if (existingPlayer) {
+      // Cancel this seat's disconnect timer — they made it back in time.
+      if (this.cancelDisconnectTimer(upperCode, existingPlayer.uid)) {
+        logger.debug(`[GRACE_PERIOD_CANCEL] Reconnection detected. Cancelled disconnect grace period for ${displayName} in Room ${upperCode}`);
       }
 
-      const oldSocketId = existingPlayerByName.id;
+      const oldSocketId = existingPlayer.id;
 
       // Update player socket ID
-      existingPlayerByName.id = playerSocketId;
+      existingPlayer.id = playerSocketId;
+
+      // The name is display data, so it simply follows the player: someone who
+      // renamed between sessions shows up under the new name, in the same seat,
+      // with the same score.
+      existingPlayer.name = displayName;
 
       // Refresh the attached persistent-profile identity on reconnect (the player
-      // may have renamed/changed avatar between sessions). Cleared if none presented.
+      // may have changed avatar/outfit between sessions). The Player ID itself is
+      // never rewritten to a different one here — a seat is reclaimed by the
+      // identity that already holds it.
       if (profile) {
-        existingPlayerByName.profileId = profile.profileId;
-        existingPlayerByName.tag = profile.tag;
-        existingPlayerByName.avatar = profile.avatar ?? null;
-        existingPlayerByName.outfit = profile.outfit ?? null;
+        existingPlayer.profileId = profile.profileId;
+        existingPlayer.tag = profile.tag;
+        existingPlayer.avatar = profile.avatar ?? null;
+        existingPlayer.outfit = profile.outfit ?? null;
+      }
+
+      // Keep the scoreboard's display copy of the name in step with the rename.
+      const score = room.match?.scores[existingPlayer.uid];
+      if (score) {
+        score.name = displayName;
+        score.playerId = existingPlayer.profileId ?? null;
       }
 
       // Update host ID if applicable
@@ -684,30 +829,25 @@ class RoomManager {
         }
       }
 
-      logger.debug(`[PLAYER_RECONNECTED] Rebound name "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
-      logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName} (Reconnected), Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${existingPlayerByName.seatNumber}`);
-      logger.debug(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      logger.debug(`[PLAYER_RECONNECTED] Rebound seat ${existingPlayer.uid} ("${displayName}") from socket ${oldSocketId} to ${playerSocketId}`);
+      logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${displayName} (Reconnected), Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${existingPlayer.seatNumber}`);
+      logger.debug(`[ROOM_JOIN] Player: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       this.markDirty(room.code);
-      return { room, player: existingPlayerByName, isSpectator: false };
+      return { room, player: existingPlayer, isSpectator: false };
     }
 
-    // Check if spectator with same name exists (Spectator Reconnection Case)
-    if (room.spectators) {
-      const existingSpectatorByName = room.spectators.find(
-        (s) => s.name.toLowerCase() === playerName.toLowerCase()
-      );
-      if (existingSpectatorByName) {
-        if (!secret || secret !== existingSpectatorByName.secret) {
-          logger.debug(`[JOIN_REJECTED] Spectator name "${playerName}" is taken in room ${room.code} (secret mismatch).`);
-          throw new Error('That name is already taken in this room. Please choose another.');
-        }
-        const oldSocketId = existingSpectatorByName.id;
-        existingSpectatorByName.id = playerSocketId;
-        logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator "${playerName}" from socket ${oldSocketId} to ${playerSocketId}`);
-        logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
-        this.markDirty(room.code);
-        return { room, player: null, isSpectator: true, spectator: existingSpectatorByName };
-      }
+    // Spectator reconnection — same identity rules as a seated player.
+    const existingSpectator = returning.spectator;
+    if (existingSpectator) {
+      this.cancelDisconnectTimer(upperCode, existingSpectator.uid);
+      const oldSocketId = existingSpectator.id;
+      existingSpectator.id = playerSocketId;
+      existingSpectator.name = displayName;
+      if (profile) existingSpectator.profileId = profile.profileId;
+      logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator slot ${existingSpectator.uid} ("${displayName}") from socket ${oldSocketId} to ${playerSocketId}`);
+      logger.debug(`[ROOM_JOIN] Spectator: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      this.markDirty(room.code);
+      return { room, player: null, isSpectator: true, spectator: existingSpectator };
     }
 
     // Spectator Check: overflow past the active-player capacity joins as a spectator.
@@ -723,7 +863,7 @@ class RoomManager {
       const botIndex = room.players.findIndex((p) => p.isBot);
       if (botIndex !== -1) {
         const [displaced] = room.players.splice(botIndex, 1);
-        logger.debug(`[BOT_DISPLACED] ${displaced.name} gave up seat ${displaced.seatNumber} for ${playerName} in room ${room.code}`);
+        logger.debug(`[BOT_DISPLACED] ${displaced.name} gave up seat ${displaced.seatNumber} for ${displayName} in room ${room.code}`);
         shouldSpectate = false;
       }
     }
@@ -736,7 +876,7 @@ class RoomManager {
       if (!room.spectators) {
         room.spectators = [];
       }
-      // Reconnection or duplicate checks for spectators
+      // Same socket re-announcing itself keeps its slot; anyone else is new.
       let spectator = room.spectators.find((s) => s.id === playerSocketId);
       if (!spectator) {
         // Spectator capacity is a house rule too (Max Spectators). When every player
@@ -745,11 +885,17 @@ class RoomManager {
         if (this.getCapacityInfo(room).spectatorsFull) {
           throw new Error('This room is completely full — all player seats and spectator slots are taken.');
         }
-        spectator = { id: playerSocketId, name: playerName, secret: randomUUID() };
+        spectator = {
+          id: playerSocketId,
+          uid: randomUUID(),
+          name: displayName,
+          secret: randomUUID(),
+          ...(profile ? { profileId: profile.profileId } : {}),
+        };
         room.spectators.push(spectator);
       }
-      logger.debug(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
-      logger.debug(`[ROOM_JOIN] Spectator: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      logger.debug(`[PLAYER_ASSIGNED_SPECTATOR] Name: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+      logger.debug(`[ROOM_JOIN] Spectator: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       this.markDirty(room.code);
       return { room, player: null, isSpectator: true, spectator };
     }
@@ -772,7 +918,8 @@ class RoomManager {
 
     const newPlayer: Player = {
       id: playerSocketId,
-      name: playerName,
+      uid: randomUUID(),
+      name: displayName,
       seatNumber,
       isHost,
       secret: randomUUID(),
@@ -782,12 +929,22 @@ class RoomManager {
     };
 
     room.players.push(newPlayer);
-    
+
     // Sort players by seat number so client lists remain aligned
     room.players.sort((a, b) => a.seatNumber - b.seatNumber);
 
-    logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${seatNumber}`);
-    logger.debug(`[ROOM_JOIN] Player: ${playerName}, Socket: ${playerSocketId}, Room: ${room.code}`);
+    // Joining mid-match puts you on the scoreboard at zero rather than leaving a
+    // hole, and does it under your own seat even if a namesake is already listed.
+    if (room.match && room.match.scores[newPlayer.uid] === undefined) {
+      room.match.scores[newPlayer.uid] = {
+        name: newPlayer.name,
+        points: 0,
+        playerId: newPlayer.profileId ?? null,
+      };
+    }
+
+    logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${seatNumber}`);
+    logger.debug(`[ROOM_JOIN] Player: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
     this.markDirty(room.code);
     return { room, player: newPlayer, isSpectator: false };
   }
@@ -803,11 +960,7 @@ class RoomManager {
         let gameStopped = false;
 
         // Cancel any active disconnect grace period timer for safety
-        const timerKey = `${code.toUpperCase()}:${leftPlayer.name.toLowerCase()}`;
-        if (this.disconnectTimers.has(timerKey)) {
-          clearTimeout(this.disconnectTimers.get(timerKey)!);
-          this.disconnectTimers.delete(timerKey);
-        }
+        this.cancelDisconnectTimer(code, leftPlayer.uid);
 
         logger.debug(`[ROOM_LEAVE] Player: ${leftPlayer.name}, Socket: ${playerSocketId}, Room: ${code}`);
 
@@ -924,13 +1077,9 @@ class RoomManager {
         const specIndex = room.spectators.findIndex((s) => s.id === playerSocketId);
         if (specIndex !== -1) {
           const [leftSpectator] = room.spectators.splice(specIndex, 1);
-          
+
           // Cancel any active disconnect grace period timer for safety
-          const timerKey = `${code.toUpperCase()}:${leftSpectator.name.toLowerCase()}`;
-          if (this.disconnectTimers.has(timerKey)) {
-            clearTimeout(this.disconnectTimers.get(timerKey)!);
-            this.disconnectTimers.delete(timerKey);
-          }
+          this.cancelDisconnectTimer(code, leftSpectator.uid);
 
           logger.debug(`[ROOM_LEAVE] Spectator: ${leftSpectator.name}, Socket: ${playerSocketId}, Room: ${code}`);
 
@@ -1032,18 +1181,23 @@ class RoomManager {
         targetScore: rules.targetScore ?? DEFAULT_TARGET_SCORE,
         round: 1,
         lastRound: null,
+        matchWinnerUid: null,
         matchWinnerName: null,
         matchStartedAt: Date.now(),
       };
-      // Seed every current player at 0 so the scoreboard shows everyone.
-      room.players.forEach((p) => { room.match!.scores[p.name.toLowerCase()] = 0; });
+      // Seed every current seat at 0 so the scoreboard shows everyone. Seat-keyed,
+      // so same-named players get one row each.
+      room.players.forEach((p) => {
+        room.match!.scores[p.uid] = { name: p.name, points: 0, playerId: p.profileId ?? null };
+      });
     } else {
       room.match.round += 1;
       room.match.lastRound = null;
       // Ensure any player who joined between rounds appears on the board.
       room.players.forEach((p) => {
-        const key = p.name.toLowerCase();
-        if (room.match!.scores[key] === undefined) room.match!.scores[key] = 0;
+        if (room.match!.scores[p.uid] === undefined) {
+          room.match!.scores[p.uid] = { name: p.name, points: 0, playerId: p.profileId ?? null };
+        }
       });
     }
 
@@ -1070,19 +1224,37 @@ class RoomManager {
 
     const winner = room.players.find((p) => p.id === game.winnerId);
     const winnerName = winner ? winner.name : 'Unknown';
-    const key = winnerName.toLowerCase();
+    // Points are banked onto the WINNING SEAT, never onto a name — with duplicate
+    // names allowed, crediting "tanmay" could otherwise pay the wrong player.
+    // A winner who somehow has no seat (left mid-finalization) gets a throwaway
+    // key so the round still balances instead of writing to `undefined`.
+    const key = winner ? winner.uid : `absent:${game.winnerId}`;
 
     const points = calculateRoundPoints(game.hands, game.winnerId);
-    room.match.scores[key] = (room.match.scores[key] ?? 0) + points;
+    const entry = room.match.scores[key] ?? {
+      name: winnerName,
+      points: 0,
+      playerId: winner?.profileId ?? null,
+    };
+    entry.points += points;
+    entry.name = winnerName;
+    if (winner?.profileId) entry.playerId = winner.profileId;
+    room.match.scores[key] = entry;
 
-    const result: RoundResult = { round: room.match.round, winnerName, pointsAwarded: points };
+    const result: RoundResult = {
+      round: room.match.round,
+      winnerUid: winner?.uid,
+      winnerName,
+      pointsAwarded: points,
+    };
     room.match.lastRound = result;
 
     let matchWon = false;
-    if (room.match.scores[key] >= room.match.targetScore) {
+    if (entry.points >= room.match.targetScore) {
+      room.match.matchWinnerUid = winner?.uid ?? null;
       room.match.matchWinnerName = winnerName;
       matchWon = true;
-      logger.info(`[MATCH_WON] ${winnerName} reached ${room.match.scores[key]} in room ${code}`);
+      logger.info(`[MATCH_WON] ${winnerName} reached ${entry.points} in room ${code}`);
     }
 
     // Server-authoritative stat capture. Fold this round into every seated
@@ -1139,6 +1311,7 @@ class RoomManager {
       .map((p) => ({
         id: p.id,
         name: p.name,
+        playerId: p.profileId ?? null,
         pts: p.id === game.winnerId ? -1 : handPoints(game.hands[p.id]),
       }))
       .sort((a, b) => a.pts - b.pts);
@@ -1160,10 +1333,14 @@ class RoomManager {
     // Everything below describes THIS round: its winner, its standings, its
     // wall-clock length. `rounds: 1` because one record covers exactly one round.
     const winnerName = result.winnerName;
+    const winnerId = room.players.find((p) => p.id === game.winnerId)?.profileId ?? null;
     const durationMs = game.startedAt ? Math.max(0, Date.now() - game.startedAt) : 0;
     const players: MatchPlayerRecord[] = ranked.map((r) => ({
       name: r.name,
       placement: roundPlacement.get(r.id) ?? 0,
+      // Stamped so a history line still identifies WHO it was after a rename, and
+      // so two same-named opponents in one match stay distinguishable.
+      playerId: r.playerId,
     }));
     const houseRulesSummary = this.summarizeHouseRules(room.houseRules);
     const finishedAt = Date.now();
@@ -1176,6 +1353,7 @@ class RoomManager {
         // Cloned per profile: each record is persisted independently.
         players: players.map((s) => ({ ...s })),
         winnerName,
+        winnerId,
         placement,
         durationMs,
         rounds: 1,

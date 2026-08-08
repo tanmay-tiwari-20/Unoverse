@@ -9,9 +9,11 @@ import { useExitTable } from '../../hooks/useExitTable';
 import { ConfettiCanvas } from './ConfettiCanvas';
 
 interface ScoreEntry {
-  nameKey: string;
+  /** Seat uid — the scoreboard's key, and this row's React key. */
+  uid: string;
   name: string;
-  id: string;
+  /** Permanent Player ID, when this seat belongs to a profile. Display only. */
+  playerId?: string | null;
   score: number;
 }
 
@@ -48,6 +50,11 @@ const ScoreRow: React.FC<ScoreRowProps> = ({ entry, rank, target, isMe, justWonR
             <RankIcon size={14} className={rankIconColor} /> #{rank}
           </span>
           <span className="font-arcade truncate max-w-[90px]">{entry.name}</span>
+          {/* Two players may share a display name — the Player ID is what tells
+              their rows apart. Kept muted so the name still reads first. */}
+          {entry.playerId && (
+            <span className="text-[9px] font-rounded text-white/40 tabular-nums">#{entry.playerId}</span>
+          )}
           {justWonRound && (
             <span className="text-[9px] font-rounded font-bold text-lime-300 uppercase">+{roundPoints}</span>
           )}
@@ -74,6 +81,7 @@ export const EndOfRound: React.FC = () => {
   const player = useGameStore((s) => s.player);
   const gameStatus = useGameStore((s) => s.gameStatus);
   const winnerName = useGameStore((s) => s.winnerName);
+  const winnerId = useGameStore((s) => s.winnerId);
   const match = useGameStore((s) => s.match);
   const isProcessing = useGameStore((s) => s.isProcessing);
   const setIsProcessing = useGameStore((s) => s.setIsProcessing);
@@ -90,19 +98,32 @@ export const EndOfRound: React.FC = () => {
   const matchWon = !!match?.matchWinnerName;
   const roundPoints = match?.lastRound?.pointsAwarded ?? 0;
   const target = match?.targetScore ?? 500;
-  const headerText = matchWon
-    ? (player && match?.matchWinnerName === player.name ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
-    : (player && winnerName === player.name ? 'You won the round!' : `${winnerName} won the round!`);
 
-  // Match scoreboard (cumulative points across rounds), highest first. Scores are
-  // keyed by lowercased name on the server so they survive reconnects.
+  // "Did I win?" is a seat comparison, never a name comparison — an opponent
+  // sharing my display name must not make my client claim the win.
+  const iWonMatch = !!player && !!match?.matchWinnerUid && match.matchWinnerUid === player.uid;
+  const iWonRound = !!player && !!winnerId && winnerId === player.id;
+  const headerText = matchWon
+    ? (iWonMatch ? 'YOU WIN THE MATCH!' : `${match?.matchWinnerName} wins the match!`)
+    : (iWonRound ? 'You won the round!' : `${winnerName} won the round!`);
+
+  // Match scoreboard (cumulative points across rounds), highest first. Keyed by
+  // seat uid server-side, so it survives reconnects and never merges two players
+  // who happen to share a name.
   const scoreboard: ScoreEntry[] = match
     ? Object.entries(match.scores)
-        .map(([nameKey, score]) => {
-          const p = room?.players.find((pl) => pl.name.toLowerCase() === nameKey);
-          return { nameKey, name: p?.name ?? nameKey, id: p?.id ?? nameKey, score };
+        .map(([uid, entry]) => {
+          // Prefer the live seat for the label (it tracks renames); fall back to
+          // the banked name for players who have since left the room.
+          const p = room?.players.find((pl) => pl.uid === uid);
+          return {
+            uid,
+            name: p?.name ?? entry.name,
+            playerId: p?.profileId ?? entry.playerId ?? null,
+            score: entry.points,
+          };
         })
-        .sort((a, b) => b.score - a.score)
+        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     : [];
 
   return (
@@ -144,14 +165,12 @@ export const EndOfRound: React.FC = () => {
           </span>
           {scoreboard.map((entry, idx) => (
             <ScoreRow
-              key={entry.id}
+              key={entry.uid}
               entry={entry}
               rank={idx + 1}
               target={target}
-              isMe={entry.name.toLowerCase() === player?.name.toLowerCase()}
-              justWonRound={
-                !matchWon && match?.lastRound?.winnerName?.toLowerCase() === entry.name.toLowerCase()
-              }
+              isMe={entry.uid === player?.uid}
+              justWonRound={!matchWon && !!match?.lastRound?.winnerUid && match.lastRound.winnerUid === entry.uid}
               roundPoints={roundPoints}
             />
           ))}

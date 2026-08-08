@@ -22,9 +22,11 @@ const nonEmptyName = z.string().trim().min(1).max(40);
 const roomCode = z.string().trim().min(1).max(12);
 const cardId = z.string().min(1).max(120);
 const secret = z.string().min(1).max(200);
-// Persistent-profile identity presented on create/join. Both are opaque UUIDs;
-// the server verifies profileSecret against the stored profile before trusting
-// profileId. Optional everywhere — a client without a profile joins as before.
+// Persistent-profile identity presented on create/join. `profileId` is the
+// player's permanent short Player ID (a legacy UUID from before the migration is
+// still accepted and resolved server-side), and the server verifies profileSecret
+// against the stored profile before trusting either. Optional everywhere — a
+// client without a profile joins as before.
 const profileId = z.string().min(1).max(100);
 const profileSecret = z.string().min(1).max(200);
 

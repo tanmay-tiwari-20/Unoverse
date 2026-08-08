@@ -102,10 +102,17 @@ export interface RoundStatDelta {
   jumpIns: number;
 }
 
-/** One player's line in a stored match record. */
+/** One player's line in a stored match record.
+ *
+ *  `name` is DISPLAY ONLY and may repeat across lines — two players called
+ *  "Tanmay" are two distinct entries. `playerId` is what actually identifies the
+ *  participant; it is absent only for bots, profile-less guests, and records
+ *  written before Player IDs existed. */
 export interface MatchPlayerRecord {
   name: string;
   placement: number; // 1 = winner of the match
+  /** The participant's permanent Player ID, when they had a profile. */
+  playerId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +266,11 @@ export function normalizePrivacy(raw: unknown): PrivacySettings {
 export interface MatchRecord {
   date: number;                 // epoch ms the round finished
   players: MatchPlayerRecord[]; // final standings
+  /** DISPLAY ONLY — see MatchPlayerRecord.name. `winnerId` identifies the winner. */
   winnerName: string;
+  /** The winner's permanent Player ID, when they had a profile. Absent on bot
+   *  wins, profile-less guests, and records written before IDs were stamped. */
+  winnerId?: string | null;
   placement: number;            // THIS profile owner's placement
   durationMs: number;           // wall-clock length of the round
   rounds: number;               // rounds covered by this record (currently always 1)
@@ -272,6 +283,40 @@ export interface MatchRecord {
     targetScore: number;
     houseRulesSummary: string;  // short human-readable rules summary
   };
+}
+
+/** Longest display name we store. Names are labels, not identifiers — this cap
+ *  is about layout and payload size, nothing else. */
+export const DISPLAY_NAME_MAX = 40;
+
+/**
+ * Clean a client-supplied display name.
+ *
+ * Display names are the one identity-adjacent field a client controls, so they
+ * are sanitized server-side on every write: control characters and zero-width /
+ * bidi-override codepoints are removed (they let a name impersonate another by
+ * rendering identically or by reversing the text), runs of whitespace collapse
+ * to a single space, and the result is trimmed and capped.
+ *
+ * Sanitizing is NOT de-duplicating: two players may legitimately end up with the
+ * exact same cleaned name, and that is allowed — they are told apart by their
+ * Player IDs, never by their names.
+ *
+ * Returns '' when nothing usable is left; callers decide whether to reject or
+ * substitute a default.
+ */
+export function sanitizeDisplayName(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw
+    // Strip C0/C1 controls + DEL, zero-width marks, bidi embeddings/overrides,
+    // deprecated format chars and the BOM. Every one of these lets a name render
+    // identically to another - impersonation by codepoint rather than spelling.
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]/g, '')
+    // Whatever whitespace survives (including exotic Unicode spaces) collapses.
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, DISPLAY_NAME_MAX)
+    .trim();
 }
 
 /**
@@ -287,10 +332,29 @@ export interface MatchRecord {
  * back the Friends & Social System.
  */
 export interface Profile {
-  id: string;                 // immutable UUID — the durable player identity
+  /**
+   * The permanent Player ID — a short 6–7 digit numeric string (see
+   * `playerId.ts`). This is the CANONICAL identity of the player: room
+   * membership, stats, the friend graph, invitations and presence are all keyed
+   * by it. Server-generated, never derived from the username, and never
+   * regenerated (renames, avatar changes, stat resets and reconnects all leave
+   * it alone).
+   */
+  id: string;
+  /**
+   * The UUID this profile used as its id before the short-Player-ID migration.
+   * Retained purely so already-issued references still resolve — clients holding
+   * the old id in localStorage, and room snapshots persisted with it. Never
+   * displayed, never searchable, never a second identity: it resolves to `id`
+   * and nothing else. Absent on profiles created after the migration.
+   */
+  legacyId?: string | null;
   secret: string;             // private auth token (never broadcast)
   displayName: string;
-  tag: string;                // short discriminator (e.g. "5LHL")
+  /** Legacy 4-character discriminator, e.g. "5LHL". Superseded by the Player ID
+   *  as the way to tell same-named players apart; kept so profiles written
+   *  before the migration round-trip unchanged. Never an identity. */
+  tag: string;
   avatarUrl: string | null;   // preset avatar key, or null for procedural fallback
   outfit: string | null;      // cosmetic outfit (skin) key, or null for default — purely visual
   isGuest: boolean;
@@ -311,16 +375,20 @@ export interface Profile {
 }
 
 /**
- * Public view of a profile: the private `secret` AND the private `social` graph
- * stripped. Everything else (stats, history, dates) is display data and safe to
- * broadcast/serve. `friendCount` is the one derived social figure that is public.
+ * Public view of a profile: the private `secret`, the private `social` graph AND
+ * the internal `legacyId` alias stripped. Everything else (stats, history, dates)
+ * is display data and safe to broadcast/serve. `friendCount` is the one derived
+ * social figure that is public.
+ *
+ * `id` here IS the short Player ID — the value the UI renders as `#4827315` and
+ * the only identity a client ever needs to hold.
  *
  * NOTE: this is the OWNER-facing view (`GET /api/profiles/:id`, unchanged
  * behavior). Inspecting *another* player goes through the social layer's
  * viewer-aware projection, which additionally applies that player's privacy
  * settings — see `socialManager.inspect`.
  */
-export type PublicProfile = Omit<Profile, 'secret' | 'social'> & {
+export type PublicProfile = Omit<Profile, 'secret' | 'social' | 'legacyId'> & {
   winRate: number;
   friendCount: number;
 };
@@ -407,6 +475,9 @@ export function normalizeProfile(raw: Partial<Profile>, mkSecret: () => string):
   const id = String(raw.id);
   return {
     id,
+    // Preserved verbatim: the migration in ProfileManager.hydrate sets this, and
+    // normalization must never drop it or old references stop resolving.
+    legacyId: typeof raw.legacyId === 'string' && raw.legacyId.length > 0 ? raw.legacyId : null,
     secret: typeof raw.secret === 'string' && raw.secret.length > 0 ? raw.secret : mkSecret(),
     displayName: typeof raw.displayName === 'string' ? raw.displayName : 'Player',
     tag: typeof raw.tag === 'string' ? raw.tag : '',
@@ -438,6 +509,6 @@ export function winRate(stats: ProfileStats): number {
  *  crosses the wire; attach the derived win rate + public friend count. The
  *  profile analog of publicPlayer(). */
 export function publicProfile(p: Profile): PublicProfile {
-  const { secret, social, ...rest } = p;
+  const { secret, social, legacyId, ...rest } = p;
   return { ...rest, winRate: winRate(p.stats), friendCount: social.friends.length };
 }

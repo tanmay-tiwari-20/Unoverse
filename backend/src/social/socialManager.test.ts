@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { profileManager } from '../profiles/profileManager';
 import { ProfileStore } from '../profiles/profileStore';
-import { Profile } from '../profiles/profileTypes';
+import { Profile, emptyRoundDelta, normalizeProfile } from '../profiles/profileTypes';
 import { socialManager, SocialError } from './socialManager';
 import { presenceManager } from './presenceManager';
 import { roomManager } from '../rooms/roomManager';
@@ -25,7 +25,7 @@ const mkProfile = (name = `P${++seq}`) => profileManager.createProfile({ display
 
 describe('SocialManager — friend graph', () => {
   beforeEach(() => {
-    profileManager.setStore(new FakeStore());
+    profileManager.resetForTests(new FakeStore());
   });
 
   it('sends a request that appears as outgoing on the sender and incoming on the receiver', () => {
@@ -137,7 +137,7 @@ describe('SocialManager — friend graph', () => {
 
 describe('SocialManager — privacy gates', () => {
   beforeEach(() => {
-    profileManager.setStore(new FakeStore());
+    profileManager.resetForTests(new FakeStore());
   });
 
   it('honors a "nobody" friend-request policy', () => {
@@ -221,7 +221,7 @@ describe('SocialManager — privacy gates', () => {
 
 describe('SocialManager — search', () => {
   beforeEach(() => {
-    profileManager.setStore(new FakeStore());
+    profileManager.resetForTests(new FakeStore());
   });
 
   it('finds a player by name and by Name#TAG, and marks the viewer relationship', () => {
@@ -252,7 +252,7 @@ describe('SocialManager — search', () => {
 
 describe('SocialManager — invites and joining', () => {
   beforeEach(() => {
-    profileManager.setStore(new FakeStore());
+    profileManager.resetForTests(new FakeStore());
   });
 
   const befriend = (a: Profile, b: Profile) => {
@@ -343,7 +343,7 @@ describe('SocialManager — invites and joining', () => {
 
 describe('PresenceManager — derivation', () => {
   beforeEach(() => {
-    profileManager.setStore(new FakeStore());
+    profileManager.resetForTests(new FakeStore());
   });
 
   it('reference-counts sockets so a second tab closing does not flap offline', () => {
@@ -400,5 +400,235 @@ describe('PresenceManager — derivation', () => {
 
     presenceManager.unbind('s-solo');
     roomManager.leaveRoom('s-solo');
+  });
+});
+
+/**
+ * ============================================================================
+ *  Identity in the social graph.
+ *
+ *  The friend graph is where a name-keyed assumption would do the most damage:
+ *  an edge written against the wrong player is invisible until someone opens a
+ *  profile they never added. Every test below puts two players with the SAME
+ *  display name on the table and checks that only the one addressed by Player
+ *  ID is touched.
+ * ============================================================================
+ */
+describe('SocialManager — Player ID is the only identity', () => {
+  beforeEach(() => {
+    profileManager.resetForTests(new FakeStore());
+  });
+
+  /** Three players who all call themselves Tanmay, plus a viewer. */
+  const crowd = () => ({
+    viewer: profileManager.createProfile({ displayName: 'Searcher' }),
+    one: profileManager.createProfile({ displayName: 'Tanmay' }),
+    two: profileManager.createProfile({ displayName: 'Tanmay' }),
+    three: profileManager.createProfile({ displayName: 'Tanmay' }),
+  });
+
+  it('lands a friend request on the addressed player, not their namesake', () => {
+    const { one, two, three } = crowd();
+    expect(one.displayName).toBe(two.displayName); // the whole point
+
+    socialManager.sendRequest(one.id, two.id);
+
+    expect(socialManager.snapshotFor(two.id).incoming.map((r) => r.profileId)).toEqual([one.id]);
+    // The namesake is untouched — no edge leaked sideways on a name match.
+    expect(socialManager.snapshotFor(three.id).incoming).toHaveLength(0);
+    expect(socialManager.relationship(one.id, three.id)).toBe('none');
+  });
+
+  it('keeps duplicate-named friendships apart through accept and removal', () => {
+    const { one, two, three } = crowd();
+
+    socialManager.sendRequest(one.id, two.id);
+    socialManager.acceptRequest(two.id, one.id);
+    socialManager.sendRequest(one.id, three.id);
+    socialManager.acceptRequest(three.id, one.id);
+
+    expect(socialManager.friendIdsOf(one.id).sort()).toEqual([two.id, three.id].sort());
+    expect(socialManager.areFriends(two.id, three.id)).toBe(false); // never met
+
+    socialManager.removeFriend(one.id, two.id);
+
+    // Removing one Tanmay must not remove the other.
+    expect(socialManager.friendIdsOf(one.id)).toEqual([three.id]);
+    expect(socialManager.areFriends(one.id, three.id)).toBe(true);
+  });
+
+  it('blocks exactly one namesake', () => {
+    const { viewer, one, two } = crowd();
+
+    socialManager.block(viewer.id, one.id);
+
+    expect(socialManager.hasBlocked(viewer.id, one.id)).toBe(true);
+    expect(socialManager.hasBlocked(viewer.id, two.id)).toBe(false);
+    // The blocked one drops out of search; the namesake stays.
+    const hits = socialManager.search(viewer.id, 'Tanmay').map((r) => r.profileId);
+    expect(hits).not.toContain(one.id);
+    expect(hits).toContain(two.id);
+  });
+
+  it('returns every namesake from a name search, each with its own Player ID', () => {
+    const { viewer, one, two, three } = crowd();
+
+    const hits = socialManager.search(viewer.id, 'Tanmay');
+
+    expect(hits.map((r) => r.profileId).sort()).toEqual([one.id, two.id, three.id].sort());
+    // Same label, distinct identities — this is what the UI renders as
+    // "Tanmay · #4827315" and needs three separate rows for.
+    expect(new Set(hits.map((r) => r.displayName))).toEqual(new Set(['Tanmay']));
+    expect(new Set(hits.map((r) => r.profileId)).size).toBe(3);
+  });
+
+  it('resolves a Player ID search to exactly one player', () => {
+    const { viewer, two } = crowd();
+
+    expect(socialManager.search(viewer.id, two.id).map((r) => r.profileId)).toEqual([two.id]);
+    // The forms a player can actually paste out of the UI.
+    expect(socialManager.search(viewer.id, `#${two.id}`).map((r) => r.profileId)).toEqual([two.id]);
+    expect(socialManager.search(viewer.id, `  ${two.id} `).map((r) => r.profileId)).toEqual([two.id]);
+    expect(socialManager.search(viewer.id, `Tanmay #${two.id}`).map((r) => r.profileId)).toEqual([two.id]);
+  });
+
+  it('carries the viewer relationship per Player ID across namesakes', () => {
+    const { viewer, one, two } = crowd();
+
+    socialManager.sendRequest(viewer.id, one.id);
+
+    const byId = (id: string) =>
+      socialManager.search(viewer.id, 'Tanmay').find((r) => r.profileId === id)?.relationship;
+
+    expect(byId(one.id)).toBe('request-sent');
+    expect(byId(two.id)).toBe('none'); // not smeared across the shared name
+  });
+
+  it('inspects a profile by Player ID and returns that player’s own stats', () => {
+    const { viewer, one, two } = crowd();
+
+    profileManager.applyRoundResult(one.id, {
+      delta: { ...emptyRoundDelta, cardsPlayed: 9 },
+      won: true,
+      placement: 1,
+      points: 40,
+    });
+
+    const inspected = socialManager.inspect(viewer.id, one.id);
+    expect(inspected.profileId).toBe(one.id);
+    expect(inspected.displayName).toBe('Tanmay');
+    expect(inspected.stats.roundsWon).toBe(1);
+    expect(inspected.stats.cardsPlayed).toBe(9);
+
+    // The namesake's card is a different card — stats never pooled by name.
+    const other = socialManager.inspect(viewer.id, two.id);
+    expect(other.profileId).toBe(two.id);
+    expect(other.stats.roundsWon).toBe(0);
+    expect(other.stats.cardsPlayed).toBe(0);
+  });
+
+  it('follows the Player ID through a rename, not the old name', () => {
+    const { viewer, one } = crowd();
+
+    socialManager.sendRequest(viewer.id, one.id);
+    profileManager.renameProfile(one.id, one.secret, 'Renamed');
+
+    // Same id, same edge — a rename is a label change, never a new player.
+    expect(socialManager.snapshotFor(viewer.id).outgoing.map((r) => r.profileId)).toEqual([one.id]);
+    expect(socialManager.snapshotFor(viewer.id).outgoing[0].displayName).toBe('Renamed');
+    expect(socialManager.search(viewer.id, 'Renamed').map((r) => r.profileId)).toEqual([one.id]);
+    expect(socialManager.inspect(viewer.id, one.id).relationship).toBe('request-sent');
+  });
+
+  it('invites the addressed player only, and the invite carries ids', () => {
+    const { one, two, three } = crowd();
+
+    socialManager.sendRequest(one.id, two.id);
+    socialManager.acceptRequest(two.id, one.id);
+    socialManager.sendRequest(one.id, three.id);
+    socialManager.acceptRequest(three.id, one.id);
+
+    const room = roomManager.createRoom('inviter');
+    roomManager.joinRoom(room.code, 'Tanmay', 's-one', undefined, { profileId: one.id });
+    presenceManager.bind('s-one', one.id);
+    presenceManager.setRoom(one.id, room.code);
+    // Both namesakes online, so only the addressed ID can decide who gets it.
+    presenceManager.bind('s-two', two.id);
+    presenceManager.bind('s-three', three.id);
+
+    socialManager.createInvite(one.id, two.id);
+
+    expect(socialManager.invitesFor(two.id).map((i) => i.toId)).toEqual([two.id]);
+    expect(socialManager.invitesFor(three.id)).toHaveLength(0);
+
+    presenceManager.setRoom(one.id, null);
+    presenceManager.unbind('s-one');
+    presenceManager.unbind('s-two');
+    presenceManager.unbind('s-three');
+    roomManager.leaveRoom('s-one');
+  });
+});
+
+/**
+ * A client that has not reloaded since the migration still holds its old UUID.
+ * Requests addressed with one must be canonicalised BEFORE the edge is written,
+ * or the two sides of the friendship reference different strings and neither
+ * ever sees the other.
+ */
+describe('SocialManager — legacy id references', () => {
+  /** Store that hands back one pre-migration profile at hydrate time. */
+  class SeededStore extends FakeStore {
+    constructor(private readonly seed: Profile[]) {
+      super();
+    }
+    async loadAll(): Promise<Profile[]> {
+      return this.seed.map((p) => JSON.parse(JSON.stringify(p)));
+    }
+  }
+
+  /** Build a pre-migration profile: filed under a UUID, no `legacyId`. */
+  const legacy = (id: string, displayName: string): Profile => {
+    const p = normalizeProfile({ id, displayName, createdAt: 1, lastSeenAt: 2 }, () => `secret-${id}`);
+    delete (p as Partial<Profile>).legacyId;
+    return p;
+  };
+
+  it('canonicalises a legacy reference so both sides of the edge match', async () => {
+    const old = legacy('11111111-1111-4111-8111-111111111111', 'Tanmay');
+    profileManager.resetForTests(new SeededStore([old]));
+    await profileManager.hydrate();
+
+    const migrated = profileManager.getProfile(old.id)!;
+    expect(migrated.id).not.toBe(old.id);
+    expect(migrated.legacyId).toBe(old.id);
+
+    const friend = profileManager.createProfile({ displayName: 'Tanmay' }); // same name
+    // Addressed by the STALE id — the graph must still store the new one.
+    socialManager.sendRequest(friend.id, old.id);
+
+    expect(socialManager.snapshotFor(migrated.id).incoming.map((r) => r.profileId)).toEqual([friend.id]);
+    expect(socialManager.snapshotFor(friend.id).outgoing.map((r) => r.profileId)).toEqual([migrated.id]);
+
+    // Accepting via the stale id closes the same edge, rather than opening a second.
+    socialManager.acceptRequest(old.id, friend.id);
+    expect(socialManager.areFriends(migrated.id, friend.id)).toBe(true);
+    expect(socialManager.friendIdsOf(migrated.id)).toEqual([friend.id]);
+    expect(socialManager.friendIdsOf(friend.id)).toEqual([migrated.id]);
+  });
+
+  it('does not expose the legacy id to search, but still resolves it', async () => {
+    const old = legacy('22222222-2222-4222-8222-222222222222', 'Tanmay');
+    profileManager.resetForTests(new SeededStore([old]));
+    await profileManager.hydrate();
+
+    const migrated = profileManager.getProfile(old.id)!;
+    const viewer = profileManager.createProfile({ displayName: 'Searcher' });
+
+    // A UUID is not a Player ID and must not be a search key.
+    expect(socialManager.search(viewer.id, old.id)).toHaveLength(0);
+    // But it is still an accepted reference for a client that has not reloaded.
+    expect(profileManager.resolveId(old.id)).toBe(migrated.id);
+    expect(socialManager.inspect(viewer.id, old.id).profileId).toBe(migrated.id);
+    expect(socialManager.search(viewer.id, migrated.id).map((r) => r.profileId)).toEqual([migrated.id]);
   });
 });

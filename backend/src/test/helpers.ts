@@ -18,14 +18,14 @@ export const card = (color: CardColor, value: CardValue): CardItem => ({
 });
 
 export const players2 = (): Player[] => [
-  { id: 'p1', name: 'Alice', seatNumber: 1, isHost: true, secret: 's1' },
-  { id: 'p2', name: 'Bob', seatNumber: 2, isHost: false, secret: 's2' },
+  { id: 'p1', uid: 'u1', name: 'Alice', seatNumber: 1, isHost: true, secret: 's1' },
+  { id: 'p2', uid: 'u2', name: 'Bob', seatNumber: 2, isHost: false, secret: 's2' },
 ];
 
 export const players3 = (): Player[] => [
-  { id: 'p1', name: 'Alice', seatNumber: 1, isHost: true, secret: 's1' },
-  { id: 'p2', name: 'Bob', seatNumber: 2, isHost: false, secret: 's2' },
-  { id: 'p3', name: 'Cara', seatNumber: 3, isHost: false, secret: 's3' },
+  { id: 'p1', uid: 'u1', name: 'Alice', seatNumber: 1, isHost: true, secret: 's1' },
+  { id: 'p2', uid: 'u2', name: 'Bob', seatNumber: 2, isHost: false, secret: 's2' },
+  { id: 'p3', uid: 'u3', name: 'Cara', seatNumber: 3, isHost: false, secret: 's3' },
 ];
 
 export interface StateOverrides {
