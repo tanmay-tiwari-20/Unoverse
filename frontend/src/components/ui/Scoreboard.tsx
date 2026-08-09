@@ -454,8 +454,8 @@ export const Scoreboard: React.FC = () => {
               className="ui-panel left-0 z-50 mt-2"
               style={{
                 position: 'absolute',
-                width: 'min(19rem, calc(100vw - 1.5rem))',
-                maxHeight: 'min(58dvh, 30rem)',
+                width: 'min(26rem, calc(100vw - 1.5rem))',
+                maxHeight: 'min(62dvh, 32rem)',
               }}
             >
               <div className="ui-body ui-body-tight custom-scrollbar">
@@ -465,7 +465,7 @@ export const Scoreboard: React.FC = () => {
           )}
         </AnimatePresence>
       ) : (
-        <Modal open={open} onClose={close} size="sm" labelledBy="scoreboard-title">
+        <Modal open={open} onClose={close} size="md" labelledBy="scoreboard-title">
           <ModalHeader
             id="scoreboard-title"
             title="At the table"

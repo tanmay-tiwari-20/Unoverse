@@ -80,7 +80,7 @@ export function CreateProfileModal({ isOpen, onCreated, initialName = "" }: Crea
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.95 }}
             transition={{ type: "spring", damping: 22, stiffness: 280 }}
-            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black w-full max-w-md flex flex-col relative overflow-hidden max-h-[90dvh]"
+            className="panel-arcade bg-gradient-to-b from-neutral-900 to-black w-full max-w-lg sm:max-w-xl md:max-w-2xl flex flex-col relative overflow-hidden max-h-[90dvh]"
           >
             <div className="absolute inset-0 arcade-dots pointer-events-none" />
 

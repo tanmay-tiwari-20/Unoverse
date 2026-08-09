@@ -159,7 +159,7 @@ export const PlayerProfileModal: React.FC = () => {
             exit={{ opacity: 0, scale: 0.95, y: 12 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[90dvh]"
+            className="w-full max-w-xl sm:max-w-2xl lg:max-w-3xl bg-gradient-to-b from-neutral-900/97 to-black/97 backdrop-blur-xl panel-arcade overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[90dvh]"
           >
             {/* ── Header ──────────────────────────────────────────────── */}
             <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b-2 border-white/15 bg-red-600/20 shrink-0 short:px-4 short:py-2">
