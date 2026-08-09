@@ -3,16 +3,18 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, Eye as EyeIcon, Zap } from "lucide-react";
+import { Eye as EyeIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useSocket } from "../hooks/useSocket";
 import { useProfileStore } from "../store/useProfileStore";
 import { CreateProfileModal } from "../components/profile/CreateProfileModal";
 import { ProfileModal } from "../components/profile/ProfileModal";
-import { PresetAvatar } from "../components/profile/PresetAvatar";
 import { CreateRoomModal } from "../components/lobby/CreateRoomModal";
-import { FriendsButton } from "../components/social/FriendsButton";
 import { SocialLayer } from "../components/social/SocialLayer";
+import { HomeTopRail } from "../components/home/HomeTopRail";
+import { HomeHero } from "../components/home/HomeHero";
+import { PlayConsole, type PlayMode } from "../components/home/PlayConsole";
+import { Button } from "../components/ui/kit";
 import { ArenaSelection } from "../lib/arenas/types";
 
 const LandingScene = dynamic(
@@ -64,14 +66,16 @@ export default function LandingPage() {
   const profileHydrated = useProfileStore((s) => s.hydrated);
   const profileId = useProfileStore((s) => s.profileId);
   const profileName = useProfileStore((s) => s.displayName);
-  const profileAvatar = useProfileStore((s) => s.avatar);
-  const setIsProfileOpen = useProfileStore((s) => s.setIsProfileOpen);
+  const refreshProfile = useProfileStore((s) => s.refreshProfile);
 
   // State variables
   const [displayName, setDisplayName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Which secondary path the console is showing. Quick Play is the primary CTA
+  // and always available; this only chooses between "join a code" and "host".
+  const [playMode, setPlayMode] = useState<PlayMode>("join");
   // Landing "Create" opens an arena picker; the actual room POST happens once
   // the host confirms a world (or Random) in the modal.
   const [createOpen, setCreateOpen] = useState(false);
@@ -81,6 +85,14 @@ export default function LandingPage() {
   useEffect(() => {
     if (profileName) setDisplayName((prev) => prev || profileName);
   }, [profileName]);
+
+  // Pull the server's view of this profile once on landing so the top rail can
+  // show real wins/streak instead of nothing. Fire-and-forget: the store owns
+  // the result and its own error state, and every surface here renders fine
+  // without it. The profile modal re-fetches on open regardless.
+  useEffect(() => {
+    if (profileHydrated && profileId) void refreshProfile();
+  }, [profileHydrated, profileId, refreshProfile]);
 
   // Set when the target room's player slots are all full: the user is informed
   // BEFORE entering that they will join as a spectator, and must confirm. (A room
@@ -97,20 +109,22 @@ export default function LandingPage() {
   const backendUrl =
     (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001").replace(/\/$/, "");
 
-  // Pre-fill the room code when arriving via an invitation link (/?room=CODE)
+  // Pre-fill the room code when arriving via an invitation link (/?room=CODE),
+  // and put the console in "join" mode so the pre-filled code is actually the
+  // thing on screen rather than hidden behind the host tab.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const invited = params.get("room");
     if (invited) {
       setRoomCode(invited.toUpperCase().slice(0, 6));
+      setPlayMode("join");
     }
   }, []);
 
-  // Step 1 — the landing "Create" button. Validate the name, then open the
+  // Step 1 — the console's "Create Room". Validate the name, then open the
   // arena picker. The room isn't created until the host confirms a world.
-  const openCreateModal = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const openCreateModal = () => {
     if (!displayName.trim()) {
       setError("Please enter a display name first.");
       return;
@@ -166,8 +180,7 @@ export default function LandingPage() {
 
   // Quick Play: ask the server for the best public room (or a fresh one) and
   // jump straight into its lobby — no room code required.
-  const handleQuickPlay = async (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleQuickPlay = async () => {
     if (requestInProgress.current) return;
     if (!displayName.trim()) {
       setError("Please enter a display name first.");
@@ -204,8 +217,7 @@ export default function LandingPage() {
     }
   };
 
-  const handleJoinRoom = async (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleJoinRoom = async () => {
     if (requestInProgress.current) return;
     if (!displayName.trim()) {
       setError("Please enter a display name first.");
@@ -284,211 +296,136 @@ export default function LandingPage() {
       {/* Playful color wash + dots over the 3D scene */}
       <div className="absolute inset-0 z-[1] arcade-bg opacity-50 pointer-events-none mix-blend-screen" />
       <div className="absolute inset-0 z-[1] arcade-dots pointer-events-none" />
+      {/* Vignette — pulls the eye to the middle and buys the console its
+          contrast wherever the colour washes happen to be brightest. */}
+      <div
+        className="absolute inset-0 z-[1] pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(ellipse at 50% 45%, transparent 25%, rgba(5, 3, 16, 0.7) 100%)",
+        }}
+        aria-hidden="true"
+      />
 
-      {/* Profile chip — opens the persistent player profile. Only shown once a
-          profile exists (first-time visitors see the create flow instead). */}
-      {profileHydrated && profileId && (
+      <HomeTopRail />
+
+      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain px-4 py-16 pointer-events-none safe-x short:px-3 short:py-12">
         <motion.div
-          initial={{ opacity: 0, y: -12 }}
+          initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, type: "spring", damping: 20, stiffness: 260 }}
-          className="absolute top-4 right-4 z-20 flex items-center gap-2 pointer-events-auto"
+          transition={{ duration: 0.7, ease: "easeOut" }}
+          className="pointer-events-auto grid w-full max-w-6xl items-center justify-items-center gap-6 short:grid-cols-[1.05fr_minmax(0,20rem)] short:gap-5 lg:grid-cols-[1.1fr_minmax(0,25rem)] lg:gap-12"
         >
-          {/* Friends drawer. Sits beside the profile chip because both are
-              "you and yours", and both need a profile to mean anything. */}
-          <FriendsButton className="h-[52px] px-3" />
+          <HomeHero className="w-full max-w-md lg:max-w-none lg:items-start lg:text-left" />
 
-          <button
-            onClick={() => setIsProfileOpen(true)}
-            className="panel-arcade bg-gradient-to-b from-neutral-900/90 to-black/90 backdrop-blur-md pl-2 pr-3.5 py-2 flex items-center gap-2.5 cursor-pointer hover:scale-[1.03] transition-transform"
-            aria-label="Open your player profile"
-          >
-            <PresetAvatar avatarKey={profileAvatar} size={36} />
-            <span className="font-arcade text-sm text-white uppercase tracking-wide max-w-[7rem] truncate">
-              {profileName ?? "Profile"}
-            </span>
-          </button>
-        </motion.div>
-      )}
-
-      {/* Foreground UI. On a landscape phone the vertical stack would overflow a
-          ~390px-tall viewport, so `short:` re-flows it into two columns —
-          wordmark on the left, controls on the right — using the width the
-          orientation actually gives us. */}
-      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none short:flex-row short:gap-6 short:px-6">
-        {/* Centerpiece Hero */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1.2, ease: "easeOut" }}
-          className="flex flex-col items-center gap-6 sm:gap-8 pointer-events-auto w-full max-w-sm px-4 short:flex-row short:items-center short:gap-6 short:max-w-3xl short:px-0"
-        >
-          {/* Titles */}
-          <div className="text-center flex flex-col items-center gap-2 sm:gap-3 arcade-bob short:flex-1 short:shrink-0">
-            <h1 className="font-arcade text-6xl sm:text-7xl md:text-8xl leading-none arcade-stroke-uno text-yellow-400 short:text-5xl">
-              UNOVERSE!
-            </h1>
-            <p className="font-arcade text-xs sm:text-sm tracking-wide uppercase text-white arcade-stroke-uno-sm">
-              Party Card Battle
-            </p>
-          </div>
-
-          {/* Controls Panel */}
-          <div className="w-full flex flex-col gap-4 short:flex-1 short:gap-2">
-            <AnimatePresence mode="wait">
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="bg-red-500/90 border-4 border-white rounded-2xl p-3 flex gap-2.5 items-center text-sm text-white font-rounded font-bold shadow-[0_6px_0_0_rgba(0,0,0,0.3)]">
-                    <AlertCircle size={18} className="text-white shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Inputs Container */}
-            <div className="panel-arcade bg-gradient-to-b from-neutral-900/95 to-black/95 backdrop-blur-md p-4 flex flex-col gap-3 relative overflow-hidden short:gap-2 short:p-3" suppressHydrationWarning>
-              <div className="absolute inset-0 arcade-dots pointer-events-none" />
-
-              <form autoComplete="off" data-form-type="other" data-lpignore="true" onSubmit={(e) => e.preventDefault()} className="contents">
-                <input
-                  type="text"
-                  maxLength={12}
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Your Name"
-                  aria-label="Your display name"
-                  disabled={loading}
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-wide font-rounded font-bold uppercase focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all text-base short:py-2.5 short:text-sm"
-                />
-
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                  placeholder="ROOM CODE"
-                  aria-label="Room code to join"
-                  disabled={loading}
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  className="relative w-full bg-white/10 border-[3px] border-white/70 rounded-2xl px-4 py-3.5 text-white placeholder-white/50 text-center tracking-[0.3em] font-arcade uppercase text-xl focus:outline-none focus:border-yellow-400 focus:bg-white/20 transition-all short:py-2.5 short:text-base"
-                />
-
-                {/* Quick Play — instant public matchmaking, no code needed */}
-                <button
-                  type="button"
-                  onClick={handleQuickPlay}
-                  disabled={loading}
-                  className="btn-arcade w-full bg-gradient-to-b from-amber-400 to-orange-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer inline-flex items-center justify-center gap-2 short:py-2.5 short:text-xs"
-                >
-                  <Zap size={16} className="fill-white" /> Quick Play
-                </button>
-
-                {/* Actions */}
-                <div className="flex gap-3 short:gap-2">
-                  <button
-                    type="button"
-                    onClick={handleJoinRoom}
-                    disabled={loading}
-                    className="btn-arcade flex-1 bg-gradient-to-b from-blue-400 to-blue-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer short:py-2.5 short:text-xs"
-                  >
-                    Join
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={openCreateModal}
-                    disabled={loading}
-                    className="btn-arcade flex-1 bg-gradient-to-b from-lime-400 to-green-600 text-white py-4 text-sm uppercase disabled:cursor-not-allowed cursor-pointer short:py-2.5 short:text-xs"
-                  >
-                    Create
-                  </button>
-                </div>
-              </form>
-            </div>
+          <div className="w-full max-w-sm short:max-w-none lg:max-w-none">
+            <PlayConsole
+              displayName={displayName}
+              onNameChange={setDisplayName}
+              roomCode={roomCode}
+              onRoomCodeChange={setRoomCode}
+              mode={playMode}
+              onModeChange={setPlayMode}
+              loading={loading}
+              error={error}
+              onQuickPlay={handleQuickPlay}
+              onJoin={handleJoinRoom}
+              onCreate={openCreateModal}
+              hasProfile={profileHydrated && !!profileId}
+            />
           </div>
         </motion.div>
       </div>
 
-      {/* Minimal Footer. Hidden on landscape phones — the two-column hero needs
-          every pixel of a ~390px-tall viewport more than the tagline does. */}
-      <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none z-10 short:hidden">
-        <span className="font-arcade text-xs text-white/70 uppercase tracking-[0.2em] arcade-stroke-sm">
+      <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-10 flex justify-center px-4 short:hidden">
+        <span className="font-rounded text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">
           Built for multiplayer fun
         </span>
       </div>
 
-      {/* =================================================================== */}
-      {/* SPECTATOR PROMPT — the playing room is full; confirm before joining   */}
-      {/* =================================================================== */}
       <AnimatePresence>
         {spectatorPrompt && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 pointer-events-auto"
+            transition={{ duration: 0.16 }}
+            className="ui-scrim fixed inset-0 z-[2100] flex items-center justify-center p-4 pointer-events-auto"
           >
             <motion.div
-              initial={{ opacity: 0, y: 24, scale: 0.95 }}
+              initial={{ opacity: 0, y: 16, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 16, scale: 0.95 }}
-              transition={{ type: "spring", damping: 22, stiffness: 280 }}
+              exit={{ opacity: 0, y: 12, scale: 0.94 }}
+              transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.7 }}
               role="alertdialog"
               aria-labelledby="spectator-prompt-title"
               aria-describedby="spectator-prompt-desc"
-              className="panel-arcade bg-gradient-to-b from-neutral-900 to-black p-6 flex flex-col items-center gap-4 w-full max-w-sm text-center relative overflow-hidden short:p-4 short:gap-2.5 short:max-h-[92dvh] short:overflow-y-auto"
+              className="home-card home-card-brand w-full max-w-sm overflow-hidden"
             >
-              <div className="absolute inset-0 arcade-dots pointer-events-none" />
+              <div className="arcade-dots pointer-events-none absolute inset-0 rounded-[inherit]" aria-hidden="true" />
 
-              <div className="relative w-14 h-14 rounded-full bg-gradient-to-b from-cyan-400 to-cyan-700 border-4 border-white flex items-center justify-center text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)]">
-                <EyeIcon size={26} />
-              </div>
+              <div className="relative flex flex-col items-center gap-3 p-5 text-center short:gap-2 short:p-3.5">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full border-4 border-white bg-gradient-to-b from-violet-400 to-violet-700 text-white shadow-[0_4px_0_0_rgba(0,0,0,0.3)] short:hidden">
+                  <EyeIcon size={22} aria-hidden="true" />
+                </span>
 
-              <div className="relative">
-                <h2 id="spectator-prompt-title" className="font-arcade text-xl uppercase tracking-wide text-yellow-400 arcade-stroke-uno-sm">
-                  Playing Room Is Full
-                </h2>
-                <p id="spectator-prompt-desc" className="font-rounded font-semibold text-white/85 text-xs mt-2 leading-relaxed">
-                  All {spectatorPrompt.maxPlayers} player slots in room{" "}
-                  <span className="font-arcade text-white">{spectatorPrompt.code}</span>{" "}
-                  are filled ({spectatorPrompt.playerCount}/{spectatorPrompt.maxPlayers} players,
-                  spectators {spectatorPrompt.spectatorCount}/{spectatorPrompt.maxSpectators}).
-                  <br />
-                  You will join as a <span className="text-cyan-300 font-bold">spectator</span> —
-                  you can watch the game, chat and react, but you won't get a seat or cards.
-                </p>
-              </div>
+                <div>
+                  <h2
+                    id="spectator-prompt-title"
+                    className="font-arcade arcade-stroke-uno-sm text-lg uppercase tracking-wide text-yellow-400"
+                  >
+                    Table Is Full
+                  </h2>
+                  <p
+                    id="spectator-prompt-desc"
+                    className="font-rounded mt-1.5 text-[11px] font-bold leading-relaxed text-white/70"
+                  >
+                    All {spectatorPrompt.maxPlayers} seats in room{" "}
+                    <span className="font-arcade text-white">{spectatorPrompt.code}</span>{" "}
+                    are taken. You&apos;ll join as a{" "}
+                    <span className="font-bold text-violet-300">spectator</span> — watch,
+                    chat and react, but no seat or cards.
+                  </p>
+                </div>
 
-              <div className="relative w-full flex flex-col gap-2.5">
-                <button
-                  onClick={() => {
-                    const code = spectatorPrompt.code;
-                    setSpectatorPrompt(null);
-                    router.push(
-                      `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
-                    );
-                  }}
-                  className="btn-arcade w-full bg-gradient-to-b from-cyan-400 to-cyan-600 text-white py-3.5 text-sm uppercase inline-flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <EyeIcon size={16} /> Join as Spectator
-                </button>
-                <button
-                  onClick={() => setSpectatorPrompt(null)}
-                  className="btn-arcade w-full bg-gradient-to-b from-neutral-600 to-neutral-800 text-white py-3 text-xs uppercase cursor-pointer"
-                >
-                  Cancel
-                </button>
+                {/* The two counts, as data rather than another sentence. */}
+                <div className="grid w-full grid-cols-2 gap-1.5">
+                  <div className="home-card-flat px-2 py-1.5">
+                    <p className="font-arcade text-sm tabular-nums text-white">
+                      {spectatorPrompt.playerCount}/{spectatorPrompt.maxPlayers}
+                    </p>
+                    <p className="font-rounded text-[9px] font-bold uppercase tracking-wider text-white/40">
+                      Players
+                    </p>
+                  </div>
+                  <div className="home-card-flat px-2 py-1.5">
+                    <p className="font-arcade text-sm tabular-nums text-violet-300">
+                      {spectatorPrompt.spectatorCount}/{spectatorPrompt.maxSpectators}
+                    </p>
+                    <p className="font-rounded text-[9px] font-bold uppercase tracking-wider text-white/40">
+                      Spectators
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex w-full flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = spectatorPrompt.code;
+                      setSpectatorPrompt(null);
+                      router.push(
+                        `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
+                      );
+                    }}
+                    className="btn-arcade font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2 bg-gradient-to-b from-violet-400 to-violet-600 py-3 text-xs uppercase text-white"
+                  >
+                    <EyeIcon size={15} aria-hidden="true" /> Watch This Table
+                  </button>
+                  <Button tone="neutral" size="sm" block onClick={() => setSpectatorPrompt(null)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

@@ -1,49 +1,12 @@
 "use client";
 
-/**
- * ============================================================================
- *  ProfileModal — your own player card, and the editor behind it.
- * ============================================================================
- *
- * This is the screen a player opens to look at themselves, so it is built to be
- * looked at: a full-height 3D mannequin wearing the equipped outfit leads the
- * panel, identity sits directly beneath it, and the numbers are grouped into
- * three tabs instead of the seven stacked grids the old version scrolled through.
- *
- * WHAT CHANGED, AND WHY
- *   • The 3D preview is now the headline rather than something you only saw
- *     while picking an outfit. It is the existing `PreviewStage` — the same
- *     camera, lighting rig, turntable and on-demand frame loop the home screen
- *     and the inspect-a-player modal use — so an outfit looks identical
- *     everywhere and any change to that stage lands in all three at once.
- *   • Twenty-four stat cells used to be one long scroll. They are now Overview /
- *     Cards / History, and only the open tab is mounted, which is what keeps the
- *     panel short enough to fit a 390×844 phone without shrinking anything.
- *   • Landscape is a genuinely different arrangement (`short:`): the mannequin
- *     moves beside the identity block instead of above it, because a 390px-tall
- *     viewport cannot afford a stacked hero.
- *   • Reset Stats moved into the editor, alongside the other three
- *     secret-authenticated writes. It is destructive and it is profile
- *     management, so it belongs where you go to manage the profile — not one tap
- *     from the panel you open to admire your win streak.
- *
- * PERFORMANCE — exactly ONE WebGL context exists on this screen. The hero stage
- * is mounted once and re-skinned by prop while editing (`outfitKey` is data, not
- * identity, so picking an outfit never remounts the canvas), and `OutfitPicker`
- * is asked to suppress its own built-in preview rather than opening a second one.
- * The stage itself renders on demand, so a still mannequin costs nothing.
- *
- * SERVER-AUTHORITATIVE — every value shown comes from the server's `PublicProfile`.
- * Nothing is computed here, and the three edits (rename / avatar / outfit) plus
- * the reset all go through the store's secret-authenticated calls unchanged.
- */
-
 import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlertCircle, ArrowLeft, Flame, Hand, History, Layers, Pencil, RotateCcw,
-  Save, ShieldCheck, ShieldX, Swords, Trophy, User, Zap,
+  AlertCircle, ArrowLeft, CalendarDays, Clock, Flame, Hand, History, Layers,
+  Pencil, RotateCcw, Save, ShieldCheck, ShieldX, Shirt, Smile, Swords,
+  TriangleAlert, Trophy, User, Users, Zap,
 } from "lucide-react";
 import { useProfileStore } from "../../store/useProfileStore";
 import { useGameStore } from "../../store/useGameStore";
@@ -55,7 +18,7 @@ import { PlayerIdTag } from "../social/PlayerIdTag";
 import { PresenceDot, presenceLabel, presenceTextClass } from "../social/PresenceDot";
 import { DEFAULT_OUTFIT_KEY, getOutfit } from "../../lib/cosmetics/outfits";
 import {
-  Badge, Button, Modal, ModalBody, ModalFooter, ModalHeader,
+  Badge, Button, EmptyState, Modal, ModalBody, ModalFooter, ModalHeader,
   SectionLabel, StatTile, TabBar,
 } from "../ui/kit";
 import type { ProfileStats } from "../../types/profile";
@@ -181,6 +144,10 @@ export function ProfileModal() {
   const status = connected ? "online" : "offline";
   const matchesLost = stats ? Math.max(0, stats.matchesPlayed - stats.matchesWon) : 0;
   const firstLoad = !cached && loading;
+  // Clamped for the hero meter's width. The server's rate is already 0–1, but a
+  // bar is one of the few places a bad value would be visible as a broken UI
+  // rather than a wrong number.
+  const winPct = Math.round(Math.min(1, Math.max(0, cached?.winRate ?? 0)) * 100);
 
   const handleSaveEdit = async () => {
     const trimmed = draftName.trim();
@@ -205,70 +172,19 @@ export function ProfileModal() {
       size="md"
       labelledBy="profile-modal-title"
       zIndex={2000}
+      className="profile-panel"
     >
       <ModalHeader
         id="profile-modal-title"
         title={mode === "edit" ? "Edit Profile" : "Player Profile"}
-        subtitle={
-          mode === "edit"
-            ? "Name, avatar and outfit — your Player ID and stats stay put."
-            : `${stats?.matchesPlayed ?? 0} games · ${formatWinRate(cached?.winRate ?? 0)} win rate`
-        }
         icon={mode === "edit" ? <Pencil size={16} aria-hidden="true" /> : <User size={16} aria-hidden="true" />}
         onClose={close}
         closeLabel="Close profile"
       />
 
-      {/* ── Hero: the mannequin + who you are ─────────────────────────────
-          Stacked in portrait, side-by-side in landscape (`short:`) — a 390px
-          tall viewport cannot spend 12rem of it on a stacked header. */}
-      <div className="flex shrink-0 flex-col border-b-2 border-white/10 short:flex-row">
-        <div
-          className={`relative shrink-0 overflow-hidden bg-gradient-to-b ${outfit.gradient} h-40 sm:h-48 short:h-auto short:w-36 short:min-h-[8.5rem]`}
-        >
-          {/* Knock the outfit gradient back so the character reads against it
-              without losing the colour that identifies the skin. */}
-          <div className="absolute inset-0 bg-black/35" aria-hidden="true" />
-          <PreviewStage
-            outfitKey={shownOutfit}
-            name={displayName}
-            className="relative h-full w-full"
-          />
-          <span className="font-rounded pointer-events-none absolute bottom-1.5 left-1/2 max-w-[90%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/85">
-            {outfit.label}
-          </span>
-        </div>
-
-        <div className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 short:flex-col short:items-start short:justify-center">
-          <span className="relative shrink-0">
-            <PresetAvatar avatarKey={shownAvatar} size={52} />
-            <span className="absolute -bottom-0.5 -right-0.5">
-              <PresenceDot status={status} size={14} halo={connected} />
-            </span>
-          </span>
-
-          <div className="min-w-0 flex-1 short:w-full">
-            <div className="flex min-w-0 items-baseline gap-1.5">
-              <span className="font-arcade truncate text-[clamp(1rem,0.8rem+1vw,1.5rem)] text-white">
-                {displayName}
-              </span>
-              <PlayerIdTag id={profileId} copyable size="text-[11px]" />
-            </div>
-            {/* Status as a word, not just a dot — §16: never colour alone. */}
-            <span
-              className={`font-rounded mt-0.5 block text-[11px] font-bold ${presenceTextClass(status)}`}
-            >
-              {presenceLabel(status)}
-              {cached ? ` · last played ${formatRelative(cached.lastSeenAt, now)}` : ""}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs are pinned above the scroller so switching never means scrolling
-          back up first. Hidden while editing — the editor is one flow. */}
+      {/* Navigation Tab Bar — Pinned right under header, ultra-compact */}
       {mode === "view" && (
-        <div className="shrink-0 px-3 py-2 short:py-1.5">
+        <div className="shrink-0 border-b border-white/10 px-2 py-1 bg-black/40">
           <TabBar value={tab} onChange={setTab} items={TABS} label="Profile sections" />
         </div>
       )}
@@ -283,7 +199,7 @@ export function ProfileModal() {
             className="shrink-0 overflow-hidden px-3 pt-2"
             role="alert"
           >
-            <div className="font-rounded flex items-center gap-2 rounded-xl border-2 border-rose-400/50 bg-rose-500/20 px-2.5 py-2 text-[11px] font-bold text-rose-100">
+            <div className="font-rounded flex items-center gap-2 rounded-xl border-2 border-rose-400/50 bg-rose-500/20 px-2.5 py-1.5 text-[11px] font-bold text-rose-100">
               <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
               <span className="min-w-0">{storeError}</span>
             </div>
@@ -298,6 +214,93 @@ export function ProfileModal() {
         id={mode === "edit" ? undefined : `tabpanel-${tab}`}
         className="ui-body-tight ui-tab-in"
       >
+        {/* ── Hero Card ──────────────────────────────────────────────────
+            Placed inside ModalBody so it scrolls naturally with the stats,
+            preventing the top fixed header from swallowing mobile vertical space. */}
+        {mode === "view" && (
+          <div className="relative shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-black/50 p-2 sm:p-3 mb-1">
+            {/* Ambient background glow matching outfit palette */}
+            <div className={`pointer-events-none absolute inset-0 bg-gradient-to-r ${outfit.gradient} opacity-25`} aria-hidden="true" />
+            <div className="arcade-dots pointer-events-none absolute inset-0 opacity-25" aria-hidden="true" />
+            <div className="profile-hero-scrim pointer-events-none absolute inset-0" aria-hidden="true" />
+
+            <div className="relative z-10 flex items-stretch gap-2 sm:gap-3">
+              {/* 3D Mannequin Studio Pod */}
+              <div className={`relative shrink-0 overflow-hidden rounded-xl border-2 border-white/20 bg-gradient-to-b ${outfit.gradient} shadow-[0_4px_12px_rgba(0,0,0,0.5)] w-24 sm:w-36 h-28 sm:h-32 short:w-20 short:h-24`}>
+                <PreviewStage
+                  outfitKey={shownOutfit}
+                  name={displayName}
+                  className="relative h-full w-full cursor-grab active:cursor-grabbing"
+                />
+
+                {/* Streak badge */}
+                {(stats?.currentStreak ?? 0) > 0 && (
+                  <span className="home-chip font-arcade pointer-events-none absolute right-1 top-1 text-[9px] sm:text-[10px] tabular-nums text-orange-300 bg-black/80 backdrop-blur-md border-orange-500/40 px-1 py-0.5">
+                    <Flame size={9} className="shrink-0 text-orange-400 animate-pulse" aria-hidden="true" />
+                    {stats?.currentStreak}
+                  </span>
+                )}
+              </div>
+
+              {/* Identity & Win Rate Info */}
+              <div className="profile-identity flex min-w-0 flex-1 flex-col justify-between rounded-xl border border-white/10 bg-white/5 p-2 sm:p-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="relative shrink-0">
+                    <PresetAvatar avatarKey={shownAvatar} size={36} />
+                    <span className="absolute -bottom-0.5 -right-0.5">
+                      <PresenceDot status={status} size={12} halo={connected} />
+                    </span>
+                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1 flex-wrap">
+                      <span className="font-arcade arcade-stroke-sm truncate text-[clamp(0.9rem,0.8rem+0.6vw,1.2rem)] leading-tight text-white drop-shadow">
+                        {displayName}
+                      </span>
+                      <PlayerIdTag id={profileId} copyable size="text-[10px]" />
+                    </div>
+                    {/* Status indicator */}
+                    <span className={`font-rounded block truncate text-[10px] font-bold ${presenceTextClass(status)}`}>
+                      {presenceLabel(status)}
+                      {cached && (
+                        <span className="text-white/40 font-medium">
+                          {" · "}
+                          {formatRelative(cached.lastSeenAt, now)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Win rate bar & stats readout */}
+                <div className="mt-1 pt-1 border-t border-white/8">
+                  <div className="flex items-baseline justify-between gap-1.5">
+                    <span className="font-rounded text-[9px] font-bold uppercase tracking-wider text-white/50">
+                      Win Rate
+                    </span>
+                    <span className="font-arcade text-[10px] sm:text-[11px] tabular-nums text-yellow-300">
+                      {formatWinRate(cached?.winRate ?? 0)}
+                      <span className="font-rounded ml-1 text-[8px] sm:text-[9px] font-bold text-white/40">
+                        ({stats?.matchesWon ?? 0}/{stats?.matchesPlayed ?? 0} W)
+                      </span>
+                    </span>
+                  </div>
+                  <div
+                    className="profile-meter mt-0.5"
+                    role="meter"
+                    aria-label="Win rate"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={winPct}
+                    aria-valuetext={`${formatWinRate(cached?.winRate ?? 0)} — ${stats?.matchesWon ?? 0} of ${stats?.matchesPlayed ?? 0} games won`}
+                  >
+                    <span className="profile-meter-fill" style={{ width: `${winPct}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {mode === "edit" ? (
           <EditForm
             draftName={draftName}
@@ -315,12 +318,13 @@ export function ProfileModal() {
           <StatsSkeleton />
         ) : tab === "overview" ? (
           <>
+            {/* No Win Rate tile: the hero meter above already leads with it, and
+                the same number twice on one screen reads as two numbers. */}
             <SectionLabel icon={<Trophy size={11} />}>Record</SectionLabel>
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            <div className="grid grid-cols-3 gap-1.5">
               <StatTile label="Played" value={stats?.matchesPlayed ?? 0} icon={<Layers size={10} />} />
-              <StatTile label="Won" value={stats?.matchesWon ?? 0} tone="good" />
-              <StatTile label="Lost" value={matchesLost} tone="bad" />
-              <StatTile label="Win Rate" value={formatWinRate(cached?.winRate ?? 0)} tone="gold" />
+              <StatTile label="Won" value={stats?.matchesWon ?? 0} tone="good" icon={<Trophy size={10} />} />
+              <StatTile label="Lost" value={matchesLost} tone="bad" icon={<Swords size={10} />} />
             </div>
 
             <SectionLabel icon={<Flame size={11} />}>Streaks &amp; Scoring</SectionLabel>
@@ -342,11 +346,26 @@ export function ProfileModal() {
               <StatTile label="Lost" value={stats?.challengesLost ?? 0} tone="bad" icon={<ShieldX size={10} />} />
             </div>
 
+            {/* Account facts, not scores. A date in a big number tile reads as
+                a stat you should be proud of; these are just facts, so they get
+                a quiet label→value list instead. */}
             <SectionLabel icon={<User size={11} />}>Profile</SectionLabel>
-            <div className="grid grid-cols-3 gap-1.5">
-              <StatTile label="Joined" value={<Small>{cached ? formatDate(cached.createdAt) : "—"}</Small>} />
-              <StatTile label="Play Time" value={<Small>{cached ? formatPlayTime(cached.totalPlayTimeMs) : "—"}</Small>} />
-              <StatTile label="Friends" value={cached?.friendCount ?? 0} />
+            <div className="ui-card divide-y divide-white/8 px-2.5">
+              <MetaRow
+                icon={<CalendarDays size={12} aria-hidden="true" />}
+                label="Joined"
+                value={cached ? formatDate(cached.createdAt) : "—"}
+              />
+              <MetaRow
+                icon={<Clock size={12} aria-hidden="true" />}
+                label="Time at the table"
+                value={cached ? formatPlayTime(cached.totalPlayTimeMs) : "—"}
+              />
+              <MetaRow
+                icon={<Users size={12} aria-hidden="true" />}
+                label="Friends"
+                value={String(cached?.friendCount ?? 0)}
+              />
             </div>
           </>
         ) : tab === "cards" ? (
@@ -421,18 +440,17 @@ export function ProfileModal() {
             })}
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-1.5 px-4 py-8 text-center short:py-5">
-            <History size={26} className="text-white/20" aria-hidden="true" />
-            <p className="font-arcade text-[11px] uppercase tracking-wider text-white/60">
-              No rounds yet
-            </p>
-            <p className="font-rounded max-w-[28ch] text-[10px] font-bold leading-snug text-white/35">
-              Finish a round and it lands here, with your placement and who won.
-            </p>
-          </div>
+          <EmptyState
+            icon={<History size={26} aria-hidden="true" />}
+            title="No rounds yet"
+            hint="Finish a round and it lands here, with your placement and who won."
+          />
         )}
       </ModalBody>
 
+      {/* The footer carries exactly one loud action per mode, on the right,
+          with the way back on the left — the same shape in both modes, so the
+          button under your thumb never changes meaning between them. */}
       <ModalFooter>
         {mode === "edit" ? (
           <>
@@ -447,25 +465,30 @@ export function ProfileModal() {
             </Button>
             <Button
               tone="success"
-              size="sm"
+              size="md"
               onClick={handleSaveEdit}
               disabled={loading}
-              icon={<Save size={13} />}
-              className="ml-auto"
+              icon={<Save size={14} />}
+              className="ml-auto min-w-[7.5rem]"
             >
-              {loading ? "Saving…" : "Save"}
+              {loading ? "Saving…" : "Save Changes"}
             </Button>
           </>
         ) : (
-          <Button
-            tone="primary"
-            size="sm"
-            onClick={enterEdit}
-            icon={<Pencil size={13} />}
-            className="ml-auto"
-          >
-            Edit Profile
-          </Button>
+          <>
+            <Button tone="neutral" size="sm" onClick={close}>
+              Done
+            </Button>
+            <Button
+              tone="primary"
+              size="md"
+              onClick={enterEdit}
+              icon={<Pencil size={14} />}
+              className="ml-auto min-w-[7.5rem]"
+            >
+              Edit Profile
+            </Button>
+          </>
         )}
       </ModalFooter>
     </Modal>
@@ -478,9 +501,19 @@ export function ProfileModal() {
 //  (and, for an input, drops focus on every keystroke).
 // ---------------------------------------------------------------------------
 
-/** Text-sized value inside a StatTile, for dates and durations. */
-const Small: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <span className="font-rounded text-[11px] font-bold text-white">{children}</span>
+/** One label → value line in the quiet "Profile" list. */
+const MetaRow: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}> = ({ icon, label, value }) => (
+  <div className="flex items-center gap-2 py-1.5">
+    <span className="shrink-0 text-white/30">{icon}</span>
+    <span className="font-rounded min-w-0 flex-1 truncate text-[11px] font-bold text-white/45">
+      {label}
+    </span>
+    <span className="font-rounded shrink-0 text-[11px] font-bold text-white">{value}</span>
+  </div>
 );
 
 interface EditFormProps {
@@ -527,10 +560,10 @@ const EditForm: React.FC<EditFormProps> = ({
       you findable, and it never changes.
     </p>
 
-    <SectionLabel icon={<Trophy size={11} />}>Avatar</SectionLabel>
+    <SectionLabel icon={<Smile size={11} />}>Avatar</SectionLabel>
     <AvatarPicker value={draftAvatar} onChange={setDraftAvatar} disabled={loading} />
 
-    <SectionLabel icon={<Layers size={11} />}>Outfit</SectionLabel>
+    <SectionLabel icon={<Shirt size={11} />}>Outfit</SectionLabel>
     <p className="font-rounded -mt-1 px-1 text-[10px] font-bold text-white/40">
       Your character&apos;s look at the table — everyone sees it. Preview above
       updates as you pick.
@@ -544,7 +577,7 @@ const EditForm: React.FC<EditFormProps> = ({
       showPreview={false}
     />
 
-    <SectionLabel icon={<RotateCcw size={11} />}>Danger zone</SectionLabel>
+    <SectionLabel icon={<TriangleAlert size={11} />}>Danger zone</SectionLabel>
     {confirmReset ? (
       <div className="flex flex-col gap-2 rounded-2xl border-2 border-rose-400/40 bg-rose-950/40 p-2.5">
         <p className="font-rounded text-center text-[11px] font-bold leading-snug text-white/85">
@@ -574,13 +607,20 @@ const EditForm: React.FC<EditFormProps> = ({
         </div>
       </div>
     ) : (
-      <button
-        type="button"
-        onClick={() => setConfirmReset(true)}
-        className="font-rounded mx-auto inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white/40 transition-colors hover:text-rose-300"
-      >
-        <RotateCcw size={12} aria-hidden="true" /> Reset Stats
-      </button>
+      <div className="flex items-center gap-2.5 rounded-2xl border-2 border-white/10 bg-black/25 px-2.5 py-2">
+        <p className="font-rounded min-w-0 flex-1 text-[10px] font-bold leading-snug text-white/45">
+          Wipe lifetime stats and match history. Your Player ID, name and avatar
+          are kept.
+        </p>
+        <button
+          type="button"
+          onClick={() => setConfirmReset(true)}
+          disabled={loading}
+          className="font-rounded inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border-2 border-rose-400/35 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-rose-300 transition-colors hover:border-rose-400/60 hover:bg-rose-500/20 disabled:cursor-not-allowed"
+        >
+          <RotateCcw size={12} aria-hidden="true" /> Reset
+        </button>
+      </div>
     )}
   </>
 );
