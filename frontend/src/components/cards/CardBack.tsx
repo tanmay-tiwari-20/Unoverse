@@ -1,62 +1,74 @@
 'use client';
 
 import React from 'react';
-import { Sparkles } from 'lucide-react';
 
-export const CardBack: React.FC = () => {
+export const CardBack: React.FC<{ className?: string }> = ({ className = '' }) => {
   return (
-    <div className="w-[124px] h-[184px] bg-slate-950 rounded-2xl p-2 flex flex-col justify-between items-center relative overflow-hidden select-none shadow-[0_10px_20px_rgba(0,0,0,0.55),_0_3px_6px_rgba(0,0,0,0.35)] border border-black/40">
-      {/* Background Gradient Pattern */}
-      <div className="absolute inset-0 bg-gradient-to-br from-indigo-950 via-slate-950 to-blue-950 opacity-90" />
-      <div className="absolute inset-0 bg-grid-pattern opacity-10" />
+    <div className={`w-[124px] h-[184px] bg-blue-600 rounded-2xl p-2 flex flex-col justify-between items-center relative overflow-hidden select-none shadow-[0_10px_20px_rgba(0,0,0,0.35)] border border-blue-400/30 ${className}`}>
+      {/* Playful Royal Blue Gradient Background */}
+      <div className="absolute inset-0 bg-radial-gradient from-blue-500 via-blue-700 to-indigo-950" />
 
-      {/* Outer Neon Blue Board Line */}
-      <div className="absolute inset-1.5 rounded-[10px] border border-blue-500/25 shadow-[inset_0_0_6px_rgba(59,130,246,0.15)] pointer-events-none" />
-
-      {/* Specular gloss highlight (sharp reflection line simulating glossy card highlight) */}
+      {/* Polka Dot Micro Texture */}
       <div 
-        className="absolute inset-0 pointer-events-none z-20 rounded-2xl" 
+        className="absolute inset-0 opacity-[0.08] pointer-events-none"
         style={{
-          background: 'linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 50%, rgba(255,255,255,0.06) 100%)'
+          backgroundImage: `radial-gradient(#ffffff 2px, transparent 2px)`,
+          backgroundSize: '12px 12px'
         }}
       />
 
-      {/* Tiny paper thickness rim (using a right-and-bottom border highlight) */}
-      <div className="absolute inset-0 rounded-2xl border-r-[1.5px] border-b-[1.5px] border-white/25 pointer-events-none z-10 translate-x-[0.5px] translate-y-[0.5px]" />
+      {/* Double Borders: Crisp White + Golden Yellow */}
+      <div className="absolute inset-1.5 rounded-xl border-[2px] border-white pointer-events-none" />
+      <div className="absolute inset-2.5 rounded-lg border-[1.5px] border-yellow-300 pointer-events-none" />
 
-      {/* Outer physical cardstock rim shadow for edge shading */}
-      <div className="absolute inset-0 rounded-2xl border border-black/35 pointer-events-none z-20" />
-      {/* Inner physical cardstock highlight rim */}
-      <div className="absolute inset-[3px] rounded-xl border border-white/12 pointer-events-none z-20" />
-
-      {/* Decorative Top/Bottom Corner Symbols */}
-      <div className="w-full flex justify-between px-1 text-[8px] font-extrabold tracking-widest text-blue-500/40 relative z-10">
-        <span>UR</span>
-        <span>UR</span>
+      {/* Corner Playful Golden Stars */}
+      <div className="w-full flex justify-between px-1 pt-0.5 relative z-10">
+        <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 text-yellow-300 fill-current">
+          <path d="M12 2 C12 7, 7 12, 2 12 C7 12, 12 17, 12 22 C12 17, 17 12, 22 12 C17 12, 12 7, 12 2 Z" />
+        </svg>
+        <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 text-yellow-300 fill-current">
+          <path d="M12 2 C12 7, 7 12, 2 12 C7 12, 12 17, 12 22 C12 17, 17 12, 22 12 C17 12, 12 7, 12 2 Z" />
+        </svg>
       </div>
 
-      {/* Center Logo Area */}
-      <div className="flex flex-col items-center justify-center relative z-10 my-auto">
-        {/* Holographic Glowing Ring */}
-        <div className="w-14 h-14 rounded-full bg-slate-900/40 border border-blue-500/30 flex items-center justify-center relative shadow-[0_0_15px_rgba(59,130,246,0.25)]">
-          {/* Pulsing neon center circle */}
-          <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-700 shadow-inner flex items-center justify-center">
-            <Sparkles size={14} className="text-white animate-pulse" />
+      {/* Center Tilted Badge with 4-Color Unoverse Emblem */}
+      <div className="flex flex-col items-center justify-center relative z-10 my-auto -rotate-12">
+        {/* Golden outer badge shadow */}
+        <div className="w-16 h-12 rounded-[100%] bg-amber-500 p-0.5 flex items-center justify-center shadow-md">
+          {/* White badge base */}
+          <div className="w-full h-full rounded-[100%] bg-white p-1 flex items-center justify-center relative overflow-hidden">
+            {/* 4-Color Quadrant Core */}
+            <div className="w-10 h-10 rounded-full relative overflow-hidden flex flex-wrap border-2 border-white shadow-inner">
+              <div className="w-1/2 h-1/2 bg-red-500" />
+              <div className="w-1/2 h-1/2 bg-blue-500" />
+              <div className="w-1/2 h-1/2 bg-yellow-500" />
+              <div className="w-1/2 h-1/2 bg-green-500" />
+            </div>
+
+            {/* Central White Starburst */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <svg viewBox="0 0 24 24" className="w-6 h-6 text-white fill-current drop-shadow-sm">
+                <path d="M12 2 C12 7, 7 12, 2 12 C7 12, 12 17, 12 22 C12 17, 17 12, 22 12 C17 12, 12 7, 12 2 Z" />
+              </svg>
+              <div className="w-1.5 h-1.5 rounded-full bg-yellow-300 absolute inset-1/2 -translate-x-1/2 -translate-y-1/2" />
+            </div>
           </div>
         </div>
-
-        {/* Brand Text */}
-        <span className="text-[10px] uppercase font-black tracking-widest text-slate-100 mt-2 bg-slate-900/60 px-2 py-0.5 rounded-full border border-slate-800/80">
-          UNO Real
-        </span>
       </div>
 
-      {/* Bottom Corner Symbols */}
-      <div className="w-full flex justify-between px-1 text-[8px] font-extrabold tracking-widest text-blue-500/40 relative z-10 rotate-180">
-        <span>UR</span>
-        <span>UR</span>
+      {/* Bottom Corner Playful Golden Stars */}
+      <div className="w-full flex justify-between px-1 pb-0.5 relative z-10">
+        <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 text-yellow-300 fill-current">
+          <path d="M12 2 C12 7, 7 12, 2 12 C7 12, 12 17, 12 22 C12 17, 17 12, 22 12 C17 12, 12 7, 12 2 Z" />
+        </svg>
+        <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 text-yellow-300 fill-current">
+          <path d="M12 2 C12 7, 7 12, 2 12 C7 12, 12 17, 12 22 C12 17, 17 12, 22 12 C17 12, 12 7, 12 2 Z" />
+        </svg>
       </div>
     </div>
   );
 };
+
 export default CardBack;
+
+

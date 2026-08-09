@@ -1,12 +1,18 @@
 import React from 'react';
+import { CardBack } from './CardBack';
 
 export interface HtmlCardProps {
   color: 'red' | 'blue' | 'green' | 'yellow' | 'wild';
   value: string;
   className?: string;
+  isFaceUp?: boolean;
 }
 
-export const HtmlCard: React.FC<HtmlCardProps> = ({ color, value, className = '' }) => {
+export const HtmlCard: React.FC<HtmlCardProps> = ({ color, value, className = '', isFaceUp = true }) => {
+  if (!isFaceUp) {
+    return <CardBack className={`!w-full !h-full ${className}`} />;
+  }
+
   const colorMap: Record<string, string> = {
     red: 'bg-red-500',
     blue: 'bg-blue-500',
@@ -50,3 +56,4 @@ export const HtmlCard: React.FC<HtmlCardProps> = ({ color, value, className = ''
     </div>
   );
 };
+

@@ -51,6 +51,145 @@ const getSharedBumpMap = () => {
   return sharedBumpMap;
 };
 
+// Helper to create a clean, 3D rounded card geometry with smooth corners and precise UV mapping.
+// This permanently eliminates black corner artifacts caused by rectangular sharp box geometries.
+let sharedCardGeometry: THREE.BufferGeometry | null = null;
+const getSharedCardGeometry = (): THREE.BufferGeometry => {
+  if (sharedCardGeometry) return sharedCardGeometry;
+
+  const width = 0.124;
+  const height = 0.002;
+  const depth = 0.184;
+  const radius = 0.010; // 10mm smooth rounded corner
+  const segmentsPerCorner = 6;
+
+  const geometry = new THREE.BufferGeometry();
+  const w2 = width / 2;
+  const h2 = height / 2;
+  const d2 = depth / 2;
+  const r = Math.min(radius, w2, d2);
+
+  // Outline perimeter of rounded rectangle on X-Z plane
+  const centers = [
+    { x: w2 - r, z: d2 - r, aStart: 0, aEnd: Math.PI / 2 },
+    { x: -w2 + r, z: d2 - r, aStart: Math.PI / 2, aEnd: Math.PI },
+    { x: -w2 + r, z: -d2 + r, aStart: Math.PI, aEnd: Math.PI * 1.5 },
+    { x: w2 - r, z: -d2 + r, aStart: Math.PI * 1.5, aEnd: Math.PI * 2 },
+  ];
+
+  const outline: { x: number; z: number }[] = [];
+  for (const c of centers) {
+    for (let i = 0; i < segmentsPerCorner; i++) {
+      const angle = c.aStart + (c.aEnd - c.aStart) * (i / segmentsPerCorner);
+      outline.push({
+        x: c.x + Math.cos(angle) * r,
+        z: c.z + Math.sin(angle) * r,
+      });
+    }
+  }
+
+  const N = outline.length;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  // 1. Top face (+Y = +h2, Front of card)
+  const topCenterIdx = 0;
+  positions.push(0, h2, 0);
+  normals.push(0, 1, 0);
+  uvs.push(0.5, 0.5);
+
+  const topPerimeterStartIdx = 1;
+  for (let i = 0; i < N; i++) {
+    const pt = outline[i];
+    positions.push(pt.x, h2, pt.z);
+    normals.push(0, 1, 0);
+    uvs.push((pt.x + w2) / width, (d2 - pt.z) / depth);
+  }
+
+  const topFaceIndicesStart = indices.length;
+  for (let i = 0; i < N; i++) {
+    const current = topPerimeterStartIdx + i;
+    const next = topPerimeterStartIdx + ((i + 1) % N);
+    indices.push(topCenterIdx, next, current);
+  }
+  const topFaceIndicesCount = indices.length - topFaceIndicesStart;
+
+  // 2. Bottom face (-Y = -h2, Back of card)
+  const bottomCenterIdx = positions.length / 3;
+  positions.push(0, -h2, 0);
+  normals.push(0, -1, 0);
+  uvs.push(0.5, 0.5);
+
+  const bottomPerimeterStartIdx = bottomCenterIdx + 1;
+  for (let i = 0; i < N; i++) {
+    const pt = outline[i];
+    positions.push(pt.x, -h2, pt.z);
+    normals.push(0, -1, 0);
+    uvs.push((pt.x + w2) / width, (d2 - pt.z) / depth);
+  }
+
+  const bottomFaceIndicesStart = indices.length;
+  for (let i = 0; i < N; i++) {
+    const current = bottomPerimeterStartIdx + i;
+    const next = bottomPerimeterStartIdx + ((i + 1) % N);
+    indices.push(bottomCenterIdx, current, next);
+  }
+  const bottomFaceIndicesCount = indices.length - bottomFaceIndicesStart;
+
+  // 3. Side wall rim
+  const sideStartIdx = positions.length / 3;
+  for (let i = 0; i < N; i++) {
+    const pt = outline[i];
+    let nx = pt.x;
+    let nz = pt.z;
+    for (const c of centers) {
+      const dx = pt.x - c.x;
+      const dz = pt.z - c.z;
+      if (Math.abs(Math.hypot(dx, dz) - r) < 0.001) {
+        const len = Math.hypot(dx, dz);
+        if (len > 0.00001) { nx = dx / len; nz = dz / len; }
+        break;
+      }
+    }
+
+    positions.push(pt.x, h2, pt.z);
+    normals.push(nx, 0, nz);
+    uvs.push(i / N, 1);
+
+    positions.push(pt.x, -h2, pt.z);
+    normals.push(nx, 0, nz);
+    uvs.push(i / N, 0);
+  }
+
+  const sideIndicesStart = indices.length;
+  for (let i = 0; i < N; i++) {
+    const iNext = (i + 1) % N;
+    const topCurr = sideStartIdx + i * 2;
+    const botCurr = sideStartIdx + i * 2 + 1;
+    const topNext = sideStartIdx + iNext * 2;
+    const botNext = sideStartIdx + iNext * 2 + 1;
+
+    indices.push(topCurr, botCurr, topNext);
+    indices.push(topNext, botCurr, botNext);
+  }
+  const sideIndicesCount = indices.length - sideIndicesStart;
+
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+
+  // Material groups: Group 0 = side rim, Group 1 = front face (+Y), Group 2 = back face (-Y)
+  geometry.addGroup(sideIndicesStart, sideIndicesCount, 0);
+  geometry.addGroup(topFaceIndicesStart, topFaceIndicesCount, 1);
+  geometry.addGroup(bottomFaceIndicesStart, bottomFaceIndicesCount, 2);
+
+  sharedCardGeometry = geometry;
+  return geometry;
+};
+
 // Helper to generate and cache canvases (prevents DOM canvas limit crash)
 const getCardCanvases = (color: string, value: string) => {
   const cacheKey = `${color}-${value}`;
@@ -95,7 +234,7 @@ const getCardCanvases = (color: string, value: string) => {
   const drawCenterOval = (ctx: CanvasRenderingContext2D, body: string, glyph: string, isWild: boolean) => {
     ctx.save();
     ctx.translate(W / 2, H / 2);
-    ctx.rotate(-Math.PI / 12); // -15deg tilt, matching the HTML hand card
+    ctx.rotate(-Math.PI / 12); // -15deg tilt
 
     // White oval badge
     ctx.fillStyle = '#ffffff';
@@ -168,10 +307,9 @@ const getCardCanvases = (color: string, value: string) => {
   frontCanvas.height = H;
   const fctx = frontCanvas.getContext('2d');
   if (fctx) {
-    // White rounded card stock
+    // Fill entire canvas edge-to-edge with crisp white card stock
     fctx.fillStyle = '#ffffff';
-    roundRect(fctx, 0, 0, W, H, 56);
-    fctx.fill();
+    fctx.fillRect(0, 0, W, H);
 
     // Colored body inset
     fctx.fillStyle = body;
@@ -188,38 +326,137 @@ const getCardCanvases = (color: string, value: string) => {
     drawCornerIndices(fctx, glyph);
   }
 
-  // ── Back canvas ──
+  // ── Back canvas (Playful Bright Unoverse Original Design) ──
   const backCanvas = document.createElement('canvas');
   backCanvas.width = W;
   backCanvas.height = H;
   const bctx = backCanvas.getContext('2d');
   if (bctx) {
-    bctx.fillStyle = '#ffffff';
-    roundRect(bctx, 0, 0, W, H, 56);
-    bctx.fill();
+    // 1. Edge-to-edge rich royal blue background base
+    bctx.fillStyle = '#1d4ed8';
+    bctx.fillRect(0, 0, W, H);
 
-    bctx.fillStyle = '#111111';
-    roundRect(bctx, 22, 22, W - 44, H - 44, 42);
-    bctx.fill();
+    // Vibrant diagonal/radial gradient wash
+    const grad = bctx.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, W * 0.75);
+    grad.addColorStop(0, '#3b82f6');
+    grad.addColorStop(0.6, '#1d4ed8');
+    grad.addColorStop(1, '#1e1b4b');
+    bctx.fillStyle = grad;
+    bctx.fillRect(0, 0, W, H);
 
-    // Red center ellipse
-    bctx.fillStyle = '#cc0000';
+    // 2. Playful micro polka dot pattern
+    bctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    const dotSpacing = 28;
+    for (let x = 14; x < W; x += dotSpacing) {
+      for (let y = 14; y < H; y += dotSpacing) {
+        const offset = ((Math.floor(x / dotSpacing) + Math.floor(y / dotSpacing)) % 2) * 6;
+        bctx.beginPath();
+        bctx.arc(x, y + offset, 2.5, 0, Math.PI * 2);
+        bctx.fill();
+      }
+    }
+
+    // 3. Playful Double Borders
+    // Outer crisp white rounded frame
+    bctx.strokeStyle = '#ffffff';
+    bctx.lineWidth = 6;
+    roundRect(bctx, 22, 22, W - 44, H - 44, 38);
+    bctx.stroke();
+
+    // Inset golden yellow line
+    bctx.strokeStyle = '#facc15';
+    bctx.lineWidth = 4;
+    roundRect(bctx, 32, 32, W - 64, H - 64, 30);
+    bctx.stroke();
+
+    // Corner playful 4-pointed golden stars
+    const cornerStars = [
+      { x: 48, y: 48 },
+      { x: W - 48, y: 48 },
+      { x: 48, y: H - 48 },
+      { x: W - 48, y: H - 48 },
+    ];
+    cornerStars.forEach(({ x, y }) => {
+      bctx.save();
+      bctx.translate(x, y);
+      bctx.fillStyle = '#fde047';
+      bctx.beginPath();
+      bctx.moveTo(0, -7);
+      bctx.quadraticCurveTo(0, 0, 7, 0);
+      bctx.quadraticCurveTo(0, 0, 0, 7);
+      bctx.quadraticCurveTo(0, 0, -7, 0);
+      bctx.quadraticCurveTo(0, 0, 0, -7);
+      bctx.closePath();
+      bctx.fill();
+      bctx.restore();
+    });
+
+    // 4. Central Tilted White Oval Badge with Vibrant 4-Color Unoverse Crest
     bctx.save();
     bctx.translate(W / 2, H / 2);
-    bctx.rotate(-Math.PI / 12);
+    bctx.rotate(-Math.PI / 12); // -15deg playful tilt
+
+    // Outer golden shadow ring around oval
+    bctx.fillStyle = '#f59e0b';
     bctx.beginPath();
-    bctx.ellipse(0, 0, W * 0.36, H * 0.30, 0, 0, Math.PI * 2);
+    bctx.ellipse(0, 0, W * 0.36, H * 0.28, 0, 0, Math.PI * 2);
     bctx.fill();
 
-    // UNO wordmark
-    bctx.fillStyle = '#ffe200';
-    bctx.font = '900 120px "Arial Black", sans-serif';
-    bctx.textAlign = 'center';
-    bctx.textBaseline = 'middle';
-    bctx.lineWidth = 10;
-    bctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    bctx.strokeText('UNO', 0, 6);
-    bctx.fillText('UNO', 0, 6);
+    // White badge oval
+    bctx.fillStyle = '#ffffff';
+    bctx.beginPath();
+    bctx.ellipse(0, 0, W * 0.34, H * 0.26, 0, 0, Math.PI * 2);
+    bctx.fill();
+
+    // Inner 4-Color Quadrant Disk for Unoverse (Red, Blue, Yellow, Green)
+    const quadR = W * 0.26;
+    const quad = [
+      { c: '#ef4444', s: Math.PI * 1.5, e: Math.PI * 2.0 }, // red
+      { c: '#3b82f6', s: 0,            e: Math.PI * 0.5 }, // blue
+      { c: '#eab308', s: Math.PI * 0.5, e: Math.PI * 1.0 }, // yellow
+      { c: '#22c55e', s: Math.PI * 1.0, e: Math.PI * 1.5 }, // green
+    ];
+    bctx.save();
+    bctx.beginPath();
+    bctx.ellipse(0, 0, quadR, quadR * (H * 0.26 / (W * 0.34)), 0, 0, Math.PI * 2);
+    bctx.clip();
+    quad.forEach(({ c, s, e }) => {
+      bctx.fillStyle = c;
+      bctx.beginPath();
+      bctx.moveTo(0, 0);
+      bctx.arc(0, 0, W * 0.4, s, e);
+      bctx.closePath();
+      bctx.fill();
+    });
+    bctx.restore();
+
+    // White ring separator inside quadrant
+    bctx.strokeStyle = '#ffffff';
+    bctx.lineWidth = 5;
+    bctx.beginPath();
+    bctx.ellipse(0, 0, quadR, quadR * (H * 0.26 / (W * 0.34)), 0, 0, Math.PI * 2);
+    bctx.stroke();
+
+    // Center bold white Unoverse Starburst Emblem (4-pointed star)
+    bctx.fillStyle = '#ffffff';
+    bctx.beginPath();
+    bctx.moveTo(0, -32);
+    bctx.quadraticCurveTo(0, 0, 32, 0);
+    bctx.quadraticCurveTo(0, 0, 0, 32);
+    bctx.quadraticCurveTo(0, 0, -32, 0);
+    bctx.quadraticCurveTo(0, 0, 0, -32);
+    bctx.closePath();
+    bctx.fill();
+    bctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    bctx.lineWidth = 2;
+    bctx.stroke();
+
+    // Central Golden Core Dot
+    bctx.fillStyle = '#fde047';
+    bctx.beginPath();
+    bctx.arc(0, 0, 8, 0, Math.PI * 2);
+    bctx.fill();
+
     bctx.restore();
   }
 
@@ -244,6 +481,8 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
   const isMounted = useRef(false);
   const { gl } = useThree();
   const maxAnisotropy = useMemo(() => gl.capabilities.getMaxAnisotropy(), [gl]);
+
+  const cardGeometry = useMemo(() => getSharedCardGeometry(), []);
 
   useLayoutEffect(() => {
     if (meshRef.current) {
@@ -277,8 +516,8 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
     frontTex.generateMipmaps = true;
     frontTex.minFilter = THREE.LinearMipmapLinearFilter;
     frontTex.magFilter = THREE.LinearFilter;
-    frontTex.anisotropy = maxAnisotropy; // Keep face crisp at grazing angles
-    frontTex.needsUpdate = true; // Ensure it updates if newly created
+    frontTex.anisotropy = maxAnisotropy;
+    frontTex.needsUpdate = true;
 
     const backTex = new THREE.CanvasTexture(back);
     backTex.colorSpace = THREE.SRGBColorSpace;
@@ -290,30 +529,27 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
 
     const bumpMap = getSharedBumpMap();
 
-    const premiumCardStock = {
-      roughness: 0.65,         // Semi-matte finish
-      metalness: 0.05,         // Slight density
-      clearcoat: 0.35,         // Premium coated finish
-      clearcoatRoughness: 0.4, // Soft reflections
+    const edgeMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x0f172a, 
+      roughness: 0.7, 
+      metalness: 0.1,
       bumpMap: bumpMap,
-      bumpScale: 0.0003,       // Extremely subtle texture only visible in light
-    };
-    const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.1 });
+      bumpScale: 0.0003,
+    });
+    
     const frontMaterial = blankFace 
       ? new THREE.MeshBasicMaterial({ color: 0x111111 })
       : new THREE.MeshBasicMaterial({ map: frontTex, toneMapped: false });
+
     const backMaterial = new THREE.MeshBasicMaterial({ 
       map: backTex,
       toneMapped: false
     });
 
     return [
-      edgeMaterial,  // +x
-      edgeMaterial,  // -x
-      frontMaterial, // +y
-      backMaterial,  // -y
-      edgeMaterial,  // +z
-      edgeMaterial,  // -z
+      edgeMaterial,  // Group 0: side wall
+      frontMaterial, // Group 1: top face (+Y)
+      backMaterial,  // Group 2: bottom face (-Y)
     ];
   }, [color, value, blankFace, maxAnisotropy]);
 
@@ -345,14 +581,16 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
       meshRef.current.rotation.z = THREE.MathUtils.lerp(meshRef.current.rotation.z, finalRotation[2], dt);
     }
 
-    // Smooth hover emissive glow
-    (materials[4] as THREE.MeshStandardMaterial).emissive.setHex(hovered && onClick ? 0x222222 : 0x000000);
-    (materials[5] as THREE.MeshStandardMaterial).emissive.setHex(hovered && onClick ? 0x222222 : 0x000000);
+    // Smooth hover emissive glow on side rim
+    if (materials[0] && materials[0] instanceof THREE.MeshStandardMaterial) {
+      materials[0].emissive.setHex(hovered && onClick ? 0x334155 : 0x000000);
+    }
   });
 
   return (
     <mesh 
-      ref={meshRef} 
+      ref={meshRef}
+      geometry={cardGeometry}
       material={materials} 
       castShadow 
       receiveShadow
@@ -375,8 +613,6 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
           document.body.style.cursor = 'auto';
         }
       }}
-    >
-      <boxGeometry args={[0.124, 0.002, 0.184]} />
-    </mesh>
+    />
   );
 };
