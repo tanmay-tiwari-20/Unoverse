@@ -560,21 +560,14 @@ const EditForm: React.FC<EditFormProps> = ({
       you findable, and it never changes.
     </p>
 
-    <SectionLabel icon={<Smile size={11} />}>Avatar</SectionLabel>
-    <AvatarPicker value={draftAvatar} onChange={setDraftAvatar} disabled={loading} />
-
-    <SectionLabel icon={<Shirt size={11} />}>Outfit</SectionLabel>
-    <p className="font-rounded -mt-1 px-1 text-[10px] font-bold text-white/40">
-      Your character&apos;s look at the table — everyone sees it. Preview above
-      updates as you pick.
-    </p>
-    {/* No second preview: the hero mannequin is already wearing the draft, and a
-        second PreviewStage would mean a second WebGL context on one screen. */}
-    <OutfitPicker
-      value={draftOutfit}
-      onChange={setDraftOutfit}
+    <SectionLabel icon={<Smile size={11} />}>Character Avatar & Outfit</SectionLabel>
+    <AvatarPicker
+      value={draftAvatar}
+      onChange={(key) => {
+        setDraftAvatar(key);
+        setDraftOutfit(key);
+      }}
       disabled={loading}
-      showPreview={false}
     />
 
     <SectionLabel icon={<TriangleAlert size={11} />}>Danger zone</SectionLabel>

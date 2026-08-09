@@ -147,16 +147,16 @@ export function CreateProfileModal({ isOpen, onCreated, initialName = "" }: Crea
 
               <div className="flex flex-col gap-2">
                 <span className="font-arcade text-[0.7rem] uppercase tracking-wide text-white/70 px-1">
-                  Pick an Avatar
+                  Choose Your Character Avatar
                 </span>
-                <AvatarPicker value={avatar} onChange={setAvatar} disabled={loading} />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <span className="font-arcade text-[0.7rem] uppercase tracking-wide text-white/70 px-1">
-                  Pick an Outfit
-                </span>
-                <OutfitPicker value={outfit} onChange={setOutfit} disabled={loading} />
+                <AvatarPicker
+                  value={avatar}
+                  onChange={(key) => {
+                    setAvatar(key);
+                    setOutfit(key);
+                  }}
+                  disabled={loading}
+                />
               </div>
 
               <button

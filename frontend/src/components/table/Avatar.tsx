@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Crown } from 'lucide-react';
+import { PresetAvatar } from '../profile/PresetAvatar';
 
 export interface AvatarConfig {
   type?: 'stylized' | 'image' | 'video';
@@ -10,6 +11,7 @@ export interface AvatarConfig {
   isSpeaking?: boolean;
   reactionEmoji?: string;
   micStatus?: 'muted' | 'unmuted' | 'active';
+  avatarKey?: string | null;
 }
 
 interface AvatarProps {
@@ -18,6 +20,7 @@ interface AvatarProps {
   isHost?: boolean;
   isLocal?: boolean;
   className?: string;
+  avatarKey?: string | null;
   config?: AvatarConfig;
 }
 
@@ -27,8 +30,10 @@ export const Avatar: React.FC<AvatarProps> = ({
   isHost = false,
   isLocal = false,
   className = '',
+  avatarKey,
   config,
 }) => {
+  const activeAvatarKey = avatarKey || config?.avatarKey;
   // Hash function to consistently select features based on name
   const hashName = (str: string) => {
     let hash = 0;
@@ -141,8 +146,12 @@ export const Avatar: React.FC<AvatarProps> = ({
         className="flex flex-col items-center justify-end w-[60px] h-[68px] origin-bottom relative"
         style={{ transform: `scale(${scaleFactor})` }}
       >
-        {/* Render profile image or video stream if configured for future media integrations */}
-        {config?.type === 'image' && config?.imageUrl ? (
+        {/* Render preset human avatar, or profile image/video */}
+        {activeAvatarKey ? (
+          <div className={`rounded-full overflow-hidden ${speakRing}`}>
+            <PresetAvatar avatarKey={activeAvatarKey} size={48} />
+          </div>
+        ) : config?.type === 'image' && config?.imageUrl ? (
           <div className={`w-12 h-12 rounded-full overflow-hidden bg-slate-800 ${speakRing}`}>
             <img src={config.imageUrl} alt={name} className="w-full h-full object-cover" />
           </div>

@@ -8,6 +8,8 @@ import { getOutfit, outfitForName } from '../../lib/cosmetics/outfits';
 import { buildMaterials, eyeMaterial } from '../table/shared/characterMaterials';
 
 
+import { CharacterHead3D } from '../table/CharacterHead3D';
+
 const HIP_H = 0.86;
 const TORSO_Y = HIP_H + 0.08;
 const LEG_X = 0.1;
@@ -182,19 +184,7 @@ const PreviewCharacter: React.FC<PreviewCharacterProps> = ({
 
           {/* ---- Head (turns independently for the look-around idle) ---- */}
           <group ref={headRef} position={[0, 0.56, 0]}>
-            <mesh castShadow material={mats.skin}>
-              <sphereGeometry args={[0.12, 20, 20]} />
-            </mesh>
-            {/* Hair cap — back/top of the head */}
-            <mesh position={[0, 0.04, -0.02]} scale={[1.06, 0.9, 1.06]} castShadow material={mats.hair}>
-              <sphereGeometry args={[0.12, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.62]} />
-            </mesh>
-            {/* Simple, expressive-but-minimal face: two eyes on the +Z front */}
-            {[-0.045, 0.045].map((x) => (
-              <mesh key={`eye${x}`} position={[x, 0.01, 0.108]} material={eyeMaterial}>
-                <sphereGeometry args={[0.018, 8, 8]} />
-              </mesh>
-            ))}
+            <CharacterHead3D outfit={outfit} mats={mats} />
           </group>
         </group>
       </group>

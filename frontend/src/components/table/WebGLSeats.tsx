@@ -9,6 +9,7 @@ import { getLayoutSeatCount } from '../../utils/capacity';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { getOutfit, outfitForName, type Outfit } from '../../lib/cosmetics/outfits';
 import { buildMaterials, eyeMaterial } from './shared/characterMaterials';
+import { CharacterHead3D } from './CharacterHead3D';
 
 /**
  * ============================================================================
@@ -197,19 +198,7 @@ const PlayerCharacter = React.memo<PlayerCharacterProps>(({ angle, rX, rZ, isAct
 
         {/* ---- Head (turns independently for the look-around idle) ---- */}
         <group ref={headRef} position={[0, 0.56, 0]}>
-          <mesh castShadow material={mats.skin}>
-            <sphereGeometry args={[0.12, 20, 20]} />
-          </mesh>
-          {/* Hair cap — back/top of the head */}
-          <mesh position={[0, 0.04, -0.02]} scale={[1.06, 0.9, 1.06]} castShadow material={mats.hair}>
-            <sphereGeometry args={[0.12, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.62]} />
-          </mesh>
-          {/* Simple, expressive-but-minimal face: two eyes on the +Z front */}
-          {[-0.045, 0.045].map((x) => (
-            <mesh key={`eye${x}`} position={[x, 0.01, 0.108]} material={eyeMaterial}>
-              <sphereGeometry args={[0.018, 8, 8]} />
-            </mesh>
-          ))}
+          <CharacterHead3D outfit={outfit} mats={mats} />
         </group>
       </group>
 
@@ -297,9 +286,11 @@ export const WebGLSeats: React.FC = () => {
 
       const isActiveTurn = occupant.id === currentPlayerId;
 
-      // Resolve the cosmetic outfit: an explicit stored key wins; otherwise a
-      // deterministic neutral outfit keyed off the stable player name.
-      const outfit = occupant.outfit ? getOutfit(occupant.outfit) : outfitForName(occupant.name);
+      const outfit = occupant.outfit
+        ? getOutfit(occupant.outfit)
+        : occupant.avatar
+        ? getOutfit(occupant.avatar)
+        : outfitForName(occupant.name);
 
       out.push({ id: occupant.id, angle, rX, rZ, isActiveTurn, outfit });
     });
