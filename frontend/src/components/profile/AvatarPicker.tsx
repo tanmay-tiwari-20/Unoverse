@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check, User, Users } from "lucide-react";
 import { PRESET_AVATARS, getPresetAvatar } from "../../lib/profile/avatars";
