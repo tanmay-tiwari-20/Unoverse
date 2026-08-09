@@ -7,48 +7,12 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { getOutfit, outfitForName } from '../../lib/cosmetics/outfits';
 import { buildMaterials, eyeMaterial } from '../table/shared/characterMaterials';
 
-/**
- * ============================================================================
- *  PreviewCharacter — a STANDING full-body avatar for outfit preview.
- * ============================================================================
- *
- * PURELY VISUAL, and deliberately SELF-CONTAINED. This is the home/profile
- * "mannequin": a full-height character standing on the ground so a player can
- * inspect an outfit before wearing it. It shares exactly ONE thing with the
- * in-game seated characters — the outfit palette and the PBR materials derived
- * from it (`characterMaterials`) — so a skin previewed here reads identically at
- * the table.
- *
- * It shares NOTHING else on purpose: no seat math, no `HIP_Y`, no
- * `WebGLSeats`, no arena/`RoomEnvironment` coupling, no game store. It takes an
- * outfit key (or a name to derive one) plus a rotation, and renders. That keeps
- * the preview safe to restyle/repose without any risk to gameplay visuals.
- *
- * PLACEMENT — the group is anchored at the FEET (soles at local y = 0), so a
- * caller can drop it straight onto a floor/turntable at y = 0. `rotationY` is
- * owned by the caller (drag-to-spin, buttons, auto-spin, whatever); the idle
- * animation only ever adds a tiny sway *inside* that, so external rotation is
- * never fought over.
- *
- * PERFORMANCE — primitives only, one shared 5-material pool built from the
- * palette and disposed on unmount, no textures, no skinned meshes. The idle is a
- * handful of trig ops per frame and is fully skipped under reduced motion.
- */
 
-// ---------------------------------------------------------------------------
-//  Standing proportions (local space; the group's origin is the GROUND).
-//  Front is local +Z (eyes face +Z), matching the seated character so both are
-//  authored with the same handedness.
-// ---------------------------------------------------------------------------
-/** Pelvis centre height. Legs run down from here; the upper body is built up. */
 const HIP_H = 0.86;
-/** Torso group origin — slightly above the pelvis, as on the seated character. */
 const TORSO_Y = HIP_H + 0.08;
-/** Horizontal leg spacing (matches the seated character's stance width). */
 const LEG_X = 0.1;
 
 export interface PreviewCharacterProps {
-  /** Stored outfit key to preview. Unknown/null falls back via `getOutfit`. */
   outfitKey?: string | null;
   /**
    * Player name, used ONLY when no `outfitKey` is given: the same deterministic

@@ -1,26 +1,5 @@
 "use client";
 
-/**
- * A grid of selectable cosmetic outfits (skins), reused by the create-profile
- * and edit-profile flows. Purely presentational + controlled: the parent owns
- * the selected key. Mirrors AvatarPicker's arcade styling exactly.
- *
- * Each swatch previews the outfit palette: the gradient is the outfit's own
- * `gradient`, and three dots preview primary/accent/secondary so the choice
- * reads clearly before you see the 3D character. Arena-themed outfits get a
- * small affinity chip so players can find the skin that suits a given world —
- * but every outfit is selectable everywhere (affinity is a hint, not a gate).
- *
- * Above the grid sits a live 3D preview (`PreviewStage`) wearing whatever is
- * currently selected. It is driven straight off the controlled `value`, so the
- * mannequin re-skins on the same render as the swatch highlight — no local
- * mirror of the selection, nothing to keep in sync.
- *
- * `showPreview={false}` suppresses it for hosts that already show a bigger
- * mannequin of their own (the profile modal's hero). That is a PERFORMANCE
- * contract, not a styling one: two `PreviewStage`s means two WebGL contexts on a
- * screen that only ever needs one.
- */
 import React from "react";
 import { motion } from "framer-motion";
 import { Check } from "lucide-react";
@@ -96,7 +75,6 @@ export function OutfitPicker({ value, onChange, disabled, showPreview = true }: 
               <span className="block truncate text-sm font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]">
                 {outfit.label}
               </span>
-              <span className="block truncate text-[11px] text-white/60">{outfit.description}</span>
               {outfit.arenaAffinity && (
                 <span className="mt-0.5 inline-block rounded-full bg-black/30 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-white/70">
                   {outfit.arenaAffinity}
