@@ -455,6 +455,7 @@ export const Scoreboard: React.FC = () => {
               style={{
                 position: 'absolute',
                 width: 'min(26rem, calc(100vw - 1.5rem))',
+                maxWidth: 'none',
                 maxHeight: 'min(62dvh, 32rem)',
               }}
             >
