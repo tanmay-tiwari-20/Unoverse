@@ -61,7 +61,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor={nameId}
-            className="font-rounded flex items-center gap-1.5 px-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white/45"
+            className="font-rounded flex items-center gap-1.5 px-0.5 text-[10px] font-bold tracking-[0.14em] text-white/45"
           >
             {hasProfile ? <Pencil size={10} aria-hidden="true" /> : null}
             {hasProfile ? "Playing as" : "Your name"}
@@ -79,7 +79,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
             autoComplete="off"
             data-lpignore="true"
             data-form-type="other"
-            className="ui-input px-3 py-2.5 text-center text-[15px] uppercase tracking-wide short:py-2 short:text-[13px]"
+            className="ui-input px-3 py-2.5 text-center text-[15px] tracking-wide short:py-2 short:text-[13px]"
           />
         </div>
 
@@ -88,7 +88,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
           type="button"
           onClick={onQuickPlay}
           disabled={loading}
-          className="btn-arcade cta-hero font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2.5 bg-gradient-to-b from-yellow-400 to-amber-600 py-4 text-lg uppercase tracking-wide text-[#1a1033] disabled:cursor-not-allowed short:py-2.5 short:text-sm sm:text-xl"
+          className="btn-arcade cta-hero font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2.5 bg-gradient-to-b from-yellow-400 to-amber-600 py-4 text-lg tracking-wide text-[#1a1033] disabled:cursor-not-allowed short:py-2.5 short:text-sm sm:text-xl"
         >
           <Zap
             size={20}
@@ -113,7 +113,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
             className="ui-segment-item inline-flex items-center justify-center gap-1.5"
             style={{ minHeight: "calc(var(--ui-tap) - 8px)" }}
           >
-            <KeyRound size={12} aria-hidden="true" /> Join a code
+            <KeyRound size={12} aria-hidden="true" /> Join Room
           </button>
           <button
             type="button"
@@ -123,7 +123,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
             className="ui-segment-item inline-flex items-center justify-center gap-1.5"
             style={{ minHeight: "calc(var(--ui-tap) - 8px)" }}
           >
-            <Plus size={12} aria-hidden="true" /> Host a room
+            <Plus size={12} aria-hidden="true" /> Host Room
           </button>
         </div>
 

@@ -79,9 +79,18 @@ export function useViewport(): Viewport {
     compute();
     window.addEventListener('resize', compute);
     window.addEventListener('orientationchange', compute);
+    document.addEventListener('fullscreenchange', compute);
+    document.addEventListener('webkitfullscreenchange', compute);
+    document.addEventListener('mozfullscreenchange', compute);
+    document.addEventListener('MSFullscreenChange', compute);
+
     return () => {
       window.removeEventListener('resize', compute);
       window.removeEventListener('orientationchange', compute);
+      document.removeEventListener('fullscreenchange', compute);
+      document.removeEventListener('webkitfullscreenchange', compute);
+      document.removeEventListener('mozfullscreenchange', compute);
+      document.removeEventListener('MSFullscreenChange', compute);
     };
   }, []);
 

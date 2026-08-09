@@ -2,11 +2,12 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Flame, Trophy, Wifi, WifiOff } from 'lucide-react';
+import { Flame, Maximize2, Minimize2, Trophy, Wifi, WifiOff } from 'lucide-react';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useGameStore } from '../../store/useGameStore';
 import { PresetAvatar } from '../profile/PresetAvatar';
 import { FriendsButton } from '../social/FriendsButton';
+import { useFullscreen } from '../../hooks/useFullscreen';
 
 export const HomeTopRail: React.FC = () => {
   const hydrated = useProfileStore((s) => s.hydrated);
@@ -16,6 +17,7 @@ export const HomeTopRail: React.FC = () => {
   const stats = useProfileStore((s) => s.cachedProfile?.stats ?? null);
   const setIsProfileOpen = useProfileStore((s) => s.setIsProfileOpen);
   const status = useGameStore((s) => s.connectionStatus);
+  const { isFullscreen, toggleFullscreen, isSupported } = useFullscreen();
 
   const live = status === 'connected';
   const known = hydrated && !!profileId;
@@ -62,32 +64,58 @@ export const HomeTopRail: React.FC = () => {
           )}
         </div>
 
-        {/* Right — Friends drawer & Profile chip */}
-        {known && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, type: 'spring', damping: 22, stiffness: 280 }}
-            className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2"
-          >
-            <FriendsButton />
-
+        {/* Right — Fullscreen toggle, Friends drawer & Profile chip */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, type: 'spring', damping: 22, stiffness: 280 }}
+          className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2"
+        >
+          {isSupported && (
             <button
               type="button"
-              onClick={() => setIsProfileOpen(true)}
-              aria-label="Open your player profile"
-              className="chip-arcade flex cursor-pointer items-center gap-2 rounded-full border-2 border-white/25 bg-gradient-to-b from-white/15 to-white/5 hover:from-white/25 hover:to-white/10 hover:border-yellow-400/70 py-1 pl-1 pr-3 text-white transition-all shadow-lg active:scale-95"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              aria-label={isFullscreen ? 'Exit fullscreen mode' : 'Enter fullscreen mode'}
+              aria-pressed={isFullscreen}
+              className={`home-chip font-rounded text-[10px] sm:text-[11px] font-bold uppercase tracking-wider backdrop-blur-md px-2.5 py-1.5 flex items-center gap-1.5 transition-all shadow-md active:scale-95 border cursor-pointer ${
+                isFullscreen
+                  ? 'bg-yellow-500/20 border-yellow-400/50 text-yellow-300 hover:bg-yellow-500/30'
+                  : 'bg-black/40 border-white/15 text-white/80 hover:bg-white/15 hover:border-white/30'
+              }`}
             >
-              <div className="relative shrink-0">
-                <PresetAvatar avatarKey={avatar} size={30} />
-                <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-lime-400 border border-black" />
-              </div>
-              <span className="font-rounded max-w-[6.5rem] truncate text-[11px] font-extrabold uppercase tracking-wider text-white drop-shadow">
-                {name ?? 'Profile'}
+              {isFullscreen ? (
+                <Minimize2 size={13} className="shrink-0 text-yellow-300" />
+              ) : (
+                <Maximize2 size={13} className="shrink-0 text-white/70" />
+              )}
+              <span className="hidden sm:inline">
+                {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
               </span>
             </button>
-          </motion.div>
-        )}
+          )}
+
+          {known && (
+            <>
+              <FriendsButton />
+
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(true)}
+                aria-label="Open your player profile"
+                className="chip-arcade flex cursor-pointer items-center gap-2 rounded-full border-2 border-white/25 bg-gradient-to-b from-white/15 to-white/5 hover:from-white/25 hover:to-white/10 hover:border-yellow-400/70 py-1 pl-1 pr-3 text-white transition-all shadow-lg active:scale-95"
+              >
+                <div className="relative shrink-0">
+                  <PresetAvatar avatarKey={avatar} size={30} />
+                  <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-lime-400 border border-black" />
+                </div>
+                <span className="font-rounded max-w-[6.5rem] truncate text-[11px] font-extrabold uppercase tracking-wider text-white drop-shadow">
+                  {name ?? 'Profile'}
+                </span>
+              </button>
+            </>
+          )}
+        </motion.div>
       </div>
     </div>
   );

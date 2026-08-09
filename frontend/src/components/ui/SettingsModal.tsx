@@ -32,6 +32,7 @@ import { useSettingsStore } from "../../store/useSettingsStore";
 import { useGameStore } from "../../store/useGameStore";
 import { useSocket } from "../../hooks/useSocket";
 import { useEffectiveQuality } from "../../hooks/useEffectiveQuality";
+import { useFullscreen } from "../../hooks/useFullscreen";
 import {
   Badge,
   Button,
@@ -191,6 +192,7 @@ export const SettingsModal: React.FC = () => {
 
   // Reported back to the user so "Auto Graphics" isn't a black box.
   const { tier, isAutoDowngraded } = useEffectiveQuality();
+  const { isFullscreen, toggleFullscreen, isSupported } = useFullscreen();
 
   const { leaveRoom } = useSocket();
   const router = useRouter();
@@ -350,6 +352,24 @@ export const SettingsModal: React.FC = () => {
                   label="Post processing"
                   checked={postProcessing}
                   onChange={setPostProcessing}
+                />
+              </Field>
+              <Field
+                label="Fullscreen Mode"
+                icon={<Monitor size={12} />}
+                hint={
+                  !isSupported
+                    ? "Not supported on this browser or iframe environment."
+                    : isFullscreen
+                      ? "Currently active."
+                      : "Expand to fill the entire screen."
+                }
+              >
+                <Toggle
+                  label="Fullscreen mode"
+                  checked={isFullscreen}
+                  onChange={toggleFullscreen}
+                  disabled={!isSupported}
                 />
               </Field>
 
