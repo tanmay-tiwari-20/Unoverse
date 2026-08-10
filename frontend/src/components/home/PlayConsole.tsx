@@ -32,8 +32,6 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
 }) => {
   const codeId = useId();
 
-  // Enter anywhere in the console runs whatever the current mode's action is —
-  // the same key does the obvious thing whether you are joining or hosting.
   const submitCurrentMode = () => {
     if (loading) return;
     if (mode === "join") onJoin();
@@ -52,7 +50,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
           type="button"
           onClick={onQuickPlay}
           disabled={loading}
-          className="btn-arcade cta-hero font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2.5 bg-gradient-to-b from-yellow-400 to-amber-600 py-4 text-lg tracking-wide text-[#1a1033] disabled:cursor-not-allowed short:py-2.5 short:text-sm sm:text-xl"
+          className="btn-arcade cta-hero font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2.5 bg-gradient-to-b from-yellow-400 to-amber-600 py-4 text-lg tracking-wide text-[#1a1033] disabled:cursor-not-allowed short:py-2.5 short:text-sm sm:text-xl uppercase"
         >
           <Zap
             size={20}
