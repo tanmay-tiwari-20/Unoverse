@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Unoverse',
     short_name: 'Unoverse',
-    description: 'Immersive 3D Multiplayer UNO Experience',
+    description: 'Immersive 3D Multiplayer Card Game',
     start_url: '/',
     display: 'standalone',
     // The 3D table, seat arc and card fan are all inherently wide, so landscape

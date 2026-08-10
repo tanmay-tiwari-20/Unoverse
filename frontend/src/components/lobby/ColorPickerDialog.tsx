@@ -60,7 +60,7 @@ export const ColorPickerDialog: React.FC = () => {
                 setIsProcessing(true);
                 chooseColor(color);
               }}
-              className={`btn-arcade bg-gradient-to-b ${classes} py-5 text-base uppercase disabled:cursor-not-allowed short:py-3 short:text-sm`}
+              className={`btn-arcade bg-gradient-to-b ${classes} py-5 text-base uppercase disabled:cursor-not-allowed short:py-3 short:text-sm cursor-pointer`}
             >
               {label}
             </button>

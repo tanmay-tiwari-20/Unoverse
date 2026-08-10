@@ -28,11 +28,11 @@ const fredoka = Fredoka({
 });
 
 export const metadata: Metadata = {
-  title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
+  title: "Unoverse — 3D Multiplayer Card Game",
   description:
-    "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+    "Experience card game like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
   keywords: [
-    "UNO",
+    "3D Arcade",
     "multiplayer game",
     "3D card game",
     "Unoverse",
@@ -45,9 +45,9 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
+    title: "Unoverse — 3D Multiplayer Card Game",
     description:
-      "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+      "Experience card game like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
     url: "https://unoverse-ivory.vercel.app",
     siteName: "Unoverse",
     images: [
@@ -63,9 +63,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Unoverse — Immersive 3D Multiplayer UNO Experience",
+    title: "Unoverse — 3D Multiplayer Card Game",
     description:
-      "Experience UNO like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
+      "Experience card game like never before. Sit around a virtual 3D table with friends, cast interactive reactions, and play with custom rules in real-time.",
     images: ["/web-app-manifest-512x512.png"],
   },
   appleWebApp: {

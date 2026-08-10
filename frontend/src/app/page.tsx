@@ -27,13 +27,6 @@ const LandingScene = dynamic(
   { ssr: false },
 );
 
-/**
- * Read back the per-session seat secret the gameplay layer stores on first join.
- * Mirrors `loadSecret` in `useSocket.ts` EXACTLY — same key shape, same silent
- * failure on unavailable storage. Duplicated (rather than exported from the hook)
- * so the landing page never pulls in the gameplay hook module; the key format is
- * the contract between them.
- */
 function loadSeatSecret(code: string, name: string): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
@@ -47,10 +40,6 @@ function loadSeatSecret(code: string, name: string): string | undefined {
   }
 }
 
-/** The durable profile identity, mirroring `profileCreds` in `useSocket.ts`.
- *  `{}` when no profile exists yet — profile-less play still works. Read via
- *  `getState()` rather than a subscription: the secret is never rendered, so
- *  subscribing to it would only cost re-renders. */
 function profileCreds(): { profileId?: string; profileSecret?: string } {
   const { profileId, profileSecret } = useProfileStore.getState();
   return profileId && profileSecret ? { profileId, profileSecret } : {};
