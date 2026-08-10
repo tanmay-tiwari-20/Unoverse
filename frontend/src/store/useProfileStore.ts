@@ -21,6 +21,7 @@ import type { PublicProfile } from '../types/profile';
 import { DEFAULT_AVATAR_KEY } from '../lib/profile/avatars';
 import { DEFAULT_OUTFIT_KEY } from '../lib/cosmetics/outfits';
 import * as profileApi from '../lib/profile/profileApi';
+import { errorMessage } from '../utils/errors';
 
 interface ProfileState {
   // ---- Persisted identity ---------------------------------------------------
@@ -100,8 +101,8 @@ export const useProfileStore = create<ProfileState>()(
             loading: false,
           });
           return profile;
-        } catch (e: any) {
-          set({ loading: false, error: e?.message || 'Failed to create profile' });
+        } catch (e: unknown) {
+          set({ loading: false, error: errorMessage(e, 'Failed to create profile') });
           return null;
         }
       },
@@ -114,8 +115,8 @@ export const useProfileStore = create<ProfileState>()(
           const profile = await profileApi.fetchProfile(profileId);
           set({ ...adopt(profile), loading: false });
           return profile;
-        } catch (e: any) {
-          set({ loading: false, error: e?.message || 'Failed to load profile' });
+        } catch (e: unknown) {
+          set({ loading: false, error: errorMessage(e, 'Failed to load profile') });
           return null;
         }
       },
@@ -130,8 +131,8 @@ export const useProfileStore = create<ProfileState>()(
           });
           set({ ...adopt(profile), loading: false });
           return profile;
-        } catch (e: any) {
-          set({ loading: false, error: e?.message || 'Failed to rename profile' });
+        } catch (e: unknown) {
+          set({ loading: false, error: errorMessage(e, 'Failed to rename profile') });
           return null;
         }
       },
@@ -144,8 +145,8 @@ export const useProfileStore = create<ProfileState>()(
           const profile = await profileApi.patchProfile(profileId, profileSecret, { avatar });
           set({ ...adopt(profile), loading: false });
           return profile;
-        } catch (e: any) {
-          set({ loading: false, error: e?.message || 'Failed to change avatar' });
+        } catch (e: unknown) {
+          set({ loading: false, error: errorMessage(e, 'Failed to change avatar') });
           return null;
         }
       },
@@ -158,8 +159,8 @@ export const useProfileStore = create<ProfileState>()(
           const profile = await profileApi.patchProfile(profileId, profileSecret, { outfit });
           set({ ...adopt(profile), loading: false });
           return profile;
-        } catch (e: any) {
-          set({ loading: false, error: e?.message || 'Failed to change outfit' });
+        } catch (e: unknown) {
+          set({ loading: false, error: errorMessage(e, 'Failed to change outfit') });
           return null;
         }
       },
@@ -172,8 +173,8 @@ export const useProfileStore = create<ProfileState>()(
           const profile = await profileApi.resetProfile(profileId, profileSecret);
           set({ ...adopt(profile), loading: false });
           return profile;
-        } catch (e: any) {
-          set({ loading: false, error: e?.message || 'Failed to reset profile' });
+        } catch (e: unknown) {
+          set({ loading: false, error: errorMessage(e, 'Failed to reset profile') });
           return null;
         }
       },

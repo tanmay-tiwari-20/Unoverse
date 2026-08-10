@@ -5,7 +5,6 @@ import { useProfileStore } from '../store/useProfileStore';
 import { CardColor, CardItem } from '../lib/cards/cardEngine';
 import { HouseRules } from '../lib/houseRules';
 import { soundManager } from '../utils/soundManager';
-import { getSeatCoords } from '../utils/seating';
 import { logger } from '../utils/logger';
 // Friends & Social System. Two calls only — the listeners are attached alongside
 // the gameplay ones, and `sayHello` re-binds the profile after every (re)connect.
@@ -235,7 +234,7 @@ function setupSocketListeners(socketInstance: Socket) {
     useGameStore.getState().setIsProcessing(false);
   });
 
-  socketInstance.on('game-ended', ({ winnerId, winnerName }) => {
+  socketInstance.on('game-ended', ({ winnerName }) => {
     logger.debug('[Socket] Game ended. Winner:', winnerName);
     soundManager.play('victory');
     useGameStore.getState().setIsProcessing(false);
@@ -316,7 +315,7 @@ function setupSocketListeners(socketInstance: Socket) {
     }
   });
 
-  socketInstance.on('spectator-joined', ({ name, id }) => {
+  socketInstance.on('spectator-joined', ({ name }) => {
     logger.debug('[Socket] Spectator joined:', name);
     soundManager.play('player_join');
     if (name) {
@@ -324,7 +323,7 @@ function setupSocketListeners(socketInstance: Socket) {
     }
   });
 
-  socketInstance.on('spectator-left', ({ name, id }) => {
+  socketInstance.on('spectator-left', ({ name }) => {
     logger.debug('[Socket] Spectator left:', name);
     soundManager.play('player_leave');
     if (name) {

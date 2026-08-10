@@ -79,7 +79,7 @@ export const WebGLCards: React.FC = () => {
   const lastAction = useGameStore((state) => state.lastAction);
   const unoCalled = useGameStore((state) => state.unoCalled);
   const showLastPlayedBy = useSettingsStore((s) => s.showLastPlayedBy);
-  const { playCard, drawCard } = useSocket();
+  const { drawCard } = useSocket();
 
   // Coarse device bucket drives the touch-only deck affordance and compact badge
   // sizing. Read once here so no child inside the R3F frame loop subscribes.

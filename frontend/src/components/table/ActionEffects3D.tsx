@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -8,7 +8,7 @@ import { useGameStore } from '../../store/useGameStore';
 import { useEffectiveQuality } from '../../hooks/useEffectiveQuality';
 import { getHandRingRadii } from '../../utils/tableLayout';
 import { getLayoutSeatCount } from '../../utils/capacity';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 /**
  * Premium 3D Action Card Effects
@@ -52,12 +52,14 @@ export const ActionEffects3D: React.FC = () => {
   const unoCalled = useGameStore((s) => s.unoCalled);
   const prevUnoCalledRef = useRef<Record<string, boolean>>({});
 
-  const playersList = room?.players || [];
+  // Memoised/callback-wrapped so both can be honest dependencies of the detection
+  // effect below without re-arming it on every render.
+  const playersList = useMemo(() => room?.players || [], [room?.players]);
   const numPlayers = getLayoutSeatCount(room);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
 
-  const getPlayerWorldPos = (playerIndex: number): [number, number, number] => {
+  const getPlayerWorldPos = useCallback((playerIndex: number): [number, number, number] => {
     const relativeIndex = (playerIndex - safeLocalIndex + numPlayers) % numPlayers;
     const baseAngle = (Math.PI * 2 / numPlayers) * relativeIndex;
     // Ring radii scale with the active player count, matching WebGLCards so the
@@ -68,7 +70,7 @@ export const ActionEffects3D: React.FC = () => {
       1.1,
       Math.cos(baseAngle) * rZ,
     ];
-  };
+  }, [safeLocalIndex, numPlayers]);
 
   useEffect(() => {
     if (gameStatus !== 'playing' && gameStatus !== 'awaiting_color_selection') {
@@ -107,19 +109,16 @@ export const ActionEffects3D: React.FC = () => {
         const prev = prevHandSizesRef.current[p.seatNumber] ?? 0;
         const curr = currentSizes[p.seatNumber] ?? 0;
         if (curr > prev) {
-          // Hand grew, must be the target! Only spawn effect once per draw event
-          const hasExistingEffect = effects.some(e => 
-            (e.type === 'draw_two' || e.type === 'draw_four') && e.playerName === p.name && (now - e.startTime < 1000)
-          );
-          if (!hasExistingEffect) {
-            newEffects.push({
-              id: `draw-${now}-${p.id}`,
-              type: topCard.value === 'draw_two' ? 'draw_two' : 'draw_four',
-              playerName: p.name,
-              targetPos: getPlayerWorldPos(idx),
-              startTime: now,
-            });
-          }
+          // Hand grew, so this is the target of the draw. Duplicate suppression
+          // happens in the state updater below, where the live effect list is
+          // available without capturing it as a dependency.
+          newEffects.push({
+            id: `draw-${now}-${p.id}`,
+            type: topCard.value === 'draw_two' ? 'draw_two' : 'draw_four',
+            playerName: p.name,
+            targetPos: getPlayerWorldPos(idx),
+            startTime: now,
+          });
         }
       });
     }
@@ -141,7 +140,21 @@ export const ActionEffects3D: React.FC = () => {
     });
 
     if (newEffects.length > 0) {
-      setEffects(prev => [...prev, ...newEffects]);
+      setEffects(prev => {
+        // Only one +2/+4 badge per player per draw burst. The check reads the
+        // live list inside the updater rather than closing over `effects`: as a
+        // dependency, `effects` would re-arm this whole detection pass every
+        // time a badge appeared or expired.
+        const fresh = newEffects.filter(e => {
+          if (e.type !== 'draw_two' && e.type !== 'draw_four') return true;
+          return !prev.some(x =>
+            (x.type === 'draw_two' || x.type === 'draw_four') &&
+            x.playerName === e.playerName &&
+            now - x.startTime < 1000,
+          );
+        });
+        return fresh.length > 0 ? [...prev, ...fresh] : prev;
+      });
     }
 
     // Update refs
@@ -149,7 +162,7 @@ export const ActionEffects3D: React.FC = () => {
     prevTopCardIdRef.current = topCard?.id ?? null;
     prevHandSizesRef.current = currentSizes;
     prevUnoCalledRef.current = { ...unoCalled };
-  }, [discardPile, discardCount, playerCards, gameStatus, unoCalled]);
+  }, [discardPile, discardCount, playerCards, gameStatus, unoCalled, playersList, getPlayerWorldPos]);
 
   const removeEffect = (id: string) => {
     setEffects(prev => prev.filter(e => e.id !== id));

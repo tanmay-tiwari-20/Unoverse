@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useGameStore } from '../store/useGameStore';
+import { subscribeToNothing } from '../utils/clientSnapshot';
 
 export interface UseFullscreenResult {
   /** Whether the document is currently in fullscreen mode. */
@@ -16,16 +17,50 @@ export interface UseFullscreenResult {
   exitFullscreen: () => Promise<boolean>;
 }
 
+/** Vendor-prefixed Fullscreen API members that are missing from the DOM lib types. */
+type VendorFullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  mozFullScreenElement?: Element | null;
+  msFullscreenElement?: Element | null;
+  webkitFullscreenEnabled?: boolean;
+  mozFullScreenEnabled?: boolean;
+  msFullscreenEnabled?: boolean;
+  webkitExitFullscreen?: () => Promise<void> | void;
+  mozCancelFullScreen?: () => Promise<void> | void;
+  msExitFullscreen?: () => Promise<void> | void;
+};
+
+type VendorFullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+  mozRequestFullScreen?: () => Promise<void> | void;
+  msRequestFullscreen?: () => Promise<void> | void;
+};
+
+const FULLSCREEN_EVENTS = [
+  'fullscreenchange',
+  'webkitfullscreenchange',
+  'mozfullscreenchange',
+  'MSFullscreenChange',
+] as const;
+
+const FULLSCREEN_ERROR_EVENTS = [
+  'fullscreenerror',
+  'webkitfullscreenerror',
+  'mozfullscreenerror',
+  'MSFullscreenError',
+] as const;
+
 /**
  * Returns true if there is an active fullscreen element across browser implementations.
  */
 function checkIsFullscreen(): boolean {
   if (typeof document === 'undefined') return false;
+  const doc = document as VendorFullscreenDocument;
   return !!(
-    document.fullscreenElement ||
-    (document as any).webkitFullscreenElement ||
-    (document as any).mozFullScreenElement ||
-    (document as any).msFullscreenElement
+    doc.fullscreenElement ||
+    doc.webkitFullscreenElement ||
+    doc.mozFullScreenElement ||
+    doc.msFullscreenElement
   );
 }
 
@@ -34,78 +69,79 @@ function checkIsFullscreen(): boolean {
  */
 function checkIsSupported(): boolean {
   if (typeof document === 'undefined') return false;
+  const doc = document as VendorFullscreenDocument;
+  const root = doc.documentElement as VendorFullscreenElement | null;
   return !!(
-    document.fullscreenEnabled ||
-    (document as any).webkitFullscreenEnabled ||
-    (document as any).mozFullScreenEnabled ||
-    (document as any).msFullscreenEnabled ||
+    doc.fullscreenEnabled ||
+    doc.webkitFullscreenEnabled ||
+    doc.mozFullScreenEnabled ||
+    doc.msFullscreenEnabled ||
     // Fallback check for requestFullscreen on root element
-    (document.documentElement &&
-      (document.documentElement.requestFullscreen ||
-        (document.documentElement as any).webkitRequestFullscreen ||
-        (document.documentElement as any).mozRequestFullScreen ||
-        (document.documentElement as any).msRequestFullscreen))
+    (root &&
+      (root.requestFullscreen ||
+        root.webkitRequestFullscreen ||
+        root.mozRequestFullScreen ||
+        root.msRequestFullscreen))
   );
 }
 
+/** Subscribes to every vendor variant of the fullscreenchange event. */
+function subscribeToFullscreenChange(onChange: () => void): () => void {
+  if (typeof document === 'undefined') return () => {};
+  FULLSCREEN_EVENTS.forEach((evt) => document.addEventListener(evt, onChange));
+  return () => {
+    FULLSCREEN_EVENTS.forEach((evt) => document.removeEventListener(evt, onChange));
+  };
+}
+
+/** Resolves a fullscreen request/exit method that may or may not return a promise. */
+async function awaitFullscreenResult(result: Promise<void> | void): Promise<void> {
+  if (result && typeof (result as Promise<void>).then === 'function') {
+    await result;
+  }
+}
 /**
  * Hook to manage Fullscreen API state across Desktop, Tablet, Mobile, and embedded iframe (CrazyGames).
  * Automatically keeps UI state synchronized with native browser events (Escape key, system gestures).
  */
 export function useFullscreen(): UseFullscreenResult {
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [isSupported, setIsSupported] = useState<boolean>(false);
+  const isFullscreen = useSyncExternalStore(
+    subscribeToFullscreenChange,
+    checkIsFullscreen,
+    () => false,
+  );
+  const isSupported = useSyncExternalStore(subscribeToNothing, checkIsSupported, () => false);
 
   useEffect(() => {
-    setIsFullscreen(checkIsFullscreen());
-    setIsSupported(checkIsSupported());
-
-    const handleFullscreenChange = () => {
-      setIsFullscreen(checkIsFullscreen());
-    };
-
     const handleFullscreenError = () => {
       // Gracefully handle fullscreen rejection (e.g. restricted iframe or user denied)
-      setIsFullscreen(checkIsFullscreen());
       const addToast = useGameStore.getState().addToast;
       if (addToast) {
         addToast('Fullscreen mode is restricted or unavailable', 'info');
       }
     };
 
-    const events = [
-      'fullscreenchange',
-      'webkitfullscreenchange',
-      'mozfullscreenchange',
-      'MSFullscreenChange',
-    ];
-
-    const errorEvents = [
-      'fullscreenerror',
-      'webkitfullscreenerror',
-      'mozfullscreenerror',
-      'MSFullscreenError',
-    ];
-
-    events.forEach((evt) => document.addEventListener(evt, handleFullscreenChange));
-    errorEvents.forEach((evt) => document.addEventListener(evt, handleFullscreenError));
+    FULLSCREEN_ERROR_EVENTS.forEach((evt) =>
+      document.addEventListener(evt, handleFullscreenError),
+    );
 
     return () => {
-      events.forEach((evt) => document.removeEventListener(evt, handleFullscreenChange));
-      errorEvents.forEach((evt) => document.removeEventListener(evt, handleFullscreenError));
+      FULLSCREEN_ERROR_EVENTS.forEach((evt) =>
+        document.removeEventListener(evt, handleFullscreenError),
+      );
     };
   }, []);
 
   const reqFullscreen = useCallback(async (): Promise<boolean> => {
     if (typeof document === 'undefined') return false;
-    const elem = document.documentElement;
+    const elem = document.documentElement as VendorFullscreenElement | null;
     if (!elem) return false;
 
     const requestMethod =
       elem.requestFullscreen ||
-      (elem as any).webkitRequestFullscreen ||
-      (elem as any).mozRequestFullScreen ||
-      (elem as any).msRequestFullscreen;
+      elem.webkitRequestFullscreen ||
+      elem.mozRequestFullScreen ||
+      elem.msRequestFullscreen;
 
     if (!requestMethod) {
       const addToast = useGameStore.getState().addToast;
@@ -116,12 +152,9 @@ export function useFullscreen(): UseFullscreenResult {
     }
 
     try {
-      const result = requestMethod.call(elem);
-      if (result && typeof result.then === 'function') {
-        await result;
-      }
+      await awaitFullscreenResult(requestMethod.call(elem));
       return true;
-    } catch (err) {
+    } catch {
       // Silent or gentle notification fallback, no console spam or crashing
       const addToast = useGameStore.getState().addToast;
       if (addToast) {
@@ -135,21 +168,19 @@ export function useFullscreen(): UseFullscreenResult {
     if (typeof document === 'undefined') return false;
     if (!checkIsFullscreen()) return true;
 
+    const doc = document as VendorFullscreenDocument;
     const exitMethod =
-      document.exitFullscreen ||
-      (document as any).webkitExitFullscreen ||
-      (document as any).mozCancelFullScreen ||
-      (document as any).msExitFullscreen;
+      doc.exitFullscreen ||
+      doc.webkitExitFullscreen ||
+      doc.mozCancelFullScreen ||
+      doc.msExitFullscreen;
 
     if (!exitMethod) return false;
 
     try {
-      const result = exitMethod.call(document);
-      if (result && typeof result.then === 'function') {
-        await result;
-      }
+      await awaitFullscreenResult(exitMethod.call(doc));
       return true;
-    } catch (err) {
+    } catch {
       return false;
     }
   }, []);

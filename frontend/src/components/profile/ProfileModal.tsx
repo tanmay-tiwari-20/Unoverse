@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertCircle, ArrowLeft, CalendarDays, Clock, Flame, Hand, History, Layers,
-  Pencil, RotateCcw, Save, ShieldCheck, ShieldX, Shirt, Smile, Swords,
+  Pencil, RotateCcw, Save, ShieldCheck, ShieldX, Smile, Swords,
   TriangleAlert, Trophy, User, Users, Zap,
 } from "lucide-react";
 import { useProfileStore } from "../../store/useProfileStore";
@@ -13,7 +13,6 @@ import { useGameStore } from "../../store/useGameStore";
 import { useNow } from "../../hooks/useNow";
 import { PresetAvatar } from "./PresetAvatar";
 import { AvatarPicker } from "./AvatarPicker";
-import { OutfitPicker } from "./OutfitPicker";
 import { PlayerIdTag } from "../social/PlayerIdTag";
 import { PresenceDot, presenceLabel, presenceTextClass } from "../social/PresenceDot";
 import { DEFAULT_OUTFIT_KEY, getOutfit } from "../../lib/cosmetics/outfits";
@@ -307,7 +306,6 @@ export function ProfileModal() {
             setDraftName={setDraftName}
             draftAvatar={draftAvatar || avatarKey || ""}
             setDraftAvatar={setDraftAvatar}
-            draftOutfit={draftOutfit || outfitKey}
             setDraftOutfit={setDraftOutfit}
             loading={loading}
             confirmReset={confirmReset}
@@ -521,7 +519,6 @@ interface EditFormProps {
   setDraftName: (v: string) => void;
   draftAvatar: string;
   setDraftAvatar: (v: string) => void;
-  draftOutfit: string;
   setDraftOutfit: (v: string) => void;
   loading: boolean;
   confirmReset: boolean;
@@ -533,7 +530,7 @@ interface EditFormProps {
 const EditForm: React.FC<EditFormProps> = ({
   draftName, setDraftName,
   draftAvatar, setDraftAvatar,
-  draftOutfit, setDraftOutfit,
+  setDraftOutfit,
   loading, confirmReset, setConfirmReset, onReset,
 }) => (
   <>

@@ -1,35 +1,43 @@
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 import { useGameStore } from '../../store/useGameStore';
 import { PhysicalCard } from '../cards/PhysicalCard';
+import type { CardItem } from '../../lib/cards/cardEngine';
 
 export const CinematicSharedTopCard: React.FC = () => {
   const discardPile = useGameStore((state) => state.discardPile);
-  const discardCount = useGameStore((state) => state.discardCount);
-  const wildColor = useGameStore((state) => state.wildColor);
   const topCard = discardPile && discardPile.length > 0 ? discardPile[discardPile.length - 1] : null;
 
-  const [activeCard, setActiveCard] = useState<any | null>(topCard);
-  const [tapped, setTapped] = useState(false);
-  const animProgress = useRef(1);
-  const groupRef = useRef<THREE.Group>(null);
+  // Whether a card has already occupied this slot. The first card to land is
+  // presented in place; every later one flies up off the pile.
+  const [seenACard, setSeenACard] = useState(false);
+  if (topCard && !seenACard) setSeenACard(true);
 
-  useEffect(() => {
-    if (topCard) {
-      if (!activeCard) {
-        setActiveCard(topCard);
-        animProgress.current = 1;
-      } else if (topCard.id !== activeCard.id) {
-        setActiveCard(topCard);
-        animProgress.current = 0;
-        setTapped(false); // Reset zoom on new card
-      }
-    }
-  }, [topCard, activeCard]);
+  if (!topCard) return null;
+
+  // Keyed by card id so a new top card remounts: the flight progress, the
+  // tap-to-zoom toggle and the displayed face all reset together, which is what
+  // mirroring the store into local state was doing by hand.
+  return <TopCardPresentation key={topCard.id} card={topCard} flyUp={seenACard} />;
+};
+
+interface TopCardPresentationProps {
+  card: CardItem;
+  /** Animate up off the pile on mount, rather than appearing already presented. */
+  flyUp: boolean;
+}
+
+const TopCardPresentation: React.FC<TopCardPresentationProps> = ({ card, flyUp }) => {
+  const discardCount = useGameStore((state) => state.discardCount);
+  const wildColor = useGameStore((state) => state.wildColor);
+
+  const [tapped, setTapped] = useState(false);
+  const animProgress = useRef(flyUp ? 0 : 1);
+  const groupRef = useRef<THREE.Group>(null);
 
   useFrame((state, delta) => {
     if (!groupRef.current) return;
@@ -81,17 +89,14 @@ export const CinematicSharedTopCard: React.FC = () => {
     groupRef.current.scale.z = THREE.MathUtils.lerp(groupRef.current.scale.z, targetScale, 0.1);
   });
 
-  if (!activeCard) return null;
-
   // Once a player picks a color for a Wild / Wild +4, the top card adopts that color.
-  const displayColor =
-    activeCard.color === 'wild' && wildColor ? wildColor : activeCard.color;
+  const displayColor = card.color === 'wild' && wildColor ? wildColor : card.color;
 
   return (
     <group ref={groupRef}>
       <PhysicalCard
-        color={displayColor as any}
-        value={activeCard.value}
+        color={displayColor}
+        value={card.value}
         isFaceUp={true}
         position={[0, 0, 0]}
         rotation={[0, 0, 0]}

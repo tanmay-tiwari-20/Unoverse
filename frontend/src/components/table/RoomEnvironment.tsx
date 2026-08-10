@@ -17,7 +17,7 @@ import { ArenaPostFX } from './arenas/shared/ArenaPostFX';
 // Suppress Three.js Clock deprecation warnings originating from React Three Fiber v9 internals
 if (typeof window !== 'undefined') {
   const originalWarn = console.warn;
-  console.warn = (...args: any[]) => {
+  console.warn = (...args: unknown[]) => {
     if (
       args[0] &&
       typeof args[0] === 'string' &&
@@ -37,9 +37,16 @@ export interface RoomEnvironmentProps {
 }
 
 function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolean; numPlayers?: number }) {
-  const { camera, size } = useThree();
+  const size = useThree((state) => state.size);
+  // The camera is read through the store getter rather than destructured from the
+  // hook: this effect imperatively drives the live camera object (position, fov),
+  // which is exactly the kind of mutation the immutability rule forbids on a
+  // value returned by a hook. `get()` hands back the same instance R3F renders
+  // with, outside of render, which is where imperative camera work belongs.
+  const get = useThree((state) => state.get);
 
   useEffect(() => {
+    const { camera } = get();
     const aspect = size.width > 0 && size.height > 0 ? size.width / size.height : 16 / 9;
     // `aspect < 1` is a portrait phone; `< 1.3` covers narrow/tablet windows.
     const portrait = aspect < 1;
@@ -88,7 +95,7 @@ function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolea
     const perspCam = camera as THREE.PerspectiveCamera;
     perspCam.fov = fov;
     perspCam.updateProjectionMatrix();
-  }, [camera, isLandingPage, numPlayers, size.width, size.height]);
+  }, [get, isLandingPage, numPlayers, size.width, size.height]);
 
   return null;
 }

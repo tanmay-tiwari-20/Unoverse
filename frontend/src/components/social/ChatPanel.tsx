@@ -65,13 +65,23 @@ export const ChatPanel: React.FC = () => {
     }
   }, [chatMessages.length, isChatOpen]);
 
+  // Latest `isCompact`, readable without making it a dependency below. The
+  // open-effect must fire on open and *only* on open — listing `isCompact` there
+  // would re-run the whole reset (including a scroll-to-bottom) when a resize
+  // crosses the mobile/tablet breakpoint, yanking the scroll position of someone
+  // reading back through history.
+  const isCompactRef = useRef(isCompact);
+  useEffect(() => {
+    isCompactRef.current = isCompact;
+  }, [isCompact]);
+
   useEffect(() => {
     if (!isChatOpen) return;
     nearBottomRef.current = true;
     const raf = requestAnimationFrame(() => {
       setShowJumpToLatest(false);
       scrollToBottom("auto");
-      if (!isCompact) inputRef.current?.focus();
+      if (!isCompactRef.current) inputRef.current?.focus();
     });
     return () => cancelAnimationFrame(raf);
   }, [isChatOpen]);

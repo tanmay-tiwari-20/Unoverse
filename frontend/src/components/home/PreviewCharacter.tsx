@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { getOutfit, outfitForName } from '../../lib/cosmetics/outfits';
-import { buildMaterials, eyeMaterial } from '../table/shared/characterMaterials';
+import { buildMaterials } from '../table/shared/characterMaterials';
 
 
 import { CharacterHead3D } from '../table/CharacterHead3D';

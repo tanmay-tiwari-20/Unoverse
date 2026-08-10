@@ -35,11 +35,6 @@ const ActionEffects3D = dynamic(
 export const TableScene: React.FC = () => {
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
-  const currentPlayerId = useGameStore((state) => state.currentPlayerId);
-  const isProcessing = useGameStore((state) => state.isProcessing);
-  const isSpectator = useGameStore((state) => state.isSpectator);
-
-  const isMyTurn = currentPlayerId === player?.id && room?.status === 'playing' && !isProcessing;
 
   // Calculate local player index for POV camera positioning. Seat count comes
   // from the shared helper so every layer (table, seats, cards, overlays) agrees.

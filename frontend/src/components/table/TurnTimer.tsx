@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Timer } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
+import { useNow } from '../../hooks/useNow';
 
 /**
  * Compact countdown pill driven by the server-authoritative `turnDeadline`
@@ -14,26 +15,19 @@ import { useGameStore } from '../../store/useGameStore';
 export const TurnTimer: React.FC<{ className?: string }> = ({ className = '' }) => {
   const turnDeadline = useGameStore((s) => s.turnDeadline);
   const gameStatus = useGameStore((s) => s.gameStatus);
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!turnDeadline || (gameStatus !== 'playing' && gameStatus !== 'awaiting_color_selection')) {
-      setSecondsLeft(null);
-      return;
-    }
+  // A ticking clock is an external system — this hook gives us the current time
+  // on one shared 250ms interval with zero local state.
+  const now = useNow(250, !!turnDeadline);
 
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((turnDeadline - Date.now()) / 1000));
-      setSecondsLeft(remaining);
-    };
+  if (
+    !turnDeadline ||
+    (gameStatus !== 'playing' && gameStatus !== 'awaiting_color_selection')
+  ) {
+    return null;
+  }
 
-    tick();
-    const interval = setInterval(tick, 250);
-    return () => clearInterval(interval);
-  }, [turnDeadline, gameStatus]);
-
-  if (secondsLeft === null) return null;
-
+  const secondsLeft = Math.max(0, Math.ceil((turnDeadline - now) / 1000));
   const urgent = secondsLeft <= 10;
 
   return (

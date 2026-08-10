@@ -607,7 +607,7 @@ export const PhysicalCard: React.FC<PhysicalCardProps> = ({
           document.body.style.cursor = 'pointer';
         }
       }}
-      onPointerOut={(e) => {
+      onPointerOut={() => {
         if (onClick) {
           setHovered(false);
           document.body.style.cursor = 'auto';

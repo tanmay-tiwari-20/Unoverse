@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Eye as EyeIcon } from "lucide-react";
@@ -16,6 +16,8 @@ import { HomeHero } from "../components/home/HomeHero";
 import { PlayConsole, type PlayMode } from "../components/home/PlayConsole";
 import { Button } from "../components/ui/kit";
 import { ArenaSelection } from "../lib/arenas/types";
+import { errorMessage } from "../utils/errors";
+import { subscribeToNothing } from "../utils/clientSnapshot";
 
 const LandingScene = dynamic(
   () =>
@@ -82,9 +84,13 @@ export default function LandingPage() {
 
   // Prefill the name field from the persistent profile once it hydrates, so the
   // player never retypes their name. They can still override it per-session.
-  useEffect(() => {
-    if (profileName) setDisplayName((prev) => prev || profileName);
-  }, [profileName]);
+  // Adjusted during render (not in an effect) so the prefilled name paints on
+  // the same commit the profile hydrates on, with no empty-field flash.
+  const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
+  if (profileName && prefilledFrom !== profileName) {
+    setPrefilledFrom(profileName);
+    if (!displayName) setDisplayName(profileName);
+  }
 
   // Pull the server's view of this profile once on landing so the top rail can
   // show real wins/streak instead of nothing. Fire-and-forget: the store owns
@@ -112,15 +118,25 @@ export default function LandingPage() {
   // Pre-fill the room code when arriving via an invitation link (/?room=CODE),
   // and put the console in "join" mode so the pre-filled code is actually the
   // thing on screen rather than hidden behind the host tab.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const invited = params.get("room");
-    if (invited) {
-      setRoomCode(invited.toUpperCase().slice(0, 6));
-      setPlayMode("join");
-    }
-  }, []);
+  //
+  // Read through useSyncExternalStore rather than a lazy initializer: the server
+  // has no query string, so `getServerSnapshot` keeps the hydration render
+  // matching the prerendered HTML, and the real code lands on the pass right
+  // after. The invite is applied once per code, so a player who clears or edits
+  // the field is not fought by a re-prefill.
+  const search = useSyncExternalStore(
+    subscribeToNothing,
+    () => window.location.search,
+    () => "",
+  );
+  const invitedCode =
+    new URLSearchParams(search).get("room")?.toUpperCase().slice(0, 6) ?? "";
+  const [appliedInvite, setAppliedInvite] = useState<string | null>(null);
+  if (invitedCode && appliedInvite !== invitedCode) {
+    setAppliedInvite(invitedCode);
+    setRoomCode(invitedCode);
+    setPlayMode("join");
+  }
 
   // Step 1 — the console's "Create Room". Validate the name, then open the
   // arena picker. The room isn't created until the host confirms a world.
@@ -168,9 +184,9 @@ export default function LandingPage() {
       router.push(
         `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
       );
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Something went wrong. Is the server running?");
+      setError(errorMessage(err, "Something went wrong. Is the server running?"));
       setLoading(false);
       setCreateOpen(false);
     } finally {
@@ -208,9 +224,9 @@ export default function LandingPage() {
       router.push(
         `/lobby/${data.code}?name=${encodeURIComponent(displayName.trim())}`,
       );
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Something went wrong. Is the server running?");
+      setError(errorMessage(err, "Something went wrong. Is the server running?"));
       setLoading(false);
     } finally {
       requestInProgress.current = false;
@@ -275,10 +291,10 @@ export default function LandingPage() {
       router.push(
         `/lobby/${roomCode.trim().toUpperCase()}?name=${encodeURIComponent(displayName.trim())}`,
       );
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       setError(
-        err.message || "Something went wrong. Please check your room code.",
+        errorMessage(err, "Something went wrong. Please check your room code."),
       );
       setLoading(false);
     } finally {
@@ -309,7 +325,12 @@ export default function LandingPage() {
 
       <HomeTopRail />
 
-      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain px-4 py-16 pointer-events-none safe-x short:px-3 short:py-12">
+      {/* Horizontal padding is set through `--safe-pad-x`, NOT `px-*`. `.safe-x`
+          is unlayered CSS, so it outranks every utility in `@layer utilities` —
+          a `px-4` here would be silently clobbered and the console would sit
+          flush against the screen edge. The var is what `.safe-x` max()es the
+          notch inset against, so this is the knob that actually works. */}
+      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain py-16 pointer-events-none safe-x [--safe-pad-x:1rem] short:[--safe-pad-x:0.75rem] short:py-12">
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
@@ -320,8 +341,6 @@ export default function LandingPage() {
 
           <div className="w-full max-w-sm short:max-w-none lg:max-w-none">
             <PlayConsole
-              displayName={displayName}
-              onNameChange={setDisplayName}
               roomCode={roomCode}
               onRoomCodeChange={setRoomCode}
               mode={playMode}
@@ -331,7 +350,6 @@ export default function LandingPage() {
               onQuickPlay={handleQuickPlay}
               onJoin={handleJoinRoom}
               onCreate={openCreateModal}
-              hasProfile={profileHydrated && !!profileId}
             />
           </div>
         </motion.div>

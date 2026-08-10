@@ -8,7 +8,7 @@ import { getSeatRingRadii } from '../../utils/tableLayout';
 import { getLayoutSeatCount } from '../../utils/capacity';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { getOutfit, outfitForName, type Outfit } from '../../lib/cosmetics/outfits';
-import { buildMaterials, eyeMaterial } from './shared/characterMaterials';
+import { buildMaterials } from './shared/characterMaterials';
 import { CharacterHead3D } from './CharacterHead3D';
 
 /**

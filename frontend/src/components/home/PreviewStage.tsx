@@ -81,34 +81,38 @@ export interface PreviewStageProps {
 // ---------------------------------------------------------------------------
 
 interface TurntableProps {
-  /** Shared mutable spin state, written by the DOM handlers on the wrapper. */
-  spin: React.RefObject<SpinState>;
+  /**
+   * Shared mutable spin state, written by the DOM handlers on the wrapper. Named
+   * with the `Ref` suffix so the hooks lint recognises it as a ref and permits
+   * the per-frame mutation below.
+   */
+  spinRef: React.RefObject<SpinState>;
   /**
    * Filled with r3f's `invalidate` so the DOM drag handlers — which live outside
    * the Canvas and therefore get no automatic re-render — can wake the loop.
    */
-  wake: React.RefObject<(() => void) | null>;
+  wakeRef: React.RefObject<(() => void) | null>;
   autoRotate: boolean;
   prefersReduced: boolean;
   children: React.ReactNode;
 }
 
-const Turntable: React.FC<TurntableProps> = ({ spin, wake, autoRotate, prefersReduced, children }) => {
+const Turntable: React.FC<TurntableProps> = ({ spinRef, wakeRef, autoRotate, prefersReduced, children }) => {
   const groupRef = useRef<THREE.Group>(null);
   const invalidate = useThree((s) => s.invalidate);
 
   useEffect(() => {
-    wake.current = invalidate;
+    wakeRef.current = invalidate;
     return () => {
-      wake.current = null;
+      wakeRef.current = null;
     };
-  }, [wake, invalidate]);
+  }, [wakeRef, invalidate]);
 
   // The rotation is applied straight to the group's transform rather than being
   // pushed through React state: a 60Hz setState would re-render the whole
   // character tree every frame for what is one matrix update.
   useFrame((_state, rawDelta) => {
-    const s = spin.current;
+    const s = spinRef.current;
     const g = groupRef.current;
     if (!s || !g) return;
 
@@ -175,23 +179,23 @@ const PreviewStage: React.FC<PreviewStageProps> = ({
     [outfitKey, name],
   );
 
-  const spin = useRef<SpinState>({ rotation: 0, velocity: 0, dragging: false, idleTime: 0 });
-  const wake = useRef<(() => void) | null>(null);
+  const spinRef = useRef<SpinState>({ rotation: 0, velocity: 0, dragging: false, idleTime: 0 });
+  const wakeRef = useRef<(() => void) | null>(null);
   /** Last pointer x + timestamp, for deriving fling velocity on release. */
   const drag = useRef({ x: 0, t: 0 });
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const s = spin.current;
+    const s = spinRef.current;
     s.dragging = true;
     s.velocity = 0;
     s.idleTime = 0;
     drag.current = { x: e.clientX, t: e.timeStamp };
     e.currentTarget.setPointerCapture(e.pointerId);
-    wake.current?.();
+    wakeRef.current?.();
   }, []);
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const s = spin.current;
+    const s = spinRef.current;
     if (!s.dragging) return;
     const dx = e.clientX - drag.current.x;
     const dt = (e.timeStamp - drag.current.t) / 1000;
@@ -201,11 +205,11 @@ const PreviewStage: React.FC<PreviewStageProps> = ({
     // guard drops the coalesced same-timestamp events browsers can emit.
     if (dt > 0) s.velocity = (dx * DRAG_SENSITIVITY) / dt;
     drag.current = { x: e.clientX, t: e.timeStamp };
-    wake.current?.();
+    wakeRef.current?.();
   }, []);
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const s = spin.current;
+    const s = spinRef.current;
     if (!s.dragging) return;
     s.dragging = false;
     s.idleTime = 0;
@@ -214,18 +218,18 @@ const PreviewStage: React.FC<PreviewStageProps> = ({
     // Under reduced motion the spin ends exactly where the finger left it.
     if (prefersReduced) s.velocity = 0;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    wake.current?.();
+    wakeRef.current?.();
   }, [prefersReduced]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     const dir = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
     if (!dir) return;
     e.preventDefault();
-    const s = spin.current;
+    const s = spinRef.current;
     s.rotation += dir * KEY_STEP;
     s.velocity = 0;
     s.idleTime = 0;
-    wake.current?.();
+    wakeRef.current?.();
   }, []);
 
   return (
@@ -298,7 +302,7 @@ const PreviewStage: React.FC<PreviewStageProps> = ({
             <shadowMaterial transparent opacity={0.32} />
           </mesh>
 
-          <Turntable spin={spin} wake={wake} autoRotate={autoRotate} prefersReduced={prefersReduced}>
+          <Turntable spinRef={spinRef} wakeRef={wakeRef} autoRotate={autoRotate} prefersReduced={prefersReduced}>
             <PreviewCharacter outfitKey={outfitKey} name={name} />
           </Turntable>
         </group>

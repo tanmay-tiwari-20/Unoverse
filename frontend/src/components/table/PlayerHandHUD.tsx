@@ -108,7 +108,7 @@ export const PlayerHandHUD: React.FC = () => {
   };
 
   // Render a CSS replica of an UNO card
-  const renderCard = (card: any, idx: number) => {
+  const renderCard = (card: CardItem, idx: number) => {
     // Max fan angle based on hand size (gentler on small screens so tall cards
     // don't rotate off the bottom edge).
     const maxAngle = Math.min(isMobile ? 20 : 30, cardCount * 2.5);

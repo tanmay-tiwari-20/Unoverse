@@ -17,7 +17,6 @@ import { useDialogA11y } from "../../hooks/useDialogA11y";
 import { DEFAULT_AVATAR_KEY } from "../../lib/profile/avatars";
 import { DEFAULT_OUTFIT_KEY } from "../../lib/cosmetics/outfits";
 import { AvatarPicker } from "./AvatarPicker";
-import { OutfitPicker } from "./OutfitPicker";
 import { PresetAvatar } from "./PresetAvatar";
 
 interface CreateProfileModalProps {

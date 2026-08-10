@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { PhysicalCard } from '../cards/PhysicalCard';
@@ -27,13 +27,10 @@ export const AnimatedCard: React.FC<AnimatedCardProps> = ({
 }) => {
   const meshRef = useRef<THREE.Group>(null);
   const progress = useRef(0);
+  // Each flight is keyed by its own id at the call site and unmounted the moment
+  // it completes, so one instance only ever animates a single card — no reset path
+  // is needed here.
   const [completed, setCompleted] = useState(false);
-
-  useEffect(() => {
-    // Reset if props change
-    progress.current = 0;
-    setCompleted(false);
-  }, [card.id]);
 
   useFrame((state, delta) => {
     if (completed || !meshRef.current) return;
@@ -68,7 +65,7 @@ export const AnimatedCard: React.FC<AnimatedCardProps> = ({
   return (
     <group ref={meshRef}>
       <PhysicalCard
-        color={card.color as any}
+        color={card.color}
         value={card.value}
         isFaceUp={isFaceUp}
         position={[0, 0, 0]}

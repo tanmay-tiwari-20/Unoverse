@@ -24,6 +24,42 @@ interface AvatarProps {
   config?: AvatarConfig;
 }
 
+/**
+ * Stylized premium microphone status pip, pinned to the avatar's bottom-right.
+ *
+ * Declared at module scope, not inside `Avatar`: a component defined during
+ * render is a brand-new type on every pass, so React unmounts and remounts it
+ * (dropping its state and restarting its CSS transitions) each time the parent
+ * re-renders — which, for a mic pip on a table of speaking players, is often.
+ */
+const MicIcon = ({ status }: { status: 'muted' | 'unmuted' | 'active' }) => {
+  const color = {
+    muted: '#ef4444',
+    unmuted: '#94a3b8',
+    active: '#22c55e',
+  }[status];
+
+  return (
+    <div
+      className={`absolute bottom-[-2px] right-[-2px] rounded-full p-0.5 border shadow-md flex items-center justify-center transition-all ${
+        status === 'active'
+          ? 'bg-green-950 border-green-500 animate-pulse scale-105 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
+          : status === 'muted'
+            ? 'bg-red-950 border-red-800'
+            : 'bg-slate-900 border-slate-800'
+      }`}
+      style={{ width: '16px', height: '16px', zIndex: 30 }}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5">
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" fill={status === 'active' ? color : 'none'} />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <line x1="12" x2="12" y1="19" y2="22" />
+        {status === 'muted' && <line x1="4" x2="20" y1="4" y2="20" stroke="#ef4444" strokeWidth="3" />}
+      </svg>
+    </div>
+  );
+};
+
 export const Avatar: React.FC<AvatarProps> = ({
   name,
   size = 'md',
@@ -105,37 +141,8 @@ export const Avatar: React.FC<AvatarProps> = ({
         ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.4)]'
         : 'ring-2 ring-indigo-500/80 shadow-[0_0_10px_rgba(99,102,241,0.3)]';
 
-  // Stylized Premium Microphone Icon
-  const MicIcon = ({ status }: { status: 'muted' | 'unmuted' | 'active' }) => {
-    const color = {
-      muted: '#ef4444',
-      unmuted: '#94a3b8',
-      active: '#22c55e',
-    }[status];
-    
-    return (
-      <div 
-        className={`absolute bottom-[-2px] right-[-2px] rounded-full p-0.5 border shadow-md flex items-center justify-center transition-all ${
-          status === 'active' 
-            ? 'bg-green-950 border-green-500 animate-pulse scale-105 shadow-[0_0_8px_rgba(34,197,94,0.6)]' 
-            : status === 'muted' 
-              ? 'bg-red-950 border-red-800' 
-              : 'bg-slate-900 border-slate-800'
-        }`}
-        style={{ width: '16px', height: '16px', zIndex: 30 }}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5">
-          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" fill={status === 'active' ? color : 'none'} />
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" x2="12" y1="19" y2="22" />
-          {status === 'muted' && <line x1="4" x2="20" y1="4" y2="20" stroke="#ef4444" strokeWidth="3" />}
-        </svg>
-      </div>
-    );
-  };
-
   return (
-    <div 
+    <div
       className={`relative flex flex-col items-center justify-end select-none shrink-0 ${className}`}
       style={{
         width: `${60 * scaleFactor}px`,
@@ -153,6 +160,12 @@ export const Avatar: React.FC<AvatarProps> = ({
           </div>
         ) : config?.type === 'image' && config?.imageUrl ? (
           <div className={`w-12 h-12 rounded-full overflow-hidden bg-slate-800 ${speakRing}`}>
+            {/* Plain <img>, not next/image: this URL comes from a player's own
+                profile, so its host isn't known at build time. Routing it through
+                the optimizer would need `images.remotePatterns`, and widening that
+                to arbitrary hosts turns the optimizer into an open image proxy —
+                not a trade worth making for a 48px avatar. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={config.imageUrl} alt={name} className="w-full h-full object-cover" />
           </div>
         ) : config?.type === 'video' ? (

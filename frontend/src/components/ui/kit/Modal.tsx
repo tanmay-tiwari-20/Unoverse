@@ -141,17 +141,20 @@ export const Modal: React.FC<ModalProps> = ({
 
           {/* Padding ring: keeps the panel clear of the notch/home bar and
               guarantees a gap on tiny screens, so `max-width: 100%` on the
-              panel can never produce horizontal overflow. */}
+              panel can never produce horizontal overflow. The dock case sets
+              all four sides inline (no `p-*` utilities) because it floats on
+              every edge — see `.ui-panel-dock`. Only the sheet is deliberately
+              flush, and only along its bottom edge. */}
           <div
             className={`relative flex min-h-0 w-full ${
               dock
-                ? 'h-full justify-end p-0 sm:pl-2'
+                ? 'items-stretch justify-end'
                 : sheet
                   ? 'items-end justify-center px-2 pt-2'
                   : 'items-center justify-center p-2 sm:p-4 short:p-2'
             }`}
             style={{
-              paddingTop: dock || sheet ? undefined : 'max(0.5rem, env(safe-area-inset-top))',
+              paddingTop: sheet ? undefined : 'max(0.5rem, env(safe-area-inset-top))',
               paddingBottom: sheet ? 0 : 'max(0.5rem, env(safe-area-inset-bottom))',
               paddingLeft: 'max(0.5rem, env(safe-area-inset-left))',
               paddingRight: 'max(0.5rem, env(safe-area-inset-right))',

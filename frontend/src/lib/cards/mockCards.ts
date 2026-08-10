@@ -1,4 +1,4 @@
-import { CardColor, CardValue, CardItem, createCard } from './cardEngine';
+import { CardItem, createCard } from './cardEngine';
 
 // Generates the exact 7-card sample hand requested:
 // Red 5, Blue Reverse, Yellow Skip, Wild, Green 8, Red Draw Two, Blue 1

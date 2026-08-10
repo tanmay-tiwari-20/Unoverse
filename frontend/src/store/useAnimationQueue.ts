@@ -7,7 +7,7 @@ export interface GameAnimation {
   playerId: string;
   card?: CardItem;
   // Delay processing of state until animation finishes
-  statePayload: any;
+  statePayload: unknown;
 }
 
 interface AnimationQueueState {
@@ -19,7 +19,7 @@ interface AnimationQueueState {
   clear: () => void;
 }
 
-export const useAnimationQueue = create<AnimationQueueState>((set, get) => ({
+export const useAnimationQueue = create<AnimationQueueState>((set) => ({
   activeAnimation: null,
   queue: [],
   

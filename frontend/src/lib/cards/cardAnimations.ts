@@ -1,10 +1,35 @@
 import { getSeatCoords } from '../../utils/seating';
 import { generatePhase3DemoHand } from './mockCards';
-import { CardItem, createCard } from './cardEngine';
+import { CardItem, CardColor, CardValue, createCard } from './cardEngine';
 
 interface SeatPlayer {
   seatNumber: number;
   id: string;
+}
+
+/**
+ * Card-flight animator installed on `window` by the HTML card layer.
+ * Absent until that layer mounts, hence the optional global.
+ */
+type HtmlCardAnimator = (
+  color: CardColor,
+  value: CardValue,
+  startX: string,
+  startY: string,
+  endX: string,
+  endY: string,
+  startRotation: number,
+  endRotation: number,
+  startScale: number,
+  endScale: number,
+  faceUp: boolean,
+  onComplete: () => void,
+) => void;
+
+declare global {
+  interface Window {
+    triggerHtmlCardAnimation?: HtmlCardAnimator;
+  }
 }
 
 /**
@@ -53,7 +78,7 @@ export const triggerDealerSequence = (
       const delay = throwIndex * 150; // 150ms delay between consecutive card throws
 
       setTimeout(() => {
-        const triggerHtmlCardAnimation = (window as any).triggerHtmlCardAnimation;
+        const triggerHtmlCardAnimation = window.triggerHtmlCardAnimation;
         if (!triggerHtmlCardAnimation) return;
 
         // Generate card details
@@ -65,7 +90,7 @@ export const triggerDealerSequence = (
           // Opponents receive random cards
           const colors = ['red', 'blue', 'green', 'yellow'] as const;
           const color = colors[Math.floor(Math.random() * colors.length)];
-          const value = String(Math.floor(Math.random() * 10)) as any;
+          const value = String(Math.floor(Math.random() * 10)) as CardValue;
           card = createCard(color, value);
         }
 

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Flame, Maximize2, Minimize2, Trophy, Wifi, WifiOff } from 'lucide-react';
+import { Flame, Maximize2, Minimize2, Trophy, WifiOff } from 'lucide-react';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useGameStore } from '../../store/useGameStore';
 import { PresetAvatar } from '../profile/PresetAvatar';

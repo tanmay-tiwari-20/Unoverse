@@ -49,7 +49,10 @@ class SoundManager {
 
   private initCtx() {
     if (!this.ctx && typeof window !== 'undefined') {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
       if (AudioContextClass) {
         this.ctx = new AudioContextClass();
       }
@@ -76,7 +79,7 @@ class SoundManager {
       const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
       this.buffers.set(url, audioBuffer);
       return audioBuffer;
-    } catch (e) {
+    } catch {
       // Silently fail if sounds aren't added to /public yet
       console.warn(`[SoundManager] Missing audio file: ${url}`);
       return null;
@@ -125,7 +128,7 @@ class SoundManager {
     const gainNode = this.ctx.createGain();
     
     // Default volumes for specific sounds to prevent them from being too loud
-    let baseVolume = 0.5;
+    const baseVolume = 0.5;
     const { gameVolume, masterVolume } = useSettingsStore.getState();
     const gVol = gameVolume / 100;
     const mVol = masterVolume / 100;

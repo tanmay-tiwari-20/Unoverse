@@ -483,11 +483,12 @@ select:focus-visible {
    is unlayered, so it outranks Tailwind's `@layer utilities` — a
    `rounded-r-none` utility would silently lose to `.ui-panel`. */
 .ui-panel-dock {
-  height: 100%;
+  /* Fills the padding ring rather than the viewport, so the gap the ring
+     reserves on every side survives. `height: 100%` against a `100dvh` parent
+     would eat it back and put the drawer flush against the top and bottom. */
+  height: auto;
+  align-self: stretch;
   max-height: 100%;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  border-right-width: 0;
 }
 .ui-panel-sheet {
   border-bottom-left-radius: 0;

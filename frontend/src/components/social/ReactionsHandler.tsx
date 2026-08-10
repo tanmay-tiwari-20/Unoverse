@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Smile, Glasses, X } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
+import type { Player } from '../../types/game';
 import { getSeatCoords } from '../../utils/seating';
 import { useSocket } from '../../hooks/useSocket';
 
@@ -127,7 +128,7 @@ export const ReactionsHandler: React.FC = () => {
 
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) {
+    } catch {
       // ignore
     }
 
@@ -165,7 +166,7 @@ export const ReactionsHandler: React.FC = () => {
     const handlePointerUp = (upEvent: PointerEvent) => {
       try {
         e.currentTarget.releasePointerCapture(upEvent.pointerId);
-      } catch (err) {
+      } catch {
         // ignore
       }
 
@@ -408,7 +409,7 @@ interface ReactionBubbleProps {
   localSeatNumber: number;
   numPlayers: number;
   localIndex: number;
-  playersList: any[];
+  playersList: Player[];
   roomStatus: string;
   onComplete: () => void;
 }

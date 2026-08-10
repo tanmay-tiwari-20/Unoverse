@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { getHandRingRadii } from '../../utils/tableLayout';
@@ -54,13 +54,16 @@ export const CardFlightAnimations: React.FC = () => {
   const prevHandSizesRef = useRef<Record<number, number>>({});
   const initializedRef = useRef(false);
 
-  const playersList = room?.players || [];
+  // Memoised/callback-wrapped so the detection effect can list them honestly as
+  // dependencies without re-arming on every render.
+  const playersList = useMemo(() => room?.players || [], [room?.players]);
   const numPlayers = getLayoutSeatCount(room);
   const localPlayerIndex = playersList.findIndex(p => p.id === player?.id);
   const safeLocalIndex = localPlayerIndex >= 0 ? localPlayerIndex : 0;
+  const localPlayerId = player?.id;
 
   // Calculate 3D world position for a player's hand area
-  const getPlayerWorldPos = (playerIndex: number): [number, number, number] => {
+  const getPlayerWorldPos = useCallback((playerIndex: number): [number, number, number] => {
     const relativeIndex = (playerIndex - safeLocalIndex + numPlayers) % numPlayers;
     const baseAngle = (Math.PI * 2 / numPlayers) * relativeIndex;
     // Ring radii scale with the active player count, matching WebGLCards so card
@@ -71,7 +74,7 @@ export const CardFlightAnimations: React.FC = () => {
       1.1,
       Math.cos(baseAngle) * rZ,
     ];
-  };
+  }, [safeLocalIndex, numPlayers]);
 
   useEffect(() => {
     if (gameStatus !== 'playing' && gameStatus !== 'awaiting_color_selection') {
@@ -146,7 +149,7 @@ export const CardFlightAnimations: React.FC = () => {
         // Actually, draw_two/draw_four cause BOTH pile change and hand growth simultaneously
         // So let's always animate draw when hand grows
         const destPos = getPlayerWorldPos(idx);
-        const isLocal = p.id === player?.id;
+        const isLocal = p.id === localPlayerId;
 
         // Animate up to 4 cards max to avoid spam
         const animCount = Math.min(cardsGained, 4);
@@ -178,7 +181,7 @@ export const CardFlightAnimations: React.FC = () => {
     if (newFlying.length > 0) {
       setFlyingCards(prev => [...prev, ...newFlying]);
     }
-  }, [discardPile, discardCount, playerCards, gameStatus]);
+  }, [discardPile, discardCount, playerCards, gameStatus, playersList, getPlayerWorldPos, localPlayerId]);
 
   const removeFlyingCard = (id: string) => {
     setFlyingCards(prev => prev.filter(f => f.id !== id));

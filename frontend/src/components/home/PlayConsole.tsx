@@ -1,13 +1,11 @@
 "use client";
 import React, { useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, KeyRound, Pencil, Plus, Zap } from "lucide-react";
+import { AlertCircle, KeyRound, Plus, Zap } from "lucide-react";
 
 export type PlayMode = "join" | "create";
 
 export interface PlayConsoleProps {
-  displayName: string;
-  onNameChange: (next: string) => void;
   roomCode: string;
   onRoomCodeChange: (next: string) => void;
   mode: PlayMode;
@@ -17,17 +15,11 @@ export interface PlayConsoleProps {
   onQuickPlay: () => void;
   onJoin: () => void;
   onCreate: () => void;
-  /** True once the profile store has read localStorage and found a profile. */
-  hasProfile: boolean;
 }
 
-/** The server caps display names at 12 characters. */
-const MAX_NAME = 12;
 const CODE_LENGTH = 6;
 
 export const PlayConsole: React.FC<PlayConsoleProps> = ({
-  displayName,
-  onNameChange,
   roomCode,
   onRoomCodeChange,
   mode,
@@ -37,9 +29,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
   onQuickPlay,
   onJoin,
   onCreate,
-  hasProfile,
 }) => {
-  const nameId = useId();
   const codeId = useId();
 
   // Enter anywhere in the console runs whatever the current mode's action is —
@@ -58,32 +48,6 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
       />
 
       <div className="relative flex flex-col gap-3 p-4 short:gap-2 short:p-3 sm:p-5">
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor={nameId}
-            className="font-rounded flex items-center gap-1.5 px-0.5 text-[10px] font-bold tracking-[0.14em] text-white/45"
-          >
-            {hasProfile ? <Pencil size={10} aria-hidden="true" /> : null}
-            {hasProfile ? "Playing as" : "Your name"}
-          </label>
-          <input
-            id={nameId}
-            type="text"
-            maxLength={MAX_NAME}
-            value={displayName}
-            onChange={(e) => onNameChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submitCurrentMode()}
-            placeholder="Your Name"
-            aria-label="Your display name"
-            disabled={loading}
-            autoComplete="off"
-            data-lpignore="true"
-            data-form-type="other"
-            className="ui-input px-3 py-2.5 text-center text-[15px] tracking-wide short:py-2 short:text-[13px]"
-          />
-        </div>
-
-        {/* ── The one loud action ───────────────────────────────────────── */}
         <button
           type="button"
           onClick={onQuickPlay}
@@ -103,7 +67,6 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
 
         <span className="ui-divider" aria-hidden="true" />
 
-        {/* ── Secondary: join a code, or host your own ──────────────────── */}
         <div role="radiogroup" aria-label="How to play" className="ui-segment">
           <button
             type="button"
@@ -127,9 +90,6 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
           </button>
         </div>
 
-        {/* Only the selected mode's controls are mounted, so the console never
-            shows a field that does nothing. Height is animated rather than the
-            whole block so the CTA above it never jumps. */}
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={mode}
