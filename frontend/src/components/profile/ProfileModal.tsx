@@ -232,13 +232,6 @@ export function ProfileModal() {
                   className="relative h-full w-full cursor-grab active:cursor-grabbing"
                 />
 
-                {/* Streak badge */}
-                {(stats?.currentStreak ?? 0) > 0 && (
-                  <span className="home-chip font-arcade pointer-events-none absolute right-1 top-1 text-[9px] sm:text-[10px] tabular-nums text-orange-300 bg-black/80 backdrop-blur-md border-orange-500/40 px-1 py-0.5">
-                    <Flame size={9} className="shrink-0 text-orange-400 animate-pulse" aria-hidden="true" />
-                    {stats?.currentStreak}
-                  </span>
-                )}
               </div>
 
               {/* Identity & Win Rate Info */}

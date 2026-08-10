@@ -1,17 +1,4 @@
 'use client';
-
-/**
- * ClassicArena — the original dim-tavern world, extracted verbatim from
- * `RoomEnvironment`.
- *
- * This is the default arena, the landing-page world, and the Suspense fallback
- * every other arena falls back to while its lazy chunk loads. Nothing here
- * changed from the pre-arena scene beyond being lifted into a component that
- * receives `ArenaProps`, so it is a guaranteed zero-regression baseline: floor,
- * felt table, hanging lamp, wall props, fog and lights are byte-for-byte what
- * they were.
- */
-
 import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -198,6 +185,108 @@ function GameTable({ groupScale = [1, 1, 1] }: { groupScale?: [number, number, n
   );
 }
 
+function LampBulb() {
+  const glassGeo = useMemo(() => {
+    const points = [
+      new THREE.Vector2(0.000, 0.000),
+      new THREE.Vector2(0.026, 0.004),
+      new THREE.Vector2(0.048, 0.016),
+      new THREE.Vector2(0.064, 0.034),
+      new THREE.Vector2(0.072, 0.058),
+      new THREE.Vector2(0.074, 0.082),
+      new THREE.Vector2(0.070, 0.104),
+      new THREE.Vector2(0.058, 0.124),
+      new THREE.Vector2(0.042, 0.140),
+      new THREE.Vector2(0.030, 0.152),
+      new THREE.Vector2(0.026, 0.166),
+      new THREE.Vector2(0.026, 0.176),
+    ];
+    return new THREE.LatheGeometry(points, 24);
+  }, []);
+
+  const filamentGeo = useMemo(() => {
+    const pts: THREE.Vector3[] = [];
+    const turns = 6;
+    const steps = 72;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const a = t * Math.PI * 2 * turns;
+      pts.push(new THREE.Vector3(Math.cos(a) * 0.017, -0.042 + t * 0.084, Math.sin(a) * 0.017));
+    }
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 72, 0.0016, 5, false);
+  }, []);
+
+  return (
+    <group position={[0, 1.47, 0]}>
+      <mesh geometry={glassGeo}>
+        <meshPhysicalMaterial
+          color="#fff4dc"
+          emissive="#ffb457"
+          emissiveIntensity={0.3}
+          roughness={0.16}
+          metalness={0}
+          transparent
+          opacity={0.3}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      {/* Filament + its two support wires, hung from the stem inside the glass. */}
+      <group position={[0, 0.085, 0]}>
+        <mesh geometry={filamentGeo}>
+          <meshBasicMaterial color="#ffcb7a" />
+        </mesh>
+        {[-0.017, 0.017].map((x) => (
+          <mesh key={`wire${x}`} position={[x, 0.02, 0]}>
+            <cylinderGeometry args={[0.0012, 0.0012, 0.08, 4]} />
+            <meshStandardMaterial color="#5a4a30" roughness={0.5} metalness={0.7} />
+          </mesh>
+        ))}
+        {/* Glass stem the wires rise from. */}
+        <mesh position={[0, 0.062, 0]}>
+          <cylinderGeometry args={[0.008, 0.012, 0.05, 8]} />
+          <meshStandardMaterial color="#e8dcc4" roughness={0.4} transparent opacity={0.55} />
+        </mesh>
+      </group>
+
+      {/* Warm halo so the lit glass glows instead of ending at its silhouette. */}
+      <mesh position={[0, 0.086, 0]}>
+        <sphereGeometry args={[0.105, 16, 12]} />
+        <meshBasicMaterial
+          color="#ffb347"
+          transparent
+          opacity={0.05}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Brass E27 screw base with three thread ridges. */}
+      <mesh position={[0, 0.206, 0]}>
+        <cylinderGeometry args={[0.026, 0.026, 0.06, 16]} />
+        <meshStandardMaterial color="#a8874a" roughness={0.38} metalness={0.9} />
+      </mesh>
+      {[0.19, 0.208, 0.226].map((y) => (
+        <mesh key={`thread${y}`} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.0265, 0.0035, 6, 20]} />
+          <meshStandardMaterial color="#c09a55" roughness={0.32} metalness={0.95} />
+        </mesh>
+      ))}
+
+      {/* Bakelite socket, meeting the shade neck above. */}
+      <mesh position={[0, 0.265, 0]}>
+        <cylinderGeometry args={[0.032, 0.03, 0.06, 16]} />
+        <meshStandardMaterial color="#191411" roughness={0.55} metalness={0.15} />
+      </mesh>
+      <mesh position={[0, 0.298, 0]}>
+        <cylinderGeometry args={[0.028, 0.032, 0.02, 16]} />
+        <meshStandardMaterial color="#8f7440" roughness={0.4} metalness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
 function HangingLamp({
   isLandingPage,
   shadows,
@@ -263,14 +352,17 @@ function HangingLamp({
         <meshStandardMaterial color="#0a0a0a" roughness={0.8} />
       </mesh>
 
-      <mesh position={[0, 2.75, 0]}>
-        <cylinderGeometry args={[0.006, 0.006, 2.5, 8]} />
+      {/* Cord: ceiling mount (y=4.0) down into the bulb socket (top y≈1.78). */}
+      <mesh position={[0, 2.885, 0]}>
+        <cylinderGeometry args={[0.006, 0.006, 2.23, 8]} />
         <meshStandardMaterial color="#111111" roughness={0.7} metalness={0.2} />
       </mesh>
 
       <mesh geometry={shadeGeo} position={[0, 1.5, 0]} castShadow={shadows}>
         <meshStandardMaterial color="#1a1a1a" roughness={0.4} metalness={0.7} side={THREE.DoubleSide} />
       </mesh>
+
+      <LampBulb />
 
       <mesh position={[0, 1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.27, 0.29, 32]} />
@@ -583,12 +675,6 @@ function RoomProps() {
   );
 }
 
-/**
- * A sturdy wooden tavern chair with a cushioned seat: four turned legs, a
- * slatted back and a leather-look cushion. Built at the origin facing the table
- * (+Z toward centre) and placed by SeatRing. Purely decorative — matches the
- * dark stained wood of the table so it reads as part of the same set.
- */
 function TavernChair() {
   const woodDark = '#160a03';
   const woodMid = '#2a160a';
@@ -641,23 +727,6 @@ function TavernChair() {
   );
 }
 
-// ---------------------------------------------------------------------------
-//  World / Table memo split (perf)
-// ---------------------------------------------------------------------------
-//
-//  The arena is split into two `React.memo` boundaries so a player-count change
-//  (the bot-add case) reconciles ONLY the small count-dependent subtree:
-//
-//   - `ClassicWorld` — fog, lights, floor, lamp, room props, hearth, sconces.
-//     It is NOT given `numPlayers`, so adding a bot never reconciles the heavy
-//     world or recompiles its shaders. Its props are the module-stable `quality`
-//     object + the `isLandingPage` flag, so it bails on every non-quality swap.
-//   - `ClassicTable` — the felt table slab + the tavern-chair seat ring. This is
-//     the only subtree that reconciles on a count change (radii + chair count).
-//
-//  Play-surface geometry (table ellipse, felt height, seat radii) is byte-for-
-//  byte what it was — only the component boundary changed.
-
 const ClassicWorld = React.memo(function ClassicWorld({
   quality,
   isLandingPage,
@@ -695,8 +764,6 @@ const ClassicWorld = React.memo(function ClassicWorld({
       />
       <RoomProps />
 
-      {/* Tavern warmth: a flickering stone hearth against the back wall and a
-          pair of candle sconces on the side walls. Purely additive atmosphere. */}
       <Fireplace tier={tier} />
       <WallSconce position={[-4.42, 1.7, -1.4]} rotation={[0, Math.PI / 2, 0]} />
       <WallSconce position={[-4.42, 1.7, 1.4]} rotation={[0, Math.PI / 2, 0]} />
@@ -720,9 +787,6 @@ const ClassicTable = React.memo(function ClassicTable({
   return (
     <>
       <GameTable groupScale={tableGroupScale} />
-
-      {/* Wooden tavern chairs at every remote seat. Placed with the shared
-          SeatRing so seat math matches the players rendered by WebGLSeats. */}
       <SeatRing numPlayers={numPlayers} localIndex={localIndex} rX={seat.rX + 0.15} rZ={seat.rZ + 0.15}>
         {() => <TavernChair />}
       </SeatRing>
@@ -730,12 +794,6 @@ const ClassicTable = React.memo(function ClassicTable({
   );
 });
 
-/**
- * The classic tavern world. Owns its own fog + lights (moved here from the old
- * `Scene`) so it is a fully self-contained arena like every other. Composed from
- * a memoized world subtree (count-independent) and a memoized table subtree (the
- * only part that reconciles when the player count changes).
- */
 export default function ClassicArena({ numPlayers, localIndex, quality, tableGroupScale, isLandingPage }: ArenaProps) {
   return (
     <>
