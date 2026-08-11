@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# crazygames html5 package (build artefact of `npm run build:crazygames`)
+/crazygames-build/
+
 # production
 /build
 

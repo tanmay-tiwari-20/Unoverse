@@ -72,6 +72,18 @@ class ProfileManager {
    */
   private legacyIds: Map<string, string> = new Map();
 
+  /**
+   * `"<provider>:<externalId>"` -> Player ID. The reverse of `Profile.externalIds`,
+   * rebuilt from the profiles themselves on every hydrate so it can never drift
+   * from what is actually persisted.
+   *
+   * This is what makes a returning platform player the SAME player: without it a
+   * CrazyGames account would mint a fresh profile (and fresh stats) on every
+   * session. Like `legacyIds` it is an alias, not an identity — everything
+   * downstream still deals only in Player IDs.
+   */
+  private externalIds: Map<string, string> = new Map();
+
   private store: ProfileStore = new MemoryProfileStore();
   private dirty: Set<string> = new Set();
   private removed: Set<string> = new Set();
@@ -95,6 +107,7 @@ class ProfileManager {
     this.tags.clear();
     this.ids.clear();
     this.legacyIds.clear();
+    this.externalIds.clear();
     this.dirty.clear();
     this.removed.clear();
     if (store) this.store = store;
@@ -163,6 +176,7 @@ class ProfileManager {
       this.profiles.set(profile.id, profile);
       if (profile.tag) this.tags.add(profile.tag.toUpperCase());
       if (profile.legacyId) this.legacyIds.set(profile.legacyId, profile.id);
+      this.indexExternalIds(profile);
 
       // A snapshot that changed (backfilled field, or a migrated id) is
       // re-persisted so the work is durable rather than redone every boot.
@@ -294,6 +308,8 @@ class ProfileManager {
       outfit: input.outfit ? String(input.outfit).slice(0, 64) : null,
       isGuest: true,
       providers: ['guest'],
+      // Populated only by resolveExternalIdentity(), from a verified signature.
+      externalIds: {},
       createdAt: now,
       updatedAt: now,
       lastSeenAt: now,
@@ -339,6 +355,67 @@ class ProfileManager {
   public getPublicProfile(id: string): PublicProfile | undefined {
     const p = this.resolve(id);
     return p ? publicProfile(p) : undefined;
+  }
+
+  // ---- External identities (platform auth) ---------------------------------
+
+  private static externalKey(provider: string, externalId: string): string {
+    return `${provider}:${externalId}`;
+  }
+
+  /** Add every link a profile carries to the reverse index. */
+  private indexExternalIds(profile: Profile): void {
+    for (const [provider, externalId] of Object.entries(profile.externalIds)) {
+      this.externalIds.set(ProfileManager.externalKey(provider, externalId), profile.id);
+    }
+  }
+
+  /**
+   * Find the profile a VERIFIED external identity already owns, or create one and
+   * link it. This is the single entry point for platform sign-in.
+   *
+   * `externalId` must come from a server-verified signature — see
+   * `auth/crazyGamesAuth.ts`. Nothing here validates it, because by the time it
+   * arrives that decision has already been made; passing a client-supplied id
+   * would hand out someone else's profile.
+   *
+   * The returned profile is the SAME player model the guest path produces, so the
+   * caller hands back the usual `{ profile, secret }` pair and every downstream
+   * system — rooms, stats, friends, sockets — is untouched.
+   *
+   * Note on avatars: `avatarUrl` holds a preset-avatar KEY, not a URL, so a
+   * platform profile picture is deliberately NOT written into it — that would
+   * break avatar rendering for the linked player. New platform profiles start on
+   * the procedural fallback and the player can pick a preset as usual.
+   */
+  public resolveExternalIdentity(input: {
+    provider: string;
+    externalId: string;
+    displayName: string;
+  }): { profile: Profile; created: boolean } {
+    const provider = input.provider.slice(0, 32);
+    const externalId = input.externalId.slice(0, 128);
+    const key = ProfileManager.externalKey(provider, externalId);
+
+    const existingId = this.externalIds.get(key);
+    const existing = existingId ? this.profiles.get(existingId) : undefined;
+    if (existing) {
+      existing.lastSeenAt = Date.now();
+      this.markDirty(existing.id);
+      return { profile: existing, created: false };
+    }
+    // A stale index entry (profile since deleted) must not block a fresh link.
+    if (existingId) this.externalIds.delete(key);
+
+    const profile = this.createProfile({ displayName: input.displayName });
+    profile.externalIds[provider] = externalId;
+    profile.providers = [provider];
+    profile.isGuest = false;
+    profile.updatedAt = Date.now();
+    this.externalIds.set(key, profile.id);
+    this.markDirty(profile.id);
+    logger.info(`[PROFILE_LINKED] ${provider} identity -> #${profile.id} (new profile)`);
+    return { profile, created: true };
   }
 
   /** Verify a caller owns a profile by matching its secret (constant-time). */

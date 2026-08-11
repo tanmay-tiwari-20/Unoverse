@@ -4,6 +4,8 @@
  * Designed for a premium, immersive tabletop experience.
  */
 import { useSettingsStore } from '../store/useSettingsStore';
+import { isPlatformAudioMuted } from '../lib/platform/platformAdaptersState';
+import { assetPath } from '../lib/assetPath';
 
 export type SoundEvent = 
   | 'card_play'
@@ -71,7 +73,10 @@ class SoundManager {
 
     this.loadQueue.add(url);
     try {
-      const response = await fetch(url);
+      // Resolved here, not in EVENT_MAP: the cache above stays keyed by the
+      // logical `/sounds/...` path while the request itself is aimed at wherever
+      // this build is actually served from.
+      const response = await fetch(assetPath(url));
       if (!response.ok) {
         throw new Error(`Failed to load ${url}: ${response.status}`);
       }
@@ -131,8 +136,12 @@ class SoundManager {
     const baseVolume = 0.5;
     const { gameVolume, masterVolume } = useSettingsStore.getState();
     const gVol = gameVolume / 100;
-    const mVol = masterVolume / 100;
-    
+    // The platform gate is combined HERE, at the read, rather than by writing
+    // masterVolume = 0 into the settings store. Writing it would destroy the
+    // player's own saved volume and restore the wrong value on unmute — the
+    // platform's mute is the platform's state, and it stays that way.
+    const mVol = isPlatformAudioMuted() ? 0 : masterVolume / 100;
+
     gainNode.gain.value = baseVolume * volumeScale * gVol * mVol;
     
     source.connect(gainNode);

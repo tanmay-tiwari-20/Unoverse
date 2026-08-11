@@ -10,8 +10,8 @@ import { logger } from '../utils/logger';
 // the gameplay ones, and `sayHello` re-binds the profile after every (re)connect.
 // Both are no-ops when no profile exists, so profile-less play is untouched.
 import { attachSocialListeners, sayHello } from '../lib/social/socialClient';
-
-const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+import { BACKEND_URL } from '../lib/config';
+import { getPlatform } from '../lib/platform';
 
 // --- Persistent profile identity -------------------------------------------
 // The durable player identity (profileId + private secret) lives in
@@ -292,6 +292,12 @@ function setupSocketListeners(socketInstance: Socket) {
 
   socketInstance.on('chat-message', (message) => {
     logger.debug('[Socket] Chat message:', message?.name);
+    // A platform-level `disableChat` means the player must not SEE chat, not
+    // merely be unable to send it — so incoming messages are dropped here
+    // rather than only hiding the panel. Server-side house rules already gate
+    // sending; this is the receive half, and it is client-side because the
+    // preference is the player's own and unknown to the server.
+    if (getPlatform().getSettings().disableChat) return;
     const store = useGameStore.getState();
     if (message?.senderId !== store.player?.id && !store.isChatOpen) {
       soundManager.play('reaction', 0.5);

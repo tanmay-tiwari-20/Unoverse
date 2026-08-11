@@ -35,12 +35,17 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import * as THREE from 'three';
 import { ThemedArenaId } from '../../../../lib/arenas/types';
 import { isThemedArena } from '../../../../lib/arenas/registry';
+import { assetPath } from '../../../../lib/assetPath';
 
 /**
  * Canonical hero-asset slots. Paths are relative to `public/` (served at the web
  * root). A file is entirely optional — see the module doc. Keeping the registry
  * here means arenas reference a symbol, not a magic string, and the set of
  * expected assets is discoverable in one place.
+ *
+ * These stay in their canonical absolute form; `assetPath` re-points them at the
+ * point of use, because the CrazyGames package is served from a subdirectory
+ * whose location is only known at runtime.
  */
 export const MODEL_PATHS = {
   spaceStation: '/models/space/station.glb',
@@ -297,7 +302,7 @@ export function ArenaModel({
   castShadow?: boolean;
   receiveShadow?: boolean;
 }) {
-  const url = MODEL_PATHS[model];
+  const url = assetPath(MODEL_PATHS[model]);
 
   const wrapped = (
     <group position={position} rotation={rotation} scale={scale}>
@@ -330,7 +335,7 @@ export function ArenaModel({
  * still falls back. Never awaited; never blocks.
  */
 export function preloadArenaModel(model: ModelKey) {
-  const url = MODEL_PATHS[model];
+  const url = assetPath(MODEL_PATHS[model]);
   try {
     useGLTF.preload(url, USE_DRACO, USE_MESHOPT);
   } catch (err) {

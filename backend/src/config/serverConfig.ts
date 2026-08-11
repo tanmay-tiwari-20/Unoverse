@@ -16,6 +16,13 @@ const num = (raw: string | undefined, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+/** Read a string env var, falling back when unset / blank. Trimmed, because a
+ *  trailing space in a dashboard-entered URL is a real and annoying failure. */
+const str = (raw: string | undefined, fallback: string): string => {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  return raw.trim();
+};
+
 // ---------------------------------------------------------------------------
 // Socket rate limiting (token bucket, per-socket, per-event).
 //   capacity     = burst size (tokens available before throttling kicks in)
@@ -240,6 +247,42 @@ export const SOCIAL_CONFIG: SocialConfig = {
   maxOutgoingInvites: num(process.env.SOCIAL_MAX_OUTGOING_INVITES, 10),
   awayAfterMs: num(process.env.SOCIAL_AWAY_AFTER_MS, 5 * 60_000),
   awaySweepMs: num(process.env.SOCIAL_AWAY_SWEEP_MS, 60_000),
+};
+
+// ---------------------------------------------------------------------------
+// CrazyGames platform authentication (Backend B only).
+// ---------------------------------------------------------------------------
+
+export interface CrazyGamesConfig {
+  /**
+   * Whether `POST /api/auth/crazygames` is mounted at all.
+   *
+   * Defaults to FALSE so the self-hosted deployment (Backend A) never exposes a
+   * platform auth surface it has no use for. Backend B opts in explicitly with
+   * `CRAZYGAMES_AUTH_ENABLED=true`.
+   */
+  enabled: boolean;
+  /** Where the RS256 public key used to verify user tokens is published. */
+  publicKeyUrl: string;
+  /**
+   * Optional expected `gameId` claim. When set, a token minted for a DIFFERENT
+   * CrazyGames game is rejected — without it, any valid CrazyGames token from any
+   * game on the platform would authenticate here. Left unset until the real game
+   * id is known from the portal; set it before Full Launch.
+   */
+  gameId: string | null;
+  /** How long a fetched public key is reused before being re-fetched. */
+  publicKeyTtlMs: number;
+  /** Bound on the token accepted by the endpoint, before any parsing. */
+  maxTokenBytes: number;
+}
+
+export const CRAZYGAMES_CONFIG: CrazyGamesConfig = {
+  enabled: process.env.CRAZYGAMES_AUTH_ENABLED === 'true',
+  publicKeyUrl: str(process.env.CRAZYGAMES_PUBLIC_KEY_URL, 'https://sdk.crazygames.com/publicKey.json'),
+  gameId: str(process.env.CRAZYGAMES_GAME_ID, '') || null,
+  publicKeyTtlMs: num(process.env.CRAZYGAMES_PUBLIC_KEY_TTL_MS, 60 * 60_000),
+  maxTokenBytes: num(process.env.CRAZYGAMES_MAX_TOKEN_BYTES, 8_192),
 };
 
 // ---------------------------------------------------------------------------

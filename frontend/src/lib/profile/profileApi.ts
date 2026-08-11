@@ -9,8 +9,7 @@
  * allows (rename / change avatar / reset). Stat values are never sent.
  */
 import type { PublicProfile } from '../../types/profile';
-
-const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001').replace(/\/$/, '');
+import { BACKEND_URL } from '../config';
 
 /** Shape returned by POST /api/profiles — the ONLY time the secret is issued. */
 export interface CreatedProfile {
@@ -38,6 +37,30 @@ export async function createProfile(input: { displayName: string; avatar?: strin
     body: JSON.stringify({ displayName: input.displayName, avatar: input.avatar ?? null, outfit: input.outfit ?? null }),
   });
   if (!res.ok) return parseError(res, 'Failed to create profile');
+  return res.json();
+}
+
+/**
+ * Exchange a CrazyGames user token for the usual `{ profile, secret }` pair.
+ *
+ * The token is the ONLY thing sent — no user id, no username. Identity is decided
+ * by the signature check on the server, so anything the client added alongside it
+ * would either be ignored or be a way to claim someone else's account.
+ *
+ * The token itself is never stored: it is passed straight through here and then
+ * dropped. Callers re-request one from the SDK whenever they need to authenticate.
+ *
+ * Mounted only on the CrazyGames deployment, so a 404 here is a configuration
+ * answer ("this backend has no platform auth"), not an error worth surfacing —
+ * the caller falls back to the normal guest path.
+ */
+export async function authenticateCrazyGames(token: string): Promise<CreatedProfile> {
+  const res = await fetch(`${BACKEND_URL}/api/auth/crazygames`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) return parseError(res, 'CrazyGames authentication failed');
   return res.json();
 }
 

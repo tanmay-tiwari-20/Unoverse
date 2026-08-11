@@ -1,5 +1,16 @@
 import { MetadataRoute } from 'next';
 
+/**
+ * Next treats `/manifest.webmanifest` as a possibly-dynamic route handler even
+ * though this one returns a constant, and `output: 'export'` refuses to build a
+ * dynamic handler. Declaring it static is what the web build already does with it
+ * (it prerenders as `○ /manifest.webmanifest`), so this changes no web output —
+ * it only lets the CrazyGames export get far enough to emit the file, which
+ * `scripts/build-crazygames.mjs` then drops from the package along with its
+ * `<link rel="manifest">`.
+ */
+export const dynamic = 'force-static';
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Unoverse',

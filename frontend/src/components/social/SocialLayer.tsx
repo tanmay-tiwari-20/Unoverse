@@ -27,6 +27,7 @@ import { useRouter } from 'next/navigation';
 import { useGameStore } from '../../store/useGameStore';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSocialStore } from '../../store/useSocialStore';
+import { lobbyHref } from '../../lib/platform/routes';
 import { FriendsPanel } from './FriendsPanel';
 import { PlayerProfileModal } from './PlayerProfileModal';
 import { InviteToasts } from './InviteToasts';
@@ -51,7 +52,7 @@ export const SocialLayer: React.FC = () => {
     setPanelOpen(false);
     openProfile(null);
     if (!name) return;
-    router.push(`/lobby/${pendingJoin.roomCode}?name=${encodeURIComponent(name)}`);
+    router.push(lobbyHref(pendingJoin.roomCode, name));
   }, [pendingJoin, router, setPendingJoin, setPanelOpen, openProfile]);
 
   // A social panel left open across a disconnect would show a stale graph, so

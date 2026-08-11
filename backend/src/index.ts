@@ -40,7 +40,9 @@ import {
   ROOM_SWEEP_CONFIG,
   TURN_TIMER_RETRY_MS,
   DISCARD_VISIBLE_COUNT,
+  CRAZYGAMES_CONFIG,
 } from './config/serverConfig';
+import { verifyCrazyGamesToken } from './auth/crazyGamesAuth';
 import type { ZodType } from 'zod';
 import {
   createRoomSchema,
@@ -624,6 +626,50 @@ app.post('/api/rooms/join', (req, res) => {
     maxSpectators,
   });
 });
+
+// --- Platform authentication (CrazyGames) ---
+// Exchange a CrazyGames user token for the SAME `{ profile, secret }` pair the
+// guest path issues, so nothing downstream — rooms, stats, friends, sockets —
+// learns that a player signed in through a platform.
+//
+// Mounted only when CRAZYGAMES_AUTH_ENABLED=true (Backend B). The self-hosted
+// deployment does not expose this route at all.
+//
+// The request body carries the TOKEN AND NOTHING ELSE. A userId/username sent
+// alongside it is deliberately ignored: identity comes from the verified
+// signature, never from the browser. The token is verified, used once, and
+// dropped — it is never persisted, and the client re-calls getUserToken() next
+// time it needs to authenticate.
+if (CRAZYGAMES_CONFIG.enabled) {
+  app.post('/api/auth/crazygames', profileWriteLimiter, async (req, res) => {
+    try {
+      const result = await verifyCrazyGamesToken(req.body?.token);
+      if (!result.ok) {
+        // 503 for "we could not reach the key server", 401 for "this token is not
+        // valid" — the client retries the former and falls back to guest on the
+        // latter. The specific reason stays in the server log.
+        const status = result.reason === 'key_unavailable' ? 503 : 401;
+        res.status(status).json({ error: 'CrazyGames authentication failed' });
+        return;
+      }
+
+      const { profile, created } = profileManager.resolveExternalIdentity({
+        provider: 'crazygames',
+        externalId: result.identity.userId,
+        displayName: result.identity.username,
+      });
+
+      res.status(created ? 201 : 200).json({
+        profile: profileManager.getPublicProfile(profile.id),
+        secret: profile.secret,
+      });
+    } catch (error: any) {
+      logger.error('[REST] Error authenticating CrazyGames user:', error);
+      res.status(500).json({ error: 'CrazyGames authentication failed' });
+    }
+  });
+  logger.info('[CG_AUTH] CrazyGames authentication endpoint enabled.');
+}
 
 // --- Player Profile APIs ---
 // Server-authoritative identity + stats. Clients may CREATE a profile and EDIT

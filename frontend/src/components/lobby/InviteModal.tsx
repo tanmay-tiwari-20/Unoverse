@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Check, Copy, Link2, Share2, Ticket, Users } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
+import { usePlatformInviteLink } from '../../hooks/usePlatformInviteLink';
 import { Button, IconButton, Modal, ModalBody, ModalFooter, ModalHeader, SectionLabel } from '../ui/kit';
 
 export interface InviteModalProps {
@@ -32,15 +33,12 @@ export const InviteModal: React.FC<InviteModalProps> = ({ open, onClose, roomId 
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const inviteLink = () =>
-    `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
-
-  // Same value, but safe to render: the panel only mounts once `open` is true,
-  // which is never the case during SSR, so this cannot desync on hydration.
-  const shownLink =
-    typeof window === 'undefined'
-      ? ''
-      : `${window.location.origin}/?room=${encodeURIComponent(roomId.toUpperCase())}`;
+  // The link to hand out. Identical to the old `?room=` deep link on web; on
+  // CrazyGames it resolves to a platform invite so the recipient stays inside the
+  // portal. One value feeds copy, share and the on-screen text, so what the
+  // player reads is always what they send.
+  const shownLink = usePlatformInviteLink(roomId, open);
+  const inviteLink = () => shownLink;
 
   const handleCopyCodeOnly = () => {
     if (!roomId) return;

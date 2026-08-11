@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@platform-impl": ["./src/lib/platform/platformImpl.crazygames.ts"],
+      "@platform-head": ["./src/lib/platform/platformHead.crazygames.tsx"]
     }
   },
   "include": [

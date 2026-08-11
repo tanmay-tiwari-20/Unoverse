@@ -324,8 +324,10 @@ export function sanitizeDisplayName(raw: unknown): string {
  * exactly (`avatarUrl` holds a preset-avatar KEY, or null); additive fields
  * (`secret`, `totalPlayTimeMs`) are appended.
  *
- * Reserved-but-unpopulated fields are kept as future-proofing hooks:
- *   - `isGuest` / `providers` / `tokenVersion` — auth & cloud-save
+ * `isGuest` / `providers` / `externalIds` are the auth hooks, and are populated
+ * once a platform identity is linked (CrazyGames today — see `crazyGamesAuth.ts`).
+ * Still reserved-but-unpopulated:
+ *   - `tokenVersion` — issued-secret invalidation
  *   - `rankedStats` — Ranked mode / Seasons
  * Room in the type for `xp`/`level`/`achievements`/`badges` is documented here
  * but intentionally NOT added until those features exist. `social` + `privacy`
@@ -358,7 +360,20 @@ export interface Profile {
   avatarUrl: string | null;   // preset avatar key, or null for procedural fallback
   outfit: string | null;      // cosmetic outfit (skin) key, or null for default — purely visual
   isGuest: boolean;
-  providers: string[];        // auth providers (["guest"] for now)
+  providers: string[];        // auth providers (["guest"], plus "crazygames" once linked)
+  /**
+   * Verified external identities, keyed by provider — e.g.
+   * `{ crazygames: "<CrazyGames userId>" }`.
+   *
+   * PRIVATE, and stripped from `PublicProfile`: a platform user id is an identity
+   * on someone else's system, not display data, so it never crosses the wire.
+   *
+   * Only ever written from a SERVER-VERIFIED signature (see `crazyGamesAuth.ts`)
+   * — never from a client-supplied id. `ProfileManager` maintains a reverse index
+   * over this map so a returning platform player resolves to their existing
+   * Player ID instead of getting a fresh profile every session.
+   */
+  externalIds: Record<string, string>;
   createdAt: number;
   updatedAt: number;
   lastSeenAt: number;
@@ -388,7 +403,7 @@ export interface Profile {
  * viewer-aware projection, which additionally applies that player's privacy
  * settings — see `socialManager.inspect`.
  */
-export type PublicProfile = Omit<Profile, 'secret' | 'social' | 'legacyId'> & {
+export type PublicProfile = Omit<Profile, 'secret' | 'social' | 'legacyId' | 'externalIds'> & {
   winRate: number;
   friendCount: number;
 };
@@ -465,6 +480,25 @@ export function normalizeStats(raw: Partial<ProfileStats> | undefined | null): P
 }
 
 /**
+ * Coerce a persisted `externalIds` blob into a clean `provider -> id` map.
+ *
+ * Defensive because this field is read back from disk/Redis: anything that is
+ * not a non-empty string pair is dropped rather than trusted, so a corrupt or
+ * hand-edited snapshot cannot inject a bogus identity into the reverse index.
+ * Both halves are length-capped for the same reason ids are capped elsewhere.
+ */
+export function normalizeExternalIds(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [provider, id] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof provider !== 'string' || !provider) continue;
+    if (typeof id !== 'string' || !id) continue;
+    out[provider.slice(0, 32)] = id.slice(0, 128);
+  }
+  return out;
+}
+
+/**
  * Normalize a raw persisted (or partial) profile into a complete Profile,
  * backfilling every field so seed files written before the current schema (or
  * missing the new `secret` / `totalPlayTimeMs` fields) hydrate cleanly.
@@ -485,6 +519,10 @@ export function normalizeProfile(raw: Partial<Profile>, mkSecret: () => string):
     outfit: typeof raw.outfit === 'string' ? raw.outfit : null,
     isGuest: raw.isGuest !== false,
     providers: Array.isArray(raw.providers) && raw.providers.length ? raw.providers : ['guest'],
+    // Every persisted profile predates external identities, so the default is an
+    // empty map rather than anything inferred — a link only ever exists because a
+    // verified token created it.
+    externalIds: normalizeExternalIds(raw.externalIds),
     createdAt: now,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now,
     lastSeenAt: typeof raw.lastSeenAt === 'number' ? raw.lastSeenAt : now,
@@ -509,6 +547,6 @@ export function winRate(stats: ProfileStats): number {
  *  crosses the wire; attach the derived win rate + public friend count. The
  *  profile analog of publicPlayer(). */
 export function publicProfile(p: Profile): PublicProfile {
-  const { secret, social, legacyId, ...rest } = p;
+  const { secret, social, legacyId, externalIds, ...rest } = p;
   return { ...rest, winRate: winRate(p.stats), friendCount: social.friends.length };
 }

@@ -33,6 +33,7 @@ import { useGameStore } from "../../store/useGameStore";
 import { useSocket } from "../../hooks/useSocket";
 import { useEffectiveQuality } from "../../hooks/useEffectiveQuality";
 import { useFullscreen } from "../../hooks/useFullscreen";
+import { CAPABILITIES } from "../../lib/platform/capabilities";
 import {
   Badge,
   Button,
@@ -354,24 +355,29 @@ export const SettingsModal: React.FC = () => {
                   onChange={setPostProcessing}
                 />
               </Field>
-              <Field
-                label="Fullscreen Mode"
-                icon={<Monitor size={12} />}
-                hint={
-                  !isSupported
-                    ? "Not supported on this browser or iframe environment."
-                    : isFullscreen
-                      ? "Currently active."
-                      : "Expand to fill the entire screen."
-                }
-              >
-                <Toggle
-                  label="Fullscreen mode"
-                  checked={isFullscreen}
-                  onChange={toggleFullscreen}
-                  disabled={!isSupported}
-                />
-              </Field>
+              {/* Hidden where the host platform owns fullscreen (see the HUD
+                  button for the same gate). Nothing is removed — `useFullscreen`
+                  is untouched and still works on web. */}
+              {CAPABILITIES.customFullscreen && (
+                <Field
+                  label="Fullscreen Mode"
+                  icon={<Monitor size={12} />}
+                  hint={
+                    !isSupported
+                      ? "Not supported on this browser or iframe environment."
+                      : isFullscreen
+                        ? "Currently active."
+                        : "Expand to fill the entire screen."
+                  }
+                >
+                  <Toggle
+                    label="Fullscreen mode"
+                    checked={isFullscreen}
+                    onChange={toggleFullscreen}
+                    disabled={!isSupported}
+                  />
+                </Field>
+              )}
 
               {isAutoDowngraded && (
                 <p

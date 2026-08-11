@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { getReducedMotionPreference } from '../hooks/useReducedMotion';
+import { platformStorage, usePlatformStorage } from '../lib/platform/storage';
 import type { QualityTier } from '../lib/quality/qualityTiers';
 
 interface SettingsState {
@@ -162,6 +163,14 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'uno-real-settings', // unique name
+      // Web keeps zustand's default localStorage engine — same key, same
+      // synchronous rehydration, byte-for-byte the behaviour it has today. On
+      // CrazyGames these preferences live in the platform's data module instead,
+      // so they follow the player between devices. Preferences only: no secrets
+      // pass through here.
+      ...(usePlatformStorage
+        ? { storage: createJSONStorage(() => platformStorage) }
+        : {}),
       partialize: (state) => ({
         // Only persist the actual settings, not the UI modal states
         masterVolume: state.masterVolume,

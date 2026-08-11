@@ -1,41 +1,45 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useSocket } from "../../../hooks/useSocket";
-import { useVoiceChat } from "../../../hooks/useVoiceChat";
-import { useChatEnabled } from "../../../hooks/useChatEnabled";
-import { useGameStore } from "../../../store/useGameStore";
-import { ErrorBoundary } from "../../../components/providers/ErrorBoundary";
-import { ReactionsHandler } from "../../../components/social/ReactionsHandler";
-import { ChatPanel } from "../../../components/social/ChatPanel";
-import { SocialLayer } from "../../../components/social/SocialLayer";
-import { TurnGlowIndicator } from "../../../components/table/TurnGlowIndicator";
-import { SettingsModal } from "../../../components/ui/SettingsModal";
-import { HouseRulesModal } from "../../../components/ui/HouseRulesModal";
-import { HelpModals } from "../../../components/ui/HelpModals";
-import { FPSCounter } from "../../../components/ui/FPSCounter";
-import { RotateDevicePrompt } from "../../../components/ui/RotateDevicePrompt";
-import { PremiumLoader } from "../../../components/lobby/PremiumLoader";
-import { JoinStatusScreen } from "../../../components/lobby/JoinStatusScreen";
-import { ConnectionOverlay } from "../../../components/lobby/ConnectionOverlay";
-import { ToastStack } from "../../../components/lobby/ToastStack";
-import { LobbyHeader } from "../../../components/lobby/LobbyHeader";
-import { GameHUD } from "../../../components/lobby/GameHUD";
-import { GameStoppedNotice } from "../../../components/lobby/GameStoppedNotice";
-import { WinnerOverlay } from "../../../components/lobby/WinnerOverlay";
-import { ColorPickerDialog } from "../../../components/lobby/ColorPickerDialog";
-import { SwapTargetDialog } from "../../../components/lobby/SwapTargetDialog";
-import { EndOfRound } from "../../../components/lobby/EndOfRound";
-import { InviteModal } from "../../../components/lobby/InviteModal";
+import { useSocket } from "../../hooks/useSocket";
+import { useVoiceChat } from "../../hooks/useVoiceChat";
+import { useChatEnabled } from "../../hooks/useChatEnabled";
+import {
+  usePlatformGameplayLifecycle,
+  usePlatformLoadingSpan,
+} from "../../hooks/usePlatformLifecycle";
+import { usePlatformRoomPublisher } from "../../hooks/usePlatformRoomPublisher";
+import { usePlatformMatchEnd } from "../../hooks/usePlatformMatchEnd";
+import { useGameStore } from "../../store/useGameStore";
+import { HOME_HREF } from "../../lib/platform/routes";
+import { ErrorBoundary } from "../providers/ErrorBoundary";
+import { ReactionsHandler } from "../social/ReactionsHandler";
+import { ChatPanel } from "../social/ChatPanel";
+import { SocialLayer } from "../social/SocialLayer";
+import { TurnGlowIndicator } from "../table/TurnGlowIndicator";
+import { SettingsModal } from "../ui/SettingsModal";
+import { HouseRulesModal } from "../ui/HouseRulesModal";
+import { HelpModals } from "../ui/HelpModals";
+import { FPSCounter } from "../ui/FPSCounter";
+import { RotateDevicePrompt } from "../ui/RotateDevicePrompt";
+import { PremiumLoader } from "./PremiumLoader";
+import { JoinStatusScreen } from "./JoinStatusScreen";
+import { ConnectionOverlay } from "./ConnectionOverlay";
+import { ToastStack } from "./ToastStack";
+import { LobbyHeader } from "./LobbyHeader";
+import { GameHUD } from "./GameHUD";
+import { GameStoppedNotice } from "./GameStoppedNotice";
+import { WinnerOverlay } from "./WinnerOverlay";
+import { ColorPickerDialog } from "./ColorPickerDialog";
+import { SwapTargetDialog } from "./SwapTargetDialog";
+import { EndOfRound } from "./EndOfRound";
+import { InviteModal } from "./InviteModal";
 
 // Dynamically import full-screen 2.5D Table Scene with SSR disabled
 const TableScene = dynamic(
-  () =>
-    import("../../../components/table/TableScene").then(
-      (mod) => mod.TableScene,
-    ),
+  () => import("../table/TableScene").then((mod) => mod.TableScene),
   {
     ssr: false,
     loading: () => (
@@ -47,26 +51,34 @@ const TableScene = dynamic(
   },
 );
 
+export interface LobbyRoomProps {
+  /** Room code to seat the player in. */
+  roomId: string;
+  /** Seat name, or null/absent — which bounces back to the home screen. */
+  name: string | null;
+}
+
 /**
- * Room route.
+ * The table.
  *
- * This component owns only what is genuinely route-scoped: the room/name from
- * the URL, joining and leaving, the single mount points for the socket and the
- * WebRTC voice mesh, and the layer order of the screen. Every panel, banner and
- * dialog below reads what it needs straight from the authoritative game store,
- * so nothing here has to thread game state through props.
+ * This component owns only what is genuinely room-scoped: joining and leaving,
+ * the single mount points for the socket and the WebRTC voice mesh, and the layer
+ * order of the screen. Every panel, banner and dialog below reads what it needs
+ * straight from the authoritative game store, so nothing here has to thread game
+ * state through props.
  *
  * Each independent region sits behind its own ErrorBoundary: a crash in chat,
  * reactions or a dialog is contained to that region and leaves the socket,
  * the table and the rest of the HUD running.
+ *
+ * WHERE `roomId`/`name` COME FROM IS THE ROUTE'S BUSINESS, NOT THIS COMPONENT'S.
+ * The web build reads them from `/lobby/[roomId]?name=`; the static CrazyGames
+ * build reads them from the root document's query string. Both hand the same two
+ * strings to the same implementation — there is no second lobby, and no platform
+ * branch anywhere below this line.
  */
-export default function LobbyPage() {
-  const params = useParams();
-  const searchParams = useSearchParams();
+export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
   const router = useRouter();
-
-  const roomId = params?.roomId as string;
-  const name = searchParams?.get("name");
 
   const { socket, joinRoom } = useSocket();
   // The voice mesh must be mounted exactly once, for the whole life of the
@@ -91,7 +103,7 @@ export default function LobbyPage() {
   // Redirect back if name query parameter is missing
   useEffect(() => {
     if (!name) {
-      router.replace("/");
+      router.replace(HOME_HREF);
     }
   }, [name, router]);
 
@@ -106,7 +118,7 @@ export default function LobbyPage() {
     if (error === "Room not found" || error === "This room no longer exists") {
       const timer = setTimeout(() => {
         setError(null);
-        router.push("/");
+        router.push(HOME_HREF);
       }, 4000);
       return () => clearTimeout(timer);
     }
@@ -132,17 +144,37 @@ export default function LobbyPage() {
   // they resolve the same module promises the render path later awaits, so this
   // only ever moves work earlier. Purely a loading optimization — no game state
   // is read or written here.
-  useEffect(() => {
-    const arena = room?.arena;
-    if (!arena) return;
+  //
+  // These same two promises are what the platform's loading span waits on: the
+  // table is "loaded" when the arena chunk and its models have settled, which is
+  // a later and more honest moment than first paint.
+  const arena = room?.arena;
+  usePlatformLoadingSpan(arena, () =>
+    arena
+      ? [
+          import("../table/arenas/ArenaEnvironment").then((mod) =>
+            mod.preloadArena(arena),
+          ),
+          import("../table/arenas/shared/gltf").then((mod) =>
+            mod.preloadArenaModels(arena),
+          ),
+        ]
+      : [],
+  );
 
-    void import("../../../components/table/arenas/ArenaEnvironment")
-      .then((mod) => mod.preloadArena(arena))
-      .catch(() => {});
-    void import("../../../components/table/arenas/shared/gltf")
-      .then((mod) => mod.preloadArenaModels(arena))
-      .catch(() => {});
-  }, [room?.arena]);
+  // Report active gameplay to the platform. No-op on web.
+  usePlatformGameplayLifecycle();
+
+  // Celebrate a match win and show the between-matches ad. Declared AFTER the
+  // lifecycle hook deliberately: effects in one component run in declaration
+  // order, so gameplay is already reported as stopped before an ad is requested.
+  // No-op on web.
+  usePlatformMatchEnd();
+
+  // Mirror this room to the platform so it can advertise it and route invites
+  // into it. Derived from the room snapshot, so it cannot disagree with the
+  // server about whether someone can actually sit down. No-op on web.
+  usePlatformRoomPublisher();
 
   // Render connection/error loading states
   if (!room || (!player && !isSpectator)) {

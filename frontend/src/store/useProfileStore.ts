@@ -53,6 +53,11 @@ interface ProfileState {
   setAvatar: (avatar: string | null) => Promise<PublicProfile | null>;
   setOutfit: (outfit: string | null) => Promise<PublicProfile | null>;
   resetProfile: () => Promise<PublicProfile | null>;
+  /**
+   * Exchange a platform user token for this player's Unoverse identity. Resolves
+   * to null (leaving the current identity alone) if the exchange fails.
+   */
+  signInWithPlatformToken: (token: string) => Promise<PublicProfile | null>;
   /** Drop a local identity the server no longer recognises. */
   clearIdentity: () => void;
   clearError: () => void;
@@ -180,6 +185,36 @@ export const useProfileStore = create<ProfileState>()(
       },
 
       /**
+       * Adopt the identity a verified platform token resolved to.
+       *
+       * The platform (CrazyGames) supplies a short-lived token; the SERVER decides
+       * which profile it belongs to and hands back the same `{ profile, secret }`
+       * pair the guest path issues. So from here on the player is an ordinary
+       * Unoverse profile — no second identity, no second code path.
+       *
+       * Deliberately quiet on failure: the caller keeps whatever identity it
+       * already had (guest included), because a platform that is unreachable or
+       * has no signed-in user must not cost the player their session. The token is
+       * consumed here and never stored.
+       */
+      signInWithPlatformToken: async (token) => {
+        set({ loading: true, error: null });
+        try {
+          const { profile, secret } = await profileApi.authenticateCrazyGames(token);
+          set({
+            profileId: profile.id,
+            profileSecret: secret,
+            ...adopt(profile),
+            loading: false,
+          });
+          return profile;
+        } catch {
+          set({ loading: false });
+          return null;
+        }
+      },
+
+      /**
        * Forget the persisted identity, keeping the display name so the create
        * flow can prefill it.
        *
@@ -204,6 +239,20 @@ export const useProfileStore = create<ProfileState>()(
     }),
     {
       name: 'unoverse:profile',
+      // DELIBERATELY NOT ROUTED THROUGH PLATFORM STORAGE, on either build.
+      //
+      // Two reasons. First, this blob contains `profileSecret`, a bearer
+      // credential that must not go into cloud storage. Second, it would be
+      // redundant: `adopt()` fills displayName/avatar/outfit from the SERVER's
+      // view of the profile, so for a platform-linked player those fields already
+      // follow them across devices — through the backend, which is authoritative.
+      // Persisting them again in the platform's data module would create a second
+      // source of truth for data we already sync correctly.
+      //
+      // What this store holds is therefore local-device identity + a paint cache,
+      // which is exactly what localStorage is for. Preferences that ARE purely
+      // client-side (`uno-real-settings`) do use platform storage.
+      //
       // Persist ONLY the durable identity + cached display fields — never the
       // runtime UI flags or the server-served stats snapshot (always re-fetched).
       partialize: (state) => ({

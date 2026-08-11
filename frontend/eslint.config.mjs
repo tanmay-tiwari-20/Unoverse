@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Build output of `npm run build:crazygames`. `out/` above covers the export
+    // itself, but the packaging step renames it, and linting minified bundles
+    // reports thousands of problems in code we did not write.
+    "crazygames-build/**",
   ]),
 ]);
 

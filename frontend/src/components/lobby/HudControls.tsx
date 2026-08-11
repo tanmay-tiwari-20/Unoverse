@@ -20,6 +20,7 @@ import { useSocialStore } from '../../store/useSocialStore';
 import { useChatEnabled } from '../../hooks/useChatEnabled';
 import { useExitTable } from '../../hooks/useExitTable';
 import { useFullscreen } from '../../hooks/useFullscreen';
+import { CAPABILITIES } from '../../lib/platform/capabilities';
 
 /**
  * ============================================================================
@@ -160,15 +161,20 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
         <Settings size={16} />
       </button>
 
-      <button
-        onClick={toggleFullscreen}
-        className={`ui-hud-btn ${isFullscreen ? 'ui-hud-btn-on' : ''}`}
-        title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
-        aria-label={isFullscreen ? 'Exit fullscreen mode' : 'Enter fullscreen mode'}
-        aria-pressed={isFullscreen}
-      >
-        {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-      </button>
+      {/* Some platforms provide their own fullscreen control and prohibit a
+          second one in the game. The hook stays wired up either way — this only
+          decides whether we surface a button. */}
+      {CAPABILITIES.customFullscreen && (
+        <button
+          onClick={toggleFullscreen}
+          className={`ui-hud-btn ${isFullscreen ? 'ui-hud-btn-on' : ''}`}
+          title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+          aria-label={isFullscreen ? 'Exit fullscreen mode' : 'Enter fullscreen mode'}
+          aria-pressed={isFullscreen}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
+      )}
 
       <span className="ui-hud-sep" aria-hidden="true" />
 

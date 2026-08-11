@@ -1,27 +1,41 @@
 "use client";
 
+/**
+ * The home screen — profile, play console, room create/join, spectate.
+ *
+ * This lives in `components/` rather than in a route file because BOTH build
+ * targets render it and neither owns it: the web build mounts it at
+ * `app/page.web.tsx`, and the static CrazyGames build mounts it at
+ * `app/page.cg.tsx` alongside `<LobbyRoom>` in the same document. One
+ * implementation, two URL shapes — every navigation out of here goes through
+ * `lobbyHref`, which is the only thing that differs between them.
+ */
+
 import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Eye as EyeIcon } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useSocket } from "../hooks/useSocket";
-import { useProfileStore } from "../store/useProfileStore";
-import { CreateProfileModal } from "../components/profile/CreateProfileModal";
-import { ProfileModal } from "../components/profile/ProfileModal";
-import { CreateRoomModal } from "../components/lobby/CreateRoomModal";
-import { SocialLayer } from "../components/social/SocialLayer";
-import { HomeTopRail } from "../components/home/HomeTopRail";
-import { HomeHero } from "../components/home/HomeHero";
-import { PlayConsole, type PlayMode } from "../components/home/PlayConsole";
-import { Button } from "../components/ui/kit";
-import { ArenaSelection } from "../lib/arenas/types";
-import { errorMessage } from "../utils/errors";
-import { subscribeToNothing } from "../utils/clientSnapshot";
+import { useSocket } from "../../hooks/useSocket";
+import { usePlatformEntry } from "../../hooks/usePlatformEntry";
+import { useProfileStore } from "../../store/useProfileStore";
+import { CreateProfileModal } from "../profile/CreateProfileModal";
+import { ProfileModal } from "../profile/ProfileModal";
+import { CreateRoomModal } from "../lobby/CreateRoomModal";
+import { SocialLayer } from "../social/SocialLayer";
+import { HomeTopRail } from "./HomeTopRail";
+import { HomeHero } from "./HomeHero";
+import { PlayConsole, type PlayMode } from "./PlayConsole";
+import { Button } from "../ui/kit";
+import { ArenaSelection } from "../../lib/arenas/types";
+import { errorMessage } from "../../utils/errors";
+import { subscribeToNothing } from "../../utils/clientSnapshot";
+import { BACKEND_URL } from "../../lib/config";
+import { lobbyHref } from "../../lib/platform/routes";
 
 const LandingScene = dynamic(
   () =>
-    import("../components/landing/LandingScene").then((mod) => ({
+    import("../landing/LandingScene").then((mod) => ({
       default: mod.LandingScene,
     })),
   { ssr: false },
@@ -45,11 +59,15 @@ function profileCreds(): { profileId?: string; profileSecret?: string } {
   return profileId && profileSecret ? { profileId, profileSecret } : {};
 }
 
-export default function LandingPage() {
+export default function HomeScreen() {
   const router = useRouter();
-  
+
   // Pre-warm the socket connection on landing mount
   useSocket();
+  // Platform entry: a CrazyGames invite or Instant Multiplayer request navigates
+  // straight into a lobby. Inert on web, and on CrazyGames for players who simply
+  // opened the game — the home screen below is unchanged either way.
+  usePlatformEntry();
   const requestInProgress = useRef(false);
 
   // Persistent profile identity. A returning player is loaded from localStorage;
@@ -101,8 +119,7 @@ export default function LandingPage() {
     maxSpectators: number;
   } | null>(null);
 
-  const backendUrl =
-    (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001").replace(/\/$/, "");
+  const backendUrl = BACKEND_URL;
 
   // Pre-fill the room code when arriving via an invitation link (/?room=CODE),
   // and put the console in "join" mode so the pre-filled code is actually the
@@ -170,9 +187,7 @@ export default function LandingPage() {
       const code = data.code;
 
       // Navigate immediately to the lobby page
-      router.push(
-        `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
-      );
+      router.push(lobbyHref(code, displayName.trim()));
     } catch (err) {
       console.error(err);
       setError(errorMessage(err, "Something went wrong. Is the server running?"));
@@ -210,9 +225,7 @@ export default function LandingPage() {
         throw new Error(data.error || "Quick Play failed.");
       }
 
-      router.push(
-        `/lobby/${data.code}?name=${encodeURIComponent(displayName.trim())}`,
-      );
+      router.push(lobbyHref(data.code, displayName.trim()));
     } catch (err) {
       console.error(err);
       setError(errorMessage(err, "Something went wrong. Is the server running?"));
@@ -278,7 +291,7 @@ export default function LandingPage() {
       }
 
       router.push(
-        `/lobby/${roomCode.trim().toUpperCase()}?name=${encodeURIComponent(displayName.trim())}`,
+        lobbyHref(roomCode.trim().toUpperCase(), displayName.trim()),
       );
     } catch (err) {
       console.error(err);
@@ -421,9 +434,7 @@ export default function LandingPage() {
                     onClick={() => {
                       const code = spectatorPrompt.code;
                       setSpectatorPrompt(null);
-                      router.push(
-                        `/lobby/${code}?name=${encodeURIComponent(displayName.trim())}`,
-                      );
+                      router.push(lobbyHref(code, displayName.trim()));
                     }}
                     className="btn-arcade font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2 bg-gradient-to-b from-violet-400 to-violet-600 py-3 text-xs uppercase text-white"
                   >

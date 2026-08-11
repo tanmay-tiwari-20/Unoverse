@@ -4,6 +4,10 @@ import { useVoiceStore } from '../store/useVoiceStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { getIceServers } from '../lib/voice/iceServers';
 import { logger } from '../utils/logger';
+import {
+  isPlatformAudioMuted,
+  subscribeToPlatformAudioGate,
+} from '../lib/platform/platformAdaptersState';
 
 /**
  * Mesh WebRTC voice chat signaled over the game's Socket.IO connection.
@@ -113,7 +117,10 @@ export const useVoiceChat = () => {
     const { isSpeakerEnabled, locallyMutedPeers } = useVoiceStore.getState();
     const key = peerSeatUid(peerId);
     const personallyMuted = !!(key && locallyMutedPeers[key]);
-    entry.audioEl.muted = !isSpeakerEnabled || personallyMuted;
+    // Voice does not pass through soundManager, so the platform gate has to be
+    // applied again here — otherwise teammates would stay audible over an ad or
+    // through a platform-level mute. Same gate, second output path.
+    entry.audioEl.muted = !isSpeakerEnabled || personallyMuted || isPlatformAudioMuted();
     const settings = useSettingsStore.getState();
     entry.audioEl.volume = (settings.voiceVolume / 100) * (settings.masterVolume / 100);
   }, []);
@@ -566,11 +573,24 @@ export const useVoiceChat = () => {
   const locallyMutedPeers = useVoiceStore((state) => state.locallyMutedPeers);
   const voiceVolume = useSettingsStore((state) => state.voiceVolume);
   const masterVolume = useSettingsStore((state) => state.masterVolume);
-  useEffect(() => {
+  const reapplyAllAudioOutput = useCallback(() => {
     Object.entries(peersRef.current).forEach(([peerId, entry]) => {
       applyAudioOutput(peerId, entry);
     });
-  }, [isSpeakerEnabled, locallyMutedPeers, voiceVolume, masterVolume, applyAudioOutput]);
+  }, [applyAudioOutput]);
+
+  useEffect(() => {
+    reapplyAllAudioOutput();
+  }, [isSpeakerEnabled, locallyMutedPeers, voiceVolume, masterVolume, reapplyAllAudioOutput]);
+
+  // The platform gate needs its own subscription: an <audio> element stays
+  // muted until something tells it otherwise, unlike soundManager which
+  // re-reads the gate on every play(). Without this, voice would go quiet for an
+  // ad and never come back.
+  useEffect(
+    () => subscribeToPlatformAudioGate(reapplyAllAudioOutput),
+    [reapplyAllAudioOutput],
+  );
 
   // Outgoing mic volume.
   const micVolume = useSettingsStore((state) => state.micVolume);
