@@ -59,6 +59,30 @@ export const MODEL_PATHS = {
 
 export type ModelKey = keyof typeof MODEL_PATHS;
 
+/**
+ * The subset of `MODEL_PATHS` whose `.glb` is actually shipped under `public/`
+ * today. `MODEL_PATHS` above is the canonical registry of every slot an arena
+ * MAY upgrade — a standing list of assets we might add; this is what really
+ * exists on disk right now.
+ *
+ * Only a model listed here is ever requested. Every other slot renders its
+ * procedural fallback and makes NO network request at all — an intentionally
+ * absent file must never be fetched. Self-hosted such a request 404s silently
+ * behind the fallback, but the CrazyGames QA console flags every 404 against the
+ * game-files domain, which is noise for a file we never meant to ship.
+ *
+ * Why an allowlist instead of deleting the unshipped entries: the arenas are
+ * built to light up automatically the moment a valid `.glb` appears at the
+ * registered path, and the registry documents where each one goes. Adding a
+ * model later is then a two-token edit — drop the file in and list its key here.
+ */
+const SHIPPED_MODELS = new Set<ModelKey>(['jungleFirefly']);
+
+/** Is this slot backed by a file we actually ship, and therefore fetchable? */
+function isShippedModel(model: ModelKey): boolean {
+  return SHIPPED_MODELS.has(model);
+}
+
 // Draco + meshopt on by default: any assets we do ship should be compressed.
 const USE_DRACO = true;
 const USE_MESHOPT = true;
@@ -310,10 +334,13 @@ export function ArenaModel({
     </group>
   );
 
-  // `enabled === false` is the quality gate; an unregistered/empty slot means
-  // there is no url to request at all. Both resolve to the procedural prop
-  // without mounting Suspense, so no request is made and nothing can throw.
-  if (!enabled || !url) return wrapped;
+  // Three independent reasons to skip the load and just show the procedural
+  // prop — none mounts Suspense, so no request is made and nothing can throw:
+  //   • `enabled === false` — the caller's quality gate (low/medium tier).
+  //   • not in SHIPPED_MODELS — the slot has no file on disk, so a fetch would
+  //     be a guaranteed 404 (which the CrazyGames QA console flags).
+  //   • no url — an unregistered/empty path.
+  if (!enabled || !isShippedModel(model) || !url) return wrapped;
 
   return (
     <group position={position} rotation={rotation} scale={scale}>
@@ -330,11 +357,17 @@ export function ArenaModel({
 }
 
 /**
- * Best-effort preload of a hero asset for an arena that is about to mount. Safe
- * to call for a file that doesn't exist — drei swallows it and `ArenaModel`
- * still falls back. Never awaited; never blocks.
+ * Best-effort preload of a hero asset for an arena that is about to mount. Skips
+ * any slot without a shipped file (see `SHIPPED_MODELS`), so it never warms a
+ * path that would 404; the arena still renders its procedural prop. Never
+ * awaited; never blocks.
  */
 export function preloadArenaModel(model: ModelKey) {
+  // Only warm an asset we actually ship. An unshipped slot has no file to fetch,
+  // so preloading it would be a guaranteed 404 (which the CrazyGames QA console
+  // flags); the arena renders its procedural prop regardless.
+  if (!isShippedModel(model)) return;
+
   const url = assetPath(MODEL_PATHS[model]);
   try {
     useGLTF.preload(url, USE_DRACO, USE_MESHOPT);
