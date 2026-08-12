@@ -114,10 +114,10 @@ log(`backend B       : ${backendUrl}`);
 // if the build failed in a way that left the directory behind.
 //
 // Windows holds a directory open for anything whose cwd is inside it — a running
-// `python -m http.server --directory crazygames-build`, or a terminal left in
-// there after the last build — and reports EBUSY rather than waiting. A short
-// retry covers the file-watcher case; a persistent holder gets named, because
-// "EBUSY: rmdir" on its own sends people looking for a bug in the build.
+// `npm run serve:crazygames`, or a terminal left in there after the last build —
+// and reports EBUSY rather than waiting. A short retry covers the file-watcher
+// case; a persistent holder gets named, because "EBUSY: rmdir" on its own sends
+// people looking for a bug in the build.
 const removeDir = (dir) => {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -277,6 +277,41 @@ const textFiles = walk(PACKAGE_DIR).filter((f) => TEXT_EXT.has(path.extname(f)))
  * a root-absolute `fetch`, or a root-absolute media/script `src` assignment — and
  * the real proof of chunk loading is the subdirectory smoke test at the end.
  */
+/**
+ * WHY THERE IS NO STATIC CHECK FOR ROOT-ABSOLUTE *ROUTE* URLS.
+ *
+ * A navigation target is not an asset, so none of the checks in this file see one,
+ * and a root-absolute route is as fatal here as a root-absolute asset — more
+ * quietly. `/?lobby=CODE` names the game-files domain ROOT, and App Router derives
+ * a route's RSC payload URL from the target pathname, so pushing it fetches
+ * `/index.txt` from that root, 404s off the end of the package, and Next falls back
+ * to a hard navigation that lands the player on the file host's root with the game
+ * gone. That was a real production failure, so a check for it was the obvious thing
+ * to add here. It does not work, and the reason is worth recording so it is not
+ * added again:
+ *
+ *   Turbopack does not fold `IS_CRAZYGAMES_BUILD` across module boundaries. It
+ *   survives minification as a module binding — `a.IS_CRAZYGAMES_BUILD ? … : …` —
+ *   so BOTH arms of every platform ternary ship in the CrazyGames bundle. The web
+ *   arm of `lobbyHref` is therefore present in the chunks as the literal
+ *   `/lobby/${id}?name=…`, and it is inert: the flag is `true` at runtime on this
+ *   target, so that arm is never evaluated.
+ *
+ * Which means the bundle text cannot distinguish "shipped but unreachable" from
+ * "actually navigated to" — the same reason JS is only spot-checked above. A scan
+ * for route literals fails every correct build.
+ *
+ * So this is verified two other ways instead, neither of them a string match:
+ *
+ *   1. BY CONSTRUCTION. `cgPush`/`cgReplace` rebuild every href as
+ *      `location.pathname + search + hash`, discarding the href's own pathname. A
+ *      call site that passed a web URL would land on the wrong screen — it could
+ *      not leave the document, because the pathname it asked for is thrown away.
+ *   2. AT RUNTIME. `npm run serve:crazygames` mounts the package in a subdirectory
+ *      and fails the run if any request escapes it. That is the only place the
+ *      payload URL exists at all: it is assembled from `location.origin` when the
+ *      navigation happens, and never appears in the package as text.
+ */
 const ROOT_ABSOLUTE_FETCH = /fetch\(\s*["'`]\//;
 const ROOT_ABSOLUTE_SRC = /(?:\.src\s*=\s*|new\s+(?:Audio|Image|Worker)\(\s*)["'`]\//;
 
@@ -365,6 +400,11 @@ log(`size      : ${(bytes / 1024 / 1024).toFixed(2)} MB`);
 log(`SDK tag   : present`);
 log(`backend B : baked in`);
 log('');
+// The smoke test is named rather than described, and it is deliberately not
+// `python -m http.server`: that serves the package AT the server root, which is
+// the one condition under which the navigation bug this build guards against
+// cannot reproduce. See scripts/serve-crazygames.mjs.
 log('Verify locally before uploading:');
-log(`  python -m http.server 8080 --directory ${path.relative(process.cwd(), PACKAGE_DIR)}`);
-log('  → http://localhost:8080/');
+log('  npm run serve:crazygames');
+log('  → http://localhost:8080/pkg/   (a SUBDIRECTORY, as the portal serves it)');
+log('  Walk every flow that navigates, then Ctrl-C for the pass/fail verdict.');

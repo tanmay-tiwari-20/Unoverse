@@ -1,9 +1,10 @@
 'use client'; // Error boundaries must be Client Components
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 
 import { ErrorScreen } from '../components/ui/ErrorScreen';
+import { usePlatformRouter } from '../hooks/usePlatformRouter';
+import { HOME_HREF } from '../lib/platform/routes';
 import { logger } from '../utils/logger';
 
 /**
@@ -28,7 +29,7 @@ export default function RouteError({
   // so a failure caused by bad data would immediately reproduce.
   unstable_retry: () => void;
 }) {
-  const router = useRouter();
+  const router = usePlatformRouter();
 
   useEffect(() => {
     logger.error('[RouteError] Unhandled error rendering route:', error, error.digest);
@@ -40,7 +41,7 @@ export default function RouteError({
       // Retry first: it re-renders in place, so an active socket connection and
       // the server-authoritative round both survive. Reload is the fallback.
       onRetry={() => unstable_retry()}
-      onGoHome={() => router.push('/')}
+      onGoHome={() => router.push(HOME_HREF)}
     />
   );
 }

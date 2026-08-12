@@ -1,10 +1,11 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ShieldAlert } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
+import { usePlatformRouter } from '../../hooks/usePlatformRouter';
+import { HOME_HREF } from '../../lib/platform/routes';
 import { PremiumLoader } from './PremiumLoader';
 
 /**
@@ -14,7 +15,7 @@ import { PremiumLoader } from './PremiumLoader';
  * timer lives in the route so it keeps running independently of this view.
  */
 export const JoinStatusScreen: React.FC = () => {
-  const router = useRouter();
+  const router = usePlatformRouter();
   const error = useGameStore((s) => s.error);
   const setError = useGameStore((s) => s.setError);
   const connectionStatus = useGameStore((s) => s.connectionStatus);
@@ -41,7 +42,7 @@ export const JoinStatusScreen: React.FC = () => {
             <button
               onClick={() => {
                 setError(null);
-                router.push('/');
+                router.push(HOME_HREF);
               }}
               className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase"
             >

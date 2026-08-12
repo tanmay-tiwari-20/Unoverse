@@ -12,12 +12,12 @@
  */
 
 import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Eye as EyeIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useSocket } from "../../hooks/useSocket";
 import { usePlatformEntry } from "../../hooks/usePlatformEntry";
+import { usePlatformRouter } from "../../hooks/usePlatformRouter";
 import { useProfileStore } from "../../store/useProfileStore";
 import { CreateProfileModal } from "../profile/CreateProfileModal";
 import { ProfileModal } from "../profile/ProfileModal";
@@ -60,7 +60,7 @@ function profileCreds(): { profileId?: string; profileSecret?: string } {
 }
 
 export default function HomeScreen() {
-  const router = useRouter();
+  const router = usePlatformRouter();
 
   // Pre-warm the socket connection on landing mount
   useSocket();

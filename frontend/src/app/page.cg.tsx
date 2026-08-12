@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import HomeScreen from "../components/home/HomeScreen";
 import LobbyRoom from "../components/lobby/LobbyRoom";
 import { LOBBY_PARAM } from "../lib/platform/routes";
+import { installCgHistorySync } from "../lib/platform/cgNavigation";
 
 /**
  * ============================================================================
@@ -30,9 +31,19 @@ import { LOBBY_PARAM } from "../lib/platform/routes";
  * components the web routes render — this file only chooses between them.
  */
 function RootScreen() {
-  // Reactive to client-side navigation, which is what makes `router.push` into
-  // and out of a room re-render this switch. In a static export the params are
-  // empty during prerender and populate on the client, hence the boundary below.
+  // Back/forward. Next's own popstate handling covers every entry
+  // `usePlatformRouter` creates; this only repairs one it would refuse to restore,
+  // which would otherwise leave the URL and the screen disagreeing with no way
+  // back. Installed here because this is the one document the package has, so it
+  // is mounted for as long as the game is running.
+  useEffect(() => installCgHistorySync(), []);
+
+  // Reactive to client-side navigation, which is what makes a push into and out of
+  // a room re-render this switch: on this target the URL is moved with
+  // `history.pushState`, which Next turns into a router restore, and
+  // `useSearchParams` is derived from the router's canonical URL. In a static
+  // export the params are empty during prerender and populate on the client, hence
+  // the boundary below.
   const searchParams = useSearchParams();
 
   const roomId = searchParams.get(LOBBY_PARAM);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePlatformRouter } from './usePlatformRouter';
 import { initPlatform, CAPABILITIES } from '../lib/platform';
 import { lobbyHref } from '../lib/platform/routes';
 import { useProfileStore } from '../store/useProfileStore';
@@ -21,10 +21,11 @@ import { logger } from '../utils/logger';
  *      a joinable room.
  *
  * Both end at the SAME lobby the web build uses, through `lobbyHref` — which is
- * the platform's own URL shape for it (`/?lobby=CODE` in the static CrazyGames
- * package, `/lobby/CODE` on web) rendering the SAME `<LobbyRoom>`. There is no
- * second join path, no second room concept, and no platform branch inside the
- * lobby itself — this hook only decides where to navigate.
+ * the platform's own URL shape for it (`?lobby=CODE` on the CrazyGames package's
+ * one document, `/lobby/CODE` on web) rendering the SAME `<LobbyRoom>`. There is
+ * no second join path, no second room concept, and no platform branch inside the
+ * lobby itself — this hook only decides where to navigate, and
+ * `usePlatformRouter` decides how.
  *
  * INSTANT MULTIPLAYER CREATES A **PRIVATE** ROOM, not a Quick Play one. Quick
  * Play drops you into a public lobby with strangers; the platform's contract is
@@ -37,7 +38,7 @@ import { logger } from '../utils/logger';
  * arrives normally sees exactly what a web player sees.
  */
 export const usePlatformEntry = (): void => {
-  const router = useRouter();
+  const router = usePlatformRouter();
 
   // Guards against a double navigation: React may run this effect twice in
   // development, and a late invite must not fight a navigation already underway.

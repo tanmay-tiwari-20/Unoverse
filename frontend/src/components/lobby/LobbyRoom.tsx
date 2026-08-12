@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useSocket } from "../../hooks/useSocket";
 import { useVoiceChat } from "../../hooks/useVoiceChat";
@@ -12,6 +11,7 @@ import {
 } from "../../hooks/usePlatformLifecycle";
 import { usePlatformRoomPublisher } from "../../hooks/usePlatformRoomPublisher";
 import { usePlatformMatchEnd } from "../../hooks/usePlatformMatchEnd";
+import { usePlatformRouter } from "../../hooks/usePlatformRouter";
 import { useGameStore } from "../../store/useGameStore";
 import { HOME_HREF } from "../../lib/platform/routes";
 import { ErrorBoundary } from "../providers/ErrorBoundary";
@@ -78,7 +78,7 @@ export interface LobbyRoomProps {
  * branch anywhere below this line.
  */
 export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
-  const router = useRouter();
+  const router = usePlatformRouter();
 
   const { socket, joinRoom } = useSocket();
   // The voice mesh must be mounted exactly once, for the whole life of the

@@ -23,7 +23,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePlatformRouter } from '../../hooks/usePlatformRouter';
 import { useGameStore } from '../../store/useGameStore';
 import { useProfileStore } from '../../store/useProfileStore';
 import { useSocialStore } from '../../store/useSocialStore';
@@ -34,7 +34,7 @@ import { InviteToasts } from './InviteToasts';
 import { SocialToasts } from './SocialToasts';
 
 export const SocialLayer: React.FC = () => {
-  const router = useRouter();
+  const router = usePlatformRouter();
 
   const pendingJoin = useSocialStore((s) => s.pendingJoin);
   const setPendingJoin = useSocialStore((s) => s.setPendingJoin);

@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePlatformRouter } from './usePlatformRouter';
+import { HOME_HREF } from '../lib/platform/routes';
 import { useSocket } from './useSocket';
 
 /**
@@ -11,12 +12,12 @@ import { useSocket } from './useSocket';
  * ever needs a different farewell, there is one place to change.
  */
 export const useExitTable = (): (() => void) => {
-  const router = useRouter();
+  const router = usePlatformRouter();
   const { leaveRoom } = useSocket();
 
   return useCallback(() => {
     leaveRoom();
-    router.push('/');
+    router.push(HOME_HREF);
     // `leaveRoom` is recreated on every render of the socket hook but always
     // reads the live socket from the store, so it is safe to leave out.
     // eslint-disable-next-line react-hooks/exhaustive-deps

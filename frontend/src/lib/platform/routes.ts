@@ -7,7 +7,7 @@
  * shapes, because they are served by two different kinds of host:
  *
  *   WEB          /lobby/<CODE>?name=<NAME>     a real route, server-rendered
- *   CRAZYGAMES   /?lobby=<CODE>&name=<NAME>    the root document, client-only
+ *   CRAZYGAMES   ?lobby=<CODE>&name=<NAME>     the current document, client-only
  *
  * WHY CRAZYGAMES STAYS ON THE ROOT DOCUMENT. The portal build is a static
  * package uploaded as a zip; it is served from a plain file host at an unknown
@@ -22,6 +22,14 @@
  *   2. RELATIVE ASSET PATHS RESOLVE AGAINST THE DOCUMENT. A bundle served from
  *      a subdirectory must reference `./_next/...`, which only resolves to the
  *      right place while the document itself sits at the package root.
+ *
+ * WHY THE CRAZYGAMES HREFS HAVE NO LEADING SLASH. They are document-relative, not
+ * root-absolute, because the package is served from a subdirectory whose name is
+ * not known at build time — `/?lobby=CODE` names the game-files domain's ROOT,
+ * which belongs to the file host and not to us. `?lobby=CODE` names the query of
+ * whatever document we are already in. `lib/platform/cgNavigation.ts` enforces
+ * that property rather than trusting it, and explains why an escaped URL is fatal
+ * rather than merely wrong.
  *
  * WHY THE PARAM IS `lobby` AND NOT `room`. `?room=` already means something on
  * CrazyGames: it is the invite parameter the portal round-trips through
@@ -42,8 +50,15 @@ import { IS_CRAZYGAMES_BUILD } from './target';
 /** Query parameter naming the room the CrazyGames build is currently showing. */
 export const LOBBY_PARAM = 'lobby';
 
-/** The home screen. The root route in both builds. */
-export const HOME_HREF = '/';
+/**
+ * The home screen.
+ *
+ * On web, the root route. On CrazyGames, "this document with no query at all" —
+ * `'?'` resolves to an empty search, which `cgNavigation`'s normaliser turns into
+ * the bare document path, so the player lands back on the home screen without the
+ * URL ever naming a path the file host would have to serve.
+ */
+export const HOME_HREF = IS_CRAZYGAMES_BUILD ? '?' : '/';
 
 /**
  * The URL that renders `roomId`'s table with the player seated as `name`.
@@ -53,5 +68,5 @@ export const HOME_HREF = '/';
  */
 export const lobbyHref = (roomId: string, name: string): string =>
   IS_CRAZYGAMES_BUILD
-    ? `/?${LOBBY_PARAM}=${encodeURIComponent(roomId)}&name=${encodeURIComponent(name)}`
+    ? `?${LOBBY_PARAM}=${encodeURIComponent(roomId)}&name=${encodeURIComponent(name)}`
     : `/lobby/${roomId}?name=${encodeURIComponent(name)}`;

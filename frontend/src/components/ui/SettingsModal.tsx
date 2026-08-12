@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Accessibility,
   BookOpen,
@@ -33,7 +32,9 @@ import { useGameStore } from "../../store/useGameStore";
 import { useSocket } from "../../hooks/useSocket";
 import { useEffectiveQuality } from "../../hooks/useEffectiveQuality";
 import { useFullscreen } from "../../hooks/useFullscreen";
+import { usePlatformRouter } from "../../hooks/usePlatformRouter";
 import { CAPABILITIES } from "../../lib/platform/capabilities";
+import { HOME_HREF } from "../../lib/platform/routes";
 import {
   Badge,
   Button,
@@ -196,7 +197,7 @@ export const SettingsModal: React.FC = () => {
   const { isFullscreen, toggleFullscreen, isSupported } = useFullscreen();
 
   const { leaveRoom } = useSocket();
-  const router = useRouter();
+  const router = usePlatformRouter();
   const inRoom = useGameStore((s) => Boolean(s.room));
 
   const [section, setSection] = useState<SectionId>("audio");
@@ -205,7 +206,7 @@ export const SettingsModal: React.FC = () => {
   const handleLeaveLobby = () => {
     close();
     leaveRoom();
-    router.push("/");
+    router.push(HOME_HREF);
   };
 
   const go = (open: (v: boolean) => void) => {
