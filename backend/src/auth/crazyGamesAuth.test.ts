@@ -181,4 +181,48 @@ describe('verifyCrazyGamesToken', () => {
 
     expect(await verifyCrazyGamesToken(token)).toEqual({ ok: false, reason: 'key_unavailable' });
   });
+
+  // --------------------------------------------------------------------------
+  // PEM format acceptance — the bug that prompted this block was a substring
+  // check for "BEGIN PUBLIC KEY" that rejected the PKCS#1 header
+  // "BEGIN RSA PUBLIC KEY" returned by the CrazyGames endpoint.
+  // --------------------------------------------------------------------------
+
+  it('accepts a PKCS#1 (BEGIN RSA PUBLIC KEY) key from the endpoint', async () => {
+    const pkcs1Key = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'pkcs1', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    expect(pkcs1Key.publicKey).toContain('BEGIN RSA PUBLIC KEY');
+
+    const { verifyCrazyGamesToken } = await load(ENABLED, pkcs1Key.publicKey);
+    const token = jwt.sign(PAYLOAD, pkcs1Key.privateKey, { algorithm: 'RS256', expiresIn: '5m' });
+
+    const result = await verifyCrazyGamesToken(token);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.identity.userId).toBe('cg-user-1');
+  });
+
+  it('accepts an SPKI (BEGIN PUBLIC KEY) key from the endpoint', async () => {
+    // The key pair at the top of this file is SPKI, reuse it explicitly.
+    expect(publicKey).toContain('BEGIN PUBLIC KEY');
+    expect(publicKey).not.toContain('BEGIN RSA PUBLIC KEY');
+
+    const { verifyCrazyGamesToken } = await load(ENABLED, publicKey);
+    const token = jwt.sign(PAYLOAD, privateKey, { algorithm: 'RS256', expiresIn: '5m' });
+
+    const result = await verifyCrazyGamesToken(token);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.identity.userId).toBe('cg-user-1');
+  });
+
+  it('rejects a non-PEM value returned by the endpoint', async () => {
+    const { verifyCrazyGamesToken } = await load(ENABLED, 'not-a-pem-key');
+    const token = jwt.sign(PAYLOAD, privateKey, { algorithm: 'RS256', expiresIn: '5m' });
+
+    expect(await verifyCrazyGamesToken(token)).toEqual({ ok: false, reason: 'key_unavailable' });
+  });
 });

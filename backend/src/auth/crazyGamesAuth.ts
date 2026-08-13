@@ -70,8 +70,9 @@ export const resetCrazyGamesKeyCache = (): void => {
  * Fetch the published public key, coalescing concurrent callers so a burst of
  * sign-ins produces one request rather than one per player.
  *
- * The response shape is `{ publicKey: "-----BEGIN PUBLIC KEY-----..." }`. Anything
- * else is treated as unavailable rather than guessed at.
+ * The response shape is `{ publicKey: "-----BEGIN [RSA] PUBLIC KEY-----..." }`. Both
+ * SPKI (`BEGIN PUBLIC KEY`) and PKCS#1 (`BEGIN RSA PUBLIC KEY`) are accepted;
+ * anything else is treated as unavailable rather than guessed at.
  */
 const fetchPublicKey = async (): Promise<string | null> => {
   inFlight ??= (async () => {
@@ -87,7 +88,7 @@ const fetchPublicKey = async (): Promise<string | null> => {
       const body: unknown = await res.json();
       const key =
         body && typeof body === 'object' ? (body as Record<string, unknown>).publicKey : undefined;
-      if (typeof key !== 'string' || !key.includes('BEGIN PUBLIC KEY')) {
+      if (typeof key !== 'string' || !/-----BEGIN (?:RSA )?PUBLIC KEY-----/.test(key)) {
         logger.error('[CG_AUTH] Public key response did not contain a PEM public key.');
         return null;
       }
