@@ -1,12 +1,16 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 import { getLayoutSeatCount } from '../../utils/capacity';
 import { ErrorBoundary } from '../providers/ErrorBoundary';
 import { SceneCrashFallback } from './SceneCrashFallback';
 import { WebGLRecoveryOverlay } from './WebGLRecoveryOverlay';
+import { UnoverseLoader } from '../ui/UnoverseLoader';
+import { ARENAS } from '../../lib/arenas/registry';
+import { ArenaId } from '../../lib/arenas/types';
 
 import { PlayerHandHUD } from './PlayerHandHUD';
 
@@ -35,6 +39,10 @@ const ActionEffects3D = dynamic(
 export const TableScene: React.FC = () => {
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
+  const [sceneReady, setSceneReady] = useState(false);
+
+  const arenaId = room?.arena as ArenaId | undefined;
+  const arenaMeta = arenaId && ARENAS[arenaId] ? ARENAS[arenaId] : ARENAS.classic;
 
   // Calculate local player index for POV camera positioning. Seat count comes
   // from the shared helper so every layer (table, seats, cards, overlays) agrees.
@@ -60,7 +68,11 @@ export const TableScene: React.FC = () => {
         resetKeys={[room?.code]}
         fallback={(_error, retry) => <SceneCrashFallback onRetry={retry} />}
       >
-        <RoomEnvironment numPlayers={numPlayers} localIndex={safeLocalIndex}>
+        <RoomEnvironment
+          numPlayers={numPlayers}
+          localIndex={safeLocalIndex}
+          onReady={() => setSceneReady(true)}
+        >
           <WebGLSeats />
           <WebGLCards />
           {/* Card flights and action effects are decorative. If either throws,
@@ -74,6 +86,27 @@ export const TableScene: React.FC = () => {
           </ErrorBoundary>
         </RoomEnvironment>
       </ErrorBoundary>
+
+      {/* Dedicated Arena Loading Screen: Remains visible until the 3D scene,
+          arena shaders, and canvas have rendered their first live frame. */}
+      <AnimatePresence>
+        {!sceneReady && (
+          <motion.div
+            key="arena-loading-overlay"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className="absolute inset-0 z-50 pointer-events-none"
+          >
+            <UnoverseLoader
+              fullScreen={false}
+              message="Entering Arena..."
+              submessage={`Loading ${arenaMeta.name} 3D Table...`}
+              arenaName={arenaMeta.name}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Shown only while the GPU context is lost; covers the canvas, not the HUD. */}
       <WebGLRecoveryOverlay />

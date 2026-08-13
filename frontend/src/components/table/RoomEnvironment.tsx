@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useDeferredValue, useEffect, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import React, { useDeferredValue, useEffect, useState, useRef } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -34,6 +34,18 @@ export interface RoomEnvironmentProps {
   localIndex: number;
   children?: React.ReactNode;
   isLandingPage?: boolean;
+  onReady?: () => void;
+}
+
+function SceneReadyNotifier({ onReady }: { onReady?: () => void }) {
+  const fired = useRef(false);
+  useFrame(() => {
+    if (!fired.current && onReady) {
+      fired.current = true;
+      onReady();
+    }
+  });
+  return null;
 }
 
 function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolean; numPlayers?: number }) {
@@ -100,7 +112,7 @@ function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolea
   return null;
 }
 
-const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage, children }: RoomEnvironmentProps) {
+const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage, onReady, children }: RoomEnvironmentProps) {
   const { cameraMotion, cameraSensitivity } = useSettingsStore();
   const quality = useEffectiveQuality();
   const reducedMotion = useReducedMotion();
@@ -125,6 +137,7 @@ const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage,
 
   return (
     <>
+      <SceneReadyNotifier onReady={onReady} />
       <CameraSetup isLandingPage={isLandingPage} numPlayers={deferredCount} />
       <OrbitControls
         makeDefault
@@ -175,7 +188,7 @@ const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage,
 });
 Scene.displayName = 'Scene';
 
-export const RoomEnvironment: React.FC<RoomEnvironmentProps> = ({ numPlayers, localIndex, isLandingPage, children }) => {
+export const RoomEnvironment: React.FC<RoomEnvironmentProps> = ({ numPlayers, localIndex, isLandingPage, onReady, children }) => {
   const quality = useEffectiveQuality();
 
   // The renderer's own construction options can only be set when the WebGL
@@ -208,9 +221,9 @@ export const RoomEnvironment: React.FC<RoomEnvironmentProps> = ({ numPlayers, lo
       style={{ background: '#020101', position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
     >
       <WebGLContextGuard />
-      <Scene numPlayers={numPlayers} localIndex={localIndex} isLandingPage={isLandingPage}>
+      <Scene numPlayers={numPlayers} localIndex={localIndex} isLandingPage={isLandingPage} onReady={onReady}>
         {children}
       </Scene>
     </Canvas>
   );
-}
+};

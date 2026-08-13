@@ -19,6 +19,7 @@ import { useSocket } from "../../hooks/useSocket";
 import { usePlatformEntry } from "../../hooks/usePlatformEntry";
 import { usePlatformRouter } from "../../hooks/usePlatformRouter";
 import { useProfileStore } from "../../store/useProfileStore";
+import { useGameStore } from "../../store/useGameStore";
 import { CreateProfileModal } from "../profile/CreateProfileModal";
 import { ProfileModal } from "../profile/ProfileModal";
 import { CreateRoomModal } from "../lobby/CreateRoomModal";
@@ -27,6 +28,7 @@ import { HomeTopRail } from "./HomeTopRail";
 import { HomeHero } from "./HomeHero";
 import { PlayConsole, type PlayMode } from "./PlayConsole";
 import { Button } from "../ui/kit";
+import { UnoverseLoader } from "../ui/UnoverseLoader";
 import { ArenaSelection } from "../../lib/arenas/types";
 import { errorMessage } from "../../utils/errors";
 import { subscribeToNothing } from "../../utils/clientSnapshot";
@@ -106,6 +108,21 @@ export default function HomeScreen() {
   useEffect(() => {
     if (profileHydrated && profileId) void refreshProfile();
   }, [profileHydrated, profileId, refreshProfile]);
+
+  const connectionStatus = useGameStore((s) => s.connectionStatus);
+  const isOnline = connectionStatus === "connected";
+
+  // Safety fallback so an offline or slow server does not trap the player forever
+  const [initTimeout, setInitTimeout] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setInitTimeout(true), 3500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const showInitialLoader =
+    (!profileHydrated || connectionStatus === "connecting" || connectionStatus === "disconnected") &&
+    !isOnline &&
+    !initTimeout;
 
   // Set when the target room's player slots are all full: the user is informed
   // BEFORE entering that they will join as a spectator, and must confirm. (A room
@@ -474,6 +491,29 @@ export default function HomeScreen() {
           profile viewer, invitations and social notifications. Purely additive —
           it renders nothing until the player opens it or a friend does something. */}
       <SocialLayer />
+
+      {/* Initial application/home loading screen: displayed while initial profile
+          hydrates and connection moves from linking to online, smoothly exiting once ready. */}
+      <AnimatePresence>
+        {showInitialLoader && (
+          <motion.div
+            key="initial-app-loader"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+            className="fixed inset-0 z-[9999] pointer-events-auto"
+          >
+            <UnoverseLoader
+              message={connectionStatus === "connecting" ? "Linking..." : "Loading..."}
+              submessage={
+                connectionStatus === "connecting"
+                  ? "Connecting to game server..."
+                  : "Initializing profile & resources..."
+              }
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

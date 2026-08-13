@@ -209,10 +209,13 @@ if (mapsRemoved) log(`pruned ${mapsRemoved} source map(s)`);
  *    matters: this runs first, while the href is still root-absolute.
  */
 let rewritten = 0;
-for (const file of files.filter((f) => f.endsWith('.html'))) {
+for (const file of files.filter((f) => f.endsWith('.html') || f.endsWith('.txt'))) {
   const before = fs.readFileSync(file, 'utf8');
   const after = before
     .replace(/<link[^>]*\brel="manifest"[^>]*>/g, '')
+    .replace(/\["\\\$","link","[^"]*",\{"rel":"manifest"[^\}]*\}\],?/g, '')
+    .replace(/\[\\"\$\\",\\"link\\",\\"[^"]*\\",\{\\"rel\\":\\"manifest\\"[^\}]*\}\],?/g, '')
+    .replace(/\/manifest\.webmanifest/g, '')
     .replace(/(\s(?:src|href)=")\/(?!\/)/g, '$1./');
   if (after !== before) {
     fs.writeFileSync(file, after);

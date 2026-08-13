@@ -44,8 +44,8 @@ const TableScene = dynamic(
     ssr: false,
     loading: () => (
       <PremiumLoader
-        message="Drawing Card Table..."
-        submessage="Aligning table felt & wood grain..."
+        message="ENTERING ARENA..."
+        submessage="Preparing 3D Card Table & World..."
       />
     ),
   },
