@@ -86,6 +86,25 @@ const SOCKET_OPTIONS: Partial<ManagerOptions & SocketOptions> = {
 let sharedSocket: Socket | null = null;
 let listenersAttached = false;
 
+// --- Deferred join (race-condition guard) ------------------------------------
+// When `joinRoom` is called before the socket has completed its connection
+// handshake, the emit would be silently lost. Instead we stash the payload here
+// and flush it once the `connect` event fires. Only one pending join is ever
+// outstanding: a second `joinRoom` call (or a cancellation from the unmounting
+// component) replaces or clears the previous one.
+let pendingJoin: {
+  code: string;
+  name: string;
+  handler: () => void;
+} | null = null;
+
+/** Cancel any outstanding deferred join and remove its listener. */
+const clearPendingJoin = () => {
+  if (!pendingJoin) return;
+  sharedSocket?.off('connect', pendingJoin.handler);
+  pendingJoin = null;
+};
+
 function setupSocketListeners(socketInstance: Socket) {
   if (listenersAttached) return;
   listenersAttached = true;
@@ -378,11 +397,33 @@ export const useSocket = () => {
 
   const joinRoom = (code: string, name: string) => {
     const currentSocket = useGameStore.getState().socket;
-    if (currentSocket) {
+    if (!currentSocket) {
+      logger.warn('[Socket] Socket not initialized yet');
+      return;
+    }
+
+    // Always cancel a prior pending join — a new joinRoom call supersedes it.
+    clearPendingJoin();
+
+    const emitJoin = () => {
       const secret = loadSecret(code, name);
       currentSocket.emit('join-room', { code, name, secret, ...profileCreds() });
+    };
+
+    if (currentSocket.connected) {
+      emitJoin();
     } else {
-      logger.warn('[Socket] Socket not initialized yet');
+      // Socket is mid-handshake (Instant Multiplayer navigated here before the
+      // connection completed). Defer the emit behind a one-shot connect listener.
+      logger.debug('[Socket] Connection in progress — deferring join-room until connected');
+      const handler = () => {
+        // Guard: only flush if this is still the active pending join.
+        if (pendingJoin?.handler !== handler) return;
+        pendingJoin = null;
+        emitJoin();
+      };
+      pendingJoin = { code, name, handler };
+      currentSocket.once('connect', handler);
     }
   };
 
