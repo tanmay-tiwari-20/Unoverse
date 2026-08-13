@@ -32,12 +32,12 @@ export interface HomeHeroProps {
 
 export const HomeHero: React.FC<HomeHeroProps> = ({ className = "" }) => (
   <div
-    className={`flex flex-col items-center gap-4 text-center short:items-start short:text-left ${className}`}
+    className={`flex flex-col items-center gap-3 sm:gap-4 text-center short:items-start short:text-left ${className}`}
   >
     {/* Floating Hero Wordmark Block */}
-    <div className="arcade-bob flex flex-col items-center gap-2 short:items-start">
+    <div className="arcade-bob flex flex-col items-center gap-1.5 sm:gap-2 short:items-start">
       {/* Playful UNO color badge pill */}
-      <div className="flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1 border border-white/15 backdrop-blur-md shadow-lg">
+      <div className="flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-0.5 sm:px-3 sm:py-1 border border-white/15 backdrop-blur-md shadow-lg">
         <span className="h-2.5 w-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
         <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />

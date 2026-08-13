@@ -8,6 +8,7 @@ import { useGameStore } from '../../store/useGameStore';
 import { PresetAvatar } from '../profile/PresetAvatar';
 import { FriendsButton } from '../social/FriendsButton';
 import { useFullscreen } from '../../hooks/useFullscreen';
+import { CAPABILITIES } from '../../lib/platform/capabilities';
 
 export const HomeTopRail: React.FC = () => {
   const hydrated = useProfileStore((s) => s.hydrated);
@@ -64,14 +65,14 @@ export const HomeTopRail: React.FC = () => {
           )}
         </div>
 
-        {/* Right — Fullscreen toggle, Friends drawer & Profile chip */}
+        {/* Right — Fullscreen toggle (web only), Friends drawer & Profile chip */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, type: 'spring', damping: 22, stiffness: 280 }}
           className="pointer-events-auto ml-auto flex shrink-0 items-center gap-2"
         >
-          {isSupported && (
+          {CAPABILITIES.customFullscreen && isSupported && (
             <button
               type="button"
               onClick={toggleFullscreen}

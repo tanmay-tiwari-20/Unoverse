@@ -45,21 +45,21 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
         aria-hidden="true"
       />
 
-      <div className="relative flex flex-col gap-3 p-4 short:gap-2 short:p-3 sm:p-5">
+      <div className="relative flex flex-col gap-2.5 sm:gap-3 p-3.5 sm:p-4 md:p-5 short:gap-1.5 short:p-2.5">
         <button
           type="button"
           onClick={onQuickPlay}
           disabled={loading}
-          className="btn-arcade cta-hero font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2.5 bg-gradient-to-b from-yellow-400 to-amber-600 py-4 text-lg tracking-wide text-[#1a1033] disabled:cursor-not-allowed short:py-2.5 short:text-sm sm:text-xl uppercase"
+          className="btn-arcade cta-hero font-arcade inline-flex w-full cursor-pointer items-center justify-center gap-2.5 bg-gradient-to-b from-yellow-400 to-amber-600 py-3 sm:py-3.5 md:py-4 text-base sm:text-lg md:text-xl tracking-wide text-[#1a1033] disabled:cursor-not-allowed short:py-2 short:text-sm uppercase"
         >
           <Zap
-            size={20}
-            className="shrink-0 fill-[#1a1033]"
+            size={18}
+            className="shrink-0 fill-[#1a1033] sm:size-5"
             aria-hidden="true"
           />
           {loading ? "Finding table…" : "Play Now"}
         </button>
-        <p className="font-rounded -mt-1.5 text-center text-[10px] font-bold text-white/40 short:hidden">
+        <p className="font-rounded -mt-1 text-center text-[10px] font-bold text-white/40 short:hidden">
           Drops you straight into the best open table
         </p>
 
@@ -118,13 +118,13 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  className="ui-code font-arcade w-full px-3 py-2.5 text-center text-lg uppercase tracking-[0.32em] text-white placeholder:tracking-[0.2em] placeholder:text-white/30 focus:outline-none short:py-2 short:text-base"
+                  className="ui-code font-arcade w-full px-3 py-2 sm:py-2.5 text-center text-base sm:text-lg uppercase tracking-[0.32em] text-white placeholder:tracking-[0.2em] placeholder:text-white/30 focus:outline-none short:py-1.5 short:text-sm"
                 />
                 <button
                   type="button"
                   onClick={onJoin}
                   disabled={loading}
-                  className="btn-arcade font-arcade w-full cursor-pointer bg-gradient-to-b from-sky-400 to-blue-600 py-2.5 text-xs uppercase text-white disabled:cursor-not-allowed short:py-2"
+                  className="btn-arcade font-arcade w-full cursor-pointer bg-gradient-to-b from-sky-400 to-blue-600 py-2 sm:py-2.5 text-xs uppercase text-white disabled:cursor-not-allowed short:py-1.5"
                 >
                   Join Room
                 </button>
@@ -138,7 +138,7 @@ export const PlayConsole: React.FC<PlayConsoleProps> = ({
                   type="button"
                   onClick={onCreate}
                   disabled={loading}
-                  className="btn-arcade font-arcade w-full cursor-pointer bg-gradient-to-b from-lime-400 to-green-600 py-2.5 text-xs uppercase text-white disabled:cursor-not-allowed short:py-2"
+                  className="btn-arcade font-arcade w-full cursor-pointer bg-gradient-to-b from-lime-400 to-green-600 py-2 sm:py-2.5 text-xs uppercase text-white disabled:cursor-not-allowed short:py-1.5"
                 >
                   Create Room
                 </button>

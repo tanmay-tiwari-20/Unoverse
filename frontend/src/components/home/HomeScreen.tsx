@@ -305,7 +305,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <main className="w-screen h-screen-dvh relative bg-[#120c2e] overflow-hidden select-none">
+    <main className="w-full h-screen-dvh relative bg-[#120c2e] overflow-hidden select-none">
       {/* 3D Background Scene */}
       <div className="absolute inset-0 z-0">
         <LandingScene />
@@ -332,16 +332,16 @@ export default function HomeScreen() {
           a `px-4` here would be silently clobbered and the console would sit
           flush against the screen edge. The var is what `.safe-x` max()es the
           notch inset against, so this is the knob that actually works. */}
-      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain py-16 pointer-events-none safe-x [--safe-pad-x:1rem] short:[--safe-pad-x:0.75rem] short:py-12">
+      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain px-3.5 py-10 sm:py-8 md:py-6 short:py-3 pointer-events-none safe-x [--safe-pad-x:1rem] short:[--safe-pad-x:0.75rem]">
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, ease: "easeOut" }}
-          className="pointer-events-auto grid w-full max-w-6xl items-center justify-items-center gap-6 short:grid-cols-[1.05fr_minmax(0,20rem)] short:gap-5 lg:grid-cols-[1.1fr_minmax(0,25rem)] lg:gap-12"
+          className="pointer-events-auto grid w-full max-w-5xl items-center justify-items-center gap-5 sm:gap-6 md:grid-cols-[1.05fr_minmax(0,21rem)] md:gap-8 lg:grid-cols-[1.1fr_minmax(0,24rem)] lg:gap-12 short:grid-cols-[1.05fr_minmax(0,19rem)] short:gap-4"
         >
-          <HomeHero className="w-full max-w-md lg:max-w-none lg:items-start lg:text-left" />
+          <HomeHero className="w-full max-w-md md:max-w-none md:items-start md:text-left" />
 
-          <div className="w-full max-w-sm short:max-w-none lg:max-w-none">
+          <div className="w-full max-w-sm md:max-w-none short:max-w-none">
             <PlayConsole
               roomCode={roomCode}
               onRoomCodeChange={setRoomCode}
@@ -357,7 +357,7 @@ export default function HomeScreen() {
         </motion.div>
       </div>
 
-      <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-10 flex justify-center px-4 short:hidden">
+      <div className="pointer-events-none absolute bottom-2.5 left-0 right-0 z-10 hidden justify-center px-4 sm:flex short:hidden">
         <span className="font-rounded text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">
           Built for multiplayer fun
         </span>
