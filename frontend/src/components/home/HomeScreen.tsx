@@ -345,14 +345,15 @@ export default function HomeScreen() {
           a `px-4` here would be silently clobbered and the console would sit
           flush against the screen edge. The var is what `.safe-x` max()es the
           notch inset against, so this is the knob that actually works. */}
-      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain px-3.5 py-10 sm:py-8 md:py-6 short:py-3 pointer-events-none safe-x [--safe-pad-x:1rem] short:[--safe-pad-x:0.75rem]">
+      <div className="absolute inset-0 z-10 flex items-center justify-center overflow-y-auto overscroll-contain px-4 py-10 sm:py-8 md:py-6 short:py-3 pointer-events-none safe-x [--safe-pad-x:1.5rem] sm:[--safe-pad-x:2rem] md:[--safe-pad-x:2.5rem] lg:[--safe-pad-x:3rem] short:[--safe-pad-x:1rem]">
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, ease: "easeOut" }}
           className="pointer-events-auto grid w-full max-w-5xl items-center justify-items-center gap-5 sm:gap-6 md:grid-cols-[1.05fr_minmax(0,21rem)] md:gap-8 lg:grid-cols-[1.1fr_minmax(0,24rem)] lg:gap-12 short:grid-cols-[1.05fr_minmax(0,19rem)] short:gap-4"
         >
-          <HomeHero className="w-full max-w-md md:max-w-none md:items-start md:text-left" />
+          <HomeHero className="w-full max-w-md md:max-w-none md:items-start md:text-left md:pl-5 lg:pl-8" />
+
 
           <div className="w-full max-w-sm md:max-w-none short:max-w-none">
             <PlayConsole

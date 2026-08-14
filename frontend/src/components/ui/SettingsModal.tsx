@@ -97,7 +97,7 @@ const SECTIONS: readonly SectionDef[] = [
     id: "controls",
     label: "Controls",
     Icon: MousePointer2,
-    blurb: "How the camera responds to your input.",
+    blurb: "Mouse, keyboard and camera controls.",
   },
   {
     id: "accessibility",
@@ -488,6 +488,66 @@ export const SettingsModal: React.FC = () => {
           {section === "controls" && (
             <>
               <SectionLabel icon={<MousePointer2 size={11} />}>
+                Mouse
+              </SectionLabel>
+              <div className="ui-card overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-1 text-[10px] uppercase tracking-wide text-white/90">
+                    Click Card
+                  </span>
+                  <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/65">
+                    Select or play card
+                  </span>
+                </div>
+              </div>
+
+              <SectionLabel icon={<Keyboard size={11} />}>
+                Keyboard
+              </SectionLabel>
+              <div className="ui-card overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-white/[0.07]">
+                  <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
+                    1 – 7
+                  </span>
+                  <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/65">
+                    Select cards
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-white/[0.07]">
+                  <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
+                    ← / →
+                  </span>
+                  <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/65">
+                    Navigate cards
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-white/[0.07]">
+                  <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
+                    Space
+                  </span>
+                  <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/65">
+                    Play selected card
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-white/[0.07]">
+                  <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
+                    Enter
+                  </span>
+                  <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/65">
+                    Play / confirm card
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3 py-1.5">
+                  <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
+                    Esc
+                  </span>
+                  <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/65">
+                    Close / cancel
+                  </span>
+                </div>
+              </div>
+
+              <SectionLabel icon={<MousePointer2 size={11} />}>
                 Camera
               </SectionLabel>
               <Slider
@@ -502,12 +562,6 @@ export const SettingsModal: React.FC = () => {
                 How far the view turns for a given drag. Lower is steadier on a
                 touchscreen.
               </p>
-              <LinkRow
-                icon={<Keyboard size={16} className="text-sky-300" />}
-                label="Controls reference"
-                hint="Every key, click and gesture."
-                onClick={() => go(setIsControlsOpen)}
-              />
             </>
           )}
 

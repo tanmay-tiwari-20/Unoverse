@@ -6,10 +6,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { HtmlCard } from '../cards/HtmlCard';
 import { isValidMove, CardItem } from '../../lib/cards/cardEngine';
 import { useViewport } from '../../hooks/useViewport';
-
 import { useSocket } from '../../hooks/useSocket';
+import { useKeyboardControls } from '../../hooks/useKeyboardControls';
 
 export const PlayerHandHUD: React.FC = () => {
+  useKeyboardControls();
+
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
   const currentPlayerId = useGameStore((state) => state.currentPlayerId);
@@ -20,6 +22,8 @@ export const PlayerHandHUD: React.FC = () => {
   const wildColor = useGameStore((state) => state.wildColor);
   const pendingDrawType = useGameStore((state) => state.pendingDrawType);
   const houseRules = useGameStore((state) => state.houseRules);
+  const selectedCardId = useGameStore((state) => state.selectedCardId);
+  const setSelectedCardId = useGameStore((state) => state.setSelectedCardId);
   const { playCard, jumpIn } = useSocket();
   const { width, isMobile, isTablet, isTouch, isLandscape } = useViewport();
 
@@ -125,6 +129,7 @@ export const PlayerHandHUD: React.FC = () => {
     const isPlayable = isMyTurn && !!topCard && isValidMove(card, topCard, wildColor, pendingDrawType);
     const isJumpIn = canJumpIn(card);
     const canPlay = isMyTurn || isJumpIn;
+    const isSelected = selectedCardId === card.id;
 
     const activate = () => {
       if (isMyTurn) playCard(card.id);
@@ -133,11 +138,31 @@ export const PlayerHandHUD: React.FC = () => {
 
     // Accessible name conveys the card and what activating it does.
     const name = describeCard(card);
+    const prefix = isSelected ? '[Selected] ' : '';
     const ariaLabel = isJumpIn
-      ? `Jump in with ${name}`
+      ? `${prefix}Jump in with ${name}`
       : isMyTurn
-        ? isPlayable ? `Play ${name}` : `${name} (not playable)`
-        : name;
+        ? isPlayable ? `${prefix}Play ${name}` : `${prefix}${name} (not playable)`
+        : `${prefix}${name}`;
+
+    const targetY = isSelected
+      ? yArchOffset - liftHover - 8
+      : (isPlayable || isJumpIn)
+        ? yArchOffset - liftPlayable
+        : yArchOffset;
+
+    let ringShadowClasses = '';
+    if (isSelected) {
+      if (canPlay) {
+        ringShadowClasses = 'rounded-xl ring-[3px] sm:ring-4 ring-yellow-300 shadow-[0_0_28px_8px_rgba(253,224,71,0.85)]';
+      } else {
+        ringShadowClasses = 'rounded-xl ring-[3px] sm:ring-4 ring-sky-400 shadow-[0_0_24px_6px_rgba(56,189,248,0.75)]';
+      }
+    } else if (isPlayable) {
+      ringShadowClasses = 'rounded-xl ring-[3px] sm:ring-4 ring-yellow-300 shadow-[0_0_22px_6px_rgba(253,224,71,0.55)]';
+    } else if (isJumpIn) {
+      ringShadowClasses = 'rounded-xl ring-[3px] sm:ring-4 ring-fuchsia-400 shadow-[0_0_22px_6px_rgba(232,121,249,0.55)]';
+    }
 
     return (
       <motion.button
@@ -148,31 +173,32 @@ export const PlayerHandHUD: React.FC = () => {
         tabIndex={canPlay ? 0 : -1}
         initial={{ y: 100, opacity: 0 }}
         animate={{
-          y: (isPlayable || isJumpIn) ? yArchOffset - liftPlayable : yArchOffset,
-          rotate: angle,
+          y: targetY,
+          rotate: isSelected ? 0 : angle,
+          scale: isSelected ? 1.14 : 1,
           opacity: 1
         }}
-        whileHover={canPlay ? {
+        whileHover={{
           y: yArchOffset - liftHover,
           scale: 1.12,
-          zIndex: 50
-        } : undefined}
-        whileTap={canPlay ? { scale: 1.08 } : undefined}
-        transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+          zIndex: 70
+        }}
+        whileTap={{ scale: 1.08 }}
+        transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
         style={{
           width: cardW,
           height: cardH,
           marginLeft: idx === 0 ? 0 : -(cardW - step),
           transformOrigin: 'bottom center',
-          zIndex: (isPlayable || isJumpIn) ? 40 : idx,
+          zIndex: isSelected ? 60 : (isPlayable || isJumpIn) ? 40 : idx,
         }}
         onClick={() => {
+          setSelectedCardId(card.id);
           if (canPlay) activate();
         }}
         className={`relative shrink-0 pointer-events-auto bg-transparent p-0 border-0
-          ${canPlay ? 'cursor-pointer hover:shadow-2xl' : 'opacity-80 cursor-not-allowed'}
-          ${isPlayable ? 'rounded-xl ring-[3px] sm:ring-4 ring-yellow-300 shadow-[0_0_22px_6px_rgba(253,224,71,0.55)]' : ''}
-          ${isJumpIn ? 'rounded-xl ring-[3px] sm:ring-4 ring-fuchsia-400 shadow-[0_0_22px_6px_rgba(232,121,249,0.55)]' : ''}
+          ${canPlay ? 'cursor-pointer hover:shadow-2xl' : 'opacity-85 cursor-pointer'}
+          ${ringShadowClasses}
           transition-shadow duration-200 ease-out`}
       >
         <HtmlCard color={card.color} value={card.value} />
@@ -195,3 +221,4 @@ export const PlayerHandHUD: React.FC = () => {
     </div>
   );
 };
+

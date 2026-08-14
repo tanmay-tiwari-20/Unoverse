@@ -106,6 +106,9 @@ const BROWSER_DEFAULTS = new Set([
   '/apple-touch-icon-precomposed.png',
 ]);
 
+const isBrowserDefault = (pathname) =>
+  BROWSER_DEFAULTS.has(pathname) || pathname.startsWith('/.well-known/');
+
 const violations = [];
 
 // Raw ESC via char code, so no control character is ever pasted into this file.
@@ -160,7 +163,7 @@ const server = http.createServer((req, res) => {
   // Outside the mount: the package reached beyond itself.
   // ---------------------------------------------------------------------------
   if (!pathname.startsWith(MOUNT)) {
-    if (BROWSER_DEFAULTS.has(pathname)) {
+    if (isBrowserDefault(pathname)) {
       log(`${c.dim}browser default  ${pathname} → 404 (not counted)${c.off}`);
       return send(res, 404, 'not found', 'text/plain; charset=utf-8');
     }

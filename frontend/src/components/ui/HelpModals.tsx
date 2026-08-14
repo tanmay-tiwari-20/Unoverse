@@ -147,11 +147,18 @@ export const ReportBugModal = () => {
   );
 };
 
-const CONTROLS: { keys: string; action: string }[] = [
+const MOUSE_CONTROLS: { keys: string; action: string }[] = [
+  { keys: "Click card", action: "Select or play card" },
   { keys: "Drag / Swipe", action: "Rotate the camera" },
   { keys: "Scroll / Pinch", action: "Zoom in and out" },
-  { keys: "Click card", action: "Play that card" },
-  { keys: "Esc", action: "Close menus" },
+];
+
+const KEYBOARD_CONTROLS: { keys: string; action: string }[] = [
+  { keys: "1 – 7", action: "Select cards in hand" },
+  { keys: "← / →", action: "Navigate between cards" },
+  { keys: "Space", action: "Play selected card" },
+  { keys: "Enter", action: "Play / confirm card" },
+  { keys: "Esc", action: "Close menus / deselect" },
 ];
 
 export const ControlsModal = () => {
@@ -162,22 +169,43 @@ export const ControlsModal = () => {
       isOpen={isControlsOpen}
       onClose={() => setIsControlsOpen(false)}
       title="Controls"
-      subtitle="Same on mouse and touch"
+      subtitle="Mouse, keyboard and touch reference"
       icon={Keyboard}
       size="sm"
     >
       <SectionLabel icon={<MousePointerClick size={11} aria-hidden="true" />}>
-        At the table
+        Mouse & Touch
       </SectionLabel>
       <ul className="ui-card overflow-hidden">
-        {CONTROLS.map((c, i) => (
+        {MOUSE_CONTROLS.map((c, i) => (
           <li
             key={c.keys}
-            className={`flex items-center justify-between gap-3 px-3 py-2.5 ${
+            className={`flex items-center justify-between gap-3 px-3 py-2 ${
               i === 0 ? "" : "border-t border-white/[0.07]"
             }`}
           >
-            <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-1 text-[10px] uppercase tracking-wide text-white/90">
+            <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
+              {c.keys}
+            </span>
+            <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/60">
+              {c.action}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <SectionLabel icon={<Keyboard size={11} aria-hidden="true" />}>
+        Keyboard Shortcuts
+      </SectionLabel>
+      <ul className="ui-card overflow-hidden">
+        {KEYBOARD_CONTROLS.map((c, i) => (
+          <li
+            key={c.keys}
+            className={`flex items-center justify-between gap-3 px-3 py-2 ${
+              i === 0 ? "" : "border-t border-white/[0.07]"
+            }`}
+          >
+            <span className="font-arcade shrink-0 rounded-lg border-2 border-white/15 bg-black/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/90">
               {c.keys}
             </span>
             <span className="font-rounded min-w-0 text-right text-[11px] font-bold text-white/60">
