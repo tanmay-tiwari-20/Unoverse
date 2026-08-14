@@ -99,6 +99,16 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
   const chatEnabled = useChatEnabled();
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [isArenaReady, setIsArenaReady] = useState(false);
+
+  // Reset arena readiness when room or arena changes (render-phase derived
+  // state — avoids the cascading re-render a useEffect would cause).
+  const arenaKey = `${room?.code ?? ''}-${room?.arena ?? ''}`;
+  const [prevArenaKey, setPrevArenaKey] = useState(arenaKey);
+  if (prevArenaKey !== arenaKey) {
+    setPrevArenaKey(arenaKey);
+    setIsArenaReady(false);
+  }
 
   // Redirect back if name query parameter is missing
   useEffect(() => {
@@ -183,109 +193,98 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
 
   return (
     <div className="w-screen h-screen-dvh flex flex-col bg-slate-950 text-slate-100 select-none overflow-hidden relative">
-      {/* Reactions Layer Overlay */}
-      <ErrorBoundary section="Reactions" fallback={null}>
-        <ReactionsHandler />
-      </ErrorBoundary>
-
-      {/* Connection Status Banner/Overlay */}
-      <ConnectionOverlay />
-
-      {/* Opponent name + voice status now live on the world-anchored SeatBadge
-          inside WebGLCards, so the separate 2D nameplate overlay is retired. */}
-
-      {/* Premium Settings + House Rules Configuration modals. Grouped: both are
-          optional menus, and neither is on the path to playing a card. */}
-      <ErrorBoundary section="Menus" fallback={null}>
-        <SettingsModal />
-        <HouseRulesModal />
-      </ErrorBoundary>
-
-      {/* Real-time Table Chat (desktop side panel / mobile bottom sheet).
-          Not mounted when the host has disabled Table Chat. */}
-      {chatEnabled && (
-        <ErrorBoundary section="Table Chat" fallback={null}>
-          <ChatPanel />
-        </ErrorBoundary>
-      )}
-
-      {/* Help & Utility Modals */}
-      <ErrorBoundary section="Help" fallback={null}>
-        <HelpModals />
-      </ErrorBoundary>
-      <FPSCounter />
-
-      {/* Landscape nudge for portrait phones. The table is designed wide, so
-          this guides players to rotate — with a persistent opt-out, never a
-          gate. Fenced off so a fault here can't take the table down. */}
-      <ErrorBoundary section="Orientation" fallback={null}>
-        <RotateDevicePrompt />
-      </ErrorBoundary>
-
-      {/* Toast Notifications Container */}
-      <ToastStack />
-
       {/* =================================================================== */}
       {/* FULL SCREEN - Virtual Card Table Viewport                           */}
       {/* =================================================================== */}
       <div className="w-full h-full relative">
-        {/* Full-screen Table Scene */}
+        {/* Full-screen Table Scene: mounts the 3D canvas and dedicated arena loader */}
         <div className="w-full h-full absolute inset-0 z-0">
-          <TableScene />
+          <TableScene onReady={() => setIsArenaReady(true)} />
         </div>
 
-        {/* Winner Highlight Spotlight Overlay */}
-        <WinnerOverlay />
+        {/* =================================================================== */}
+        {/* IN-GAME HUD & OVERLAYS — ONLY MOUNTED ONCE ARENA IS FULLY READY    */}
+        {/* =================================================================== */}
+        {isArenaReady && (
+          <>
+            {/* Reactions Layer Overlay */}
+            <ErrorBoundary section="Reactions" fallback={null}>
+              <ReactionsHandler />
+            </ErrorBoundary>
 
-        {/* HUD: Overlay Top Header Panel */}
-        <ErrorBoundary section="Table Header">
-          <LobbyHeader
-            onOpenInvite={() => setIsInviteModalOpen(true)}
-            onToggleMic={toggleMic}
-          />
-        </ErrorBoundary>
+            {/* Connection Status Banner/Overlay */}
+            <ConnectionOverlay />
 
-        {/* HUD: Bottom Table Actions */}
-        <GameHUD />
+            {/* Premium Settings + House Rules Configuration modals */}
+            <ErrorBoundary section="Menus" fallback={null}>
+              <SettingsModal />
+              <HouseRulesModal />
+            </ErrorBoundary>
+
+            {/* Real-time Table Chat */}
+            {chatEnabled && (
+              <ErrorBoundary section="Table Chat" fallback={null}>
+                <ChatPanel />
+              </ErrorBoundary>
+            )}
+
+            {/* Help & Utility Modals */}
+            <ErrorBoundary section="Help" fallback={null}>
+              <HelpModals />
+            </ErrorBoundary>
+            <FPSCounter />
+
+            {/* Landscape nudge for portrait phones */}
+            <ErrorBoundary section="Orientation" fallback={null}>
+              <RotateDevicePrompt />
+            </ErrorBoundary>
+
+            {/* Toast Notifications Container */}
+            <ToastStack />
+
+            {/* Winner Highlight Spotlight Overlay */}
+            <WinnerOverlay />
+
+            {/* HUD: Overlay Top Header Panel */}
+            <ErrorBoundary section="Table Header">
+              <LobbyHeader
+                onOpenInvite={() => setIsInviteModalOpen(true)}
+                onToggleMic={toggleMic}
+              />
+            </ErrorBoundary>
+
+            {/* HUD: Bottom Table Actions */}
+            <GameHUD />
+
+            {/* OVERLAYS: Game Stopped Notice */}
+            <GameStoppedNotice />
+
+            {/* OVERLAYS: forced-choice dialogs and the end-of-round summary */}
+            <ErrorBoundary section="Game Dialogs" resetKeys={[gameStatus]}>
+              <ColorPickerDialog />
+              <SwapTargetDialog />
+              <EndOfRound />
+            </ErrorBoundary>
+
+            {/* OVERLAYS: Invite Friends Modal */}
+            <InviteModal
+              open={isInviteModalOpen}
+              onClose={() => setIsInviteModalOpen(false)}
+              roomId={roomId}
+            />
+
+            {/* GAME EFFECTS LAYER */}
+            <ErrorBoundary section="Turn Glow" fallback={null}>
+              <TurnGlowIndicator />
+            </ErrorBoundary>
+
+            {/* FRIENDS & SOCIAL */}
+            <ErrorBoundary section="Friends" fallback={null}>
+              <SocialLayer />
+            </ErrorBoundary>
+          </>
+        )}
       </div>
-
-      {/* =================================================================== */}
-      {/* OVERLAYS: Game Stopped — Not Enough Players Banner                  */}
-      {/* =================================================================== */}
-      <GameStoppedNotice />
-
-      {/* =================================================================== */}
-      {/* OVERLAYS: forced-choice dialogs and the end-of-round summary.       */}
-      {/* Reset on any phase change so a crashed dialog can't outlive it.     */}
-      {/* =================================================================== */}
-      <ErrorBoundary section="Game Dialogs" resetKeys={[gameStatus]}>
-        <ColorPickerDialog />
-        <SwapTargetDialog />
-        <EndOfRound />
-      </ErrorBoundary>
-
-      {/* =================================================================== */}
-      {/* OVERLAYS: Invite Friends Modal                                      */}
-      {/* =================================================================== */}
-      <InviteModal
-        open={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
-        roomId={roomId}
-      />
-
-      {/* GAME EFFECTS LAYER */}
-      <ErrorBoundary section="Turn Glow" fallback={null}>
-        <TurnGlowIndicator />
-      </ErrorBoundary>
-
-      {/* =================================================================== */}
-      {/* FRIENDS & SOCIAL: drawer, player profiles, invitations, notices.     */}
-      {/* Fenced off with `fallback={null}` like every other overlay here, so a */}
-      {/* fault in the social layer can never take the table down with it.     */}
-      {/* =================================================================== */}
-      <ErrorBoundary section="Friends" fallback={null}>
-        <SocialLayer />
-      </ErrorBoundary>
     </div>
   );
 }

@@ -36,10 +36,29 @@ const ActionEffects3D = dynamic(
   { ssr: false }
 );
 
-export const TableScene: React.FC = () => {
+export interface TableSceneProps {
+  onReady?: () => void;
+}
+
+export const TableScene: React.FC<TableSceneProps> = ({ onReady }) => {
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
   const [sceneReady, setSceneReady] = useState(false);
+
+  // Reset scene readiness when room or arena changes (render-phase derived
+  // state — React's recommended replacement for getDerivedStateFromProps,
+  // avoids the cascading re-render an effect would cause).
+  const sceneKey = `${room?.code ?? ''}-${room?.arena ?? ''}`;
+  const [prevSceneKey, setPrevSceneKey] = useState(sceneKey);
+  if (prevSceneKey !== sceneKey) {
+    setPrevSceneKey(sceneKey);
+    setSceneReady(false);
+  }
+
+  const handleSceneReady = React.useCallback(() => {
+    setSceneReady(true);
+    onReady?.();
+  }, [onReady]);
 
   const arenaId = room?.arena as ArenaId | undefined;
   const arenaMeta = arenaId && ARENAS[arenaId] ? ARENAS[arenaId] : ARENAS.classic;
@@ -67,14 +86,16 @@ export const TableScene: React.FC = () => {
         section="3D Table"
         resetKeys={[room?.code]}
         fallback={(_error, retry) => {
-          if (!sceneReady) setSceneReady(true);
+          if (!sceneReady) {
+            handleSceneReady();
+          }
           return <SceneCrashFallback onRetry={retry} />;
         }}
       >
         <RoomEnvironment
           numPlayers={numPlayers}
           localIndex={safeLocalIndex}
-          onReady={() => setSceneReady(true)}
+          onReady={handleSceneReady}
         >
           <WebGLSeats />
           <WebGLCards />
@@ -98,7 +119,7 @@ export const TableScene: React.FC = () => {
             key="arena-loading-overlay"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: "easeOut" }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
             className="absolute inset-0 z-50 pointer-events-none"
           >
             <UnoverseLoader
@@ -115,10 +136,12 @@ export const TableScene: React.FC = () => {
       <WebGLRecoveryOverlay />
 
       {/* HUD LAYER — the hand is how the game is actually played, so it gets its
-          own boundary and is never brought down by the scene behind it. */}
-      <ErrorBoundary section="Your Hand">
-        <PlayerHandHUD />
-      </ErrorBoundary>
+          own boundary and is only mounted once the arena is fully loaded and ready. */}
+      {sceneReady && (
+        <ErrorBoundary section="Your Hand">
+          <PlayerHandHUD />
+        </ErrorBoundary>
+      )}
 
     </div>
   );
