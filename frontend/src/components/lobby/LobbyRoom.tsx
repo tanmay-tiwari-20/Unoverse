@@ -126,7 +126,7 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
 
   // Connect socket and join room seating list
   useEffect(() => {
-    if (!roomId || !name || !socket) return;
+    if (!roomId || !name) return;
 
     joinRoom(roomId, name);
 

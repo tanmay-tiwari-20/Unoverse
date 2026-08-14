@@ -82,6 +82,15 @@ const SOCKET_OPTIONS: Partial<ManagerOptions & SocketOptions> = {
   timeout: 20000,
 };
 
+const getOrCreateSocket = (): Socket => {
+  if (!sharedSocket) {
+    logger.debug('SOCKET_CREATED');
+    sharedSocket = io(BACKEND_URL, SOCKET_OPTIONS);
+    setupSocketListeners(sharedSocket);
+  }
+  return sharedSocket;
+};
+
 // Global singleton socket instance to prevent duplicate socket connections
 let sharedSocket: Socket | null = null;
 let listenersAttached = false;
@@ -368,13 +377,7 @@ export const useSocket = () => {
   const setConnectionStatus = useGameStore((state) => state.setConnectionStatus);
 
   useEffect(() => {
-    if (!sharedSocket) {
-      logger.debug('SOCKET_CREATED');
-      sharedSocket = io(BACKEND_URL, SOCKET_OPTIONS);
-      setupSocketListeners(sharedSocket);
-    }
-
-    const socketInstance = sharedSocket;
+    const socketInstance = getOrCreateSocket();
 
     if (!socketInstance.connected) {
       setConnectionStatus('connecting');
@@ -387,18 +390,27 @@ export const useSocket = () => {
   }, [socket, setSocket, setConnectionStatus]);
 
   const createRoom = (name: string) => {
-    const currentSocket = useGameStore.getState().socket;
-    if (currentSocket) {
-      currentSocket.emit('create-room', { name, ...profileCreds() });
-    } else {
-      logger.warn('[Socket] Socket not initialized yet');
-    }
+    const currentSocket = useGameStore.getState().socket || getOrCreateSocket();
+    currentSocket.emit('create-room', { name, ...profileCreds() });
   };
 
   const joinRoom = (code: string, name: string) => {
-    const currentSocket = useGameStore.getState().socket;
-    if (!currentSocket) {
-      logger.warn('[Socket] Socket not initialized yet');
+    const currentSocket = useGameStore.getState().socket || getOrCreateSocket();
+
+    const normCode = code.trim().toUpperCase();
+    const normName = name.trim();
+
+    // De-duplication check: if we are already in this room as this player or spectator, ignore duplicate join
+    const state = useGameStore.getState();
+    const isAlreadySeatedInRoom =
+      state.room?.code?.toUpperCase() === normCode &&
+      (state.player?.name === normName || state.spectator?.name === normName);
+    if (isAlreadySeatedInRoom) {
+      return;
+    }
+
+    // If an identical join is already pending connection, don't re-register
+    if (pendingJoin && pendingJoin.code.toUpperCase() === normCode && pendingJoin.name === normName) {
       return;
     }
 
@@ -406,8 +418,8 @@ export const useSocket = () => {
     clearPendingJoin();
 
     const emitJoin = () => {
-      const secret = loadSecret(code, name);
-      currentSocket.emit('join-room', { code, name, secret, ...profileCreds() });
+      const secret = loadSecret(normCode, normName);
+      currentSocket.emit('join-room', { code: normCode, name: normName, secret, ...profileCreds() });
     };
 
     if (currentSocket.connected) {
@@ -422,7 +434,7 @@ export const useSocket = () => {
         pendingJoin = null;
         emitJoin();
       };
-      pendingJoin = { code, name, handler };
+      pendingJoin = { code: normCode, name: normName, handler };
       currentSocket.once('connect', handler);
     }
   };
