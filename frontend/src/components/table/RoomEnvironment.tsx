@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useDeferredValue, useEffect, useState, useRef } from 'react';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import React, { useDeferredValue, useEffect, useState } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useSettingsStore } from '../../store/useSettingsStore';
@@ -37,16 +37,6 @@ export interface RoomEnvironmentProps {
   onReady?: () => void;
 }
 
-function SceneReadyNotifier({ onReady }: { onReady?: () => void }) {
-  const fired = useRef(false);
-  useFrame(() => {
-    if (!fired.current && onReady) {
-      fired.current = true;
-      onReady();
-    }
-  });
-  return null;
-}
 
 function CameraSetup({ isLandingPage, numPlayers = 6 }: { isLandingPage?: boolean; numPlayers?: number }) {
   const size = useThree((state) => state.size);
@@ -137,7 +127,6 @@ const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage,
 
   return (
     <>
-      <SceneReadyNotifier onReady={onReady} />
       <CameraSetup isLandingPage={isLandingPage} numPlayers={deferredCount} />
       <OrbitControls
         makeDefault
@@ -170,9 +159,11 @@ const Scene = React.memo(function Scene({ numPlayers, localIndex, isLandingPage,
         tableGroupScale={tableGroupScale}
         isLandingPage={isLandingPage}
         reducedMotion={reducedMotion}
+        onReady={onReady}
       />
 
       {children}
+
 
       {/* Global bloom pass — sits AFTER the arena and gameplay layers so it
           composites the whole frame. Renders nothing unless the effective tier

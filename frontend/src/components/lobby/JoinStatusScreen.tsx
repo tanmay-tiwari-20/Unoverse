@@ -20,41 +20,43 @@ export const JoinStatusScreen: React.FC = () => {
   const setError = useGameStore((s) => s.setError);
   const connectionStatus = useGameStore((s) => s.connectionStatus);
 
+  if (!error) {
+    return (
+      <PremiumLoader
+        message="Connecting to Lobby..."
+        submessage={`Status: ${connectionStatus.toUpperCase()} • Syncing seating slots...`}
+      />
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-4 min-h-screen arcade-bg arcade-dots">
       <div className="text-center max-w-sm flex flex-col items-center gap-4">
-        {error ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="panel-arcade bg-gradient-to-b from-rose-600 to-red-800 p-6 flex flex-col items-center gap-4"
-          >
-            <ShieldAlert className="text-yellow-300 animate-bounce" size={48} />
-            <h2 className="font-arcade text-2xl uppercase tracking-wide text-white arcade-stroke-sm">Join Failed</h2>
-            <p className="font-rounded text-white/90 text-sm leading-relaxed font-semibold">
-              {error === 'Room not found' ? 'This room no longer exists' : error}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="panel-arcade bg-gradient-to-b from-rose-600 to-red-800 p-6 flex flex-col items-center gap-4"
+        >
+          <ShieldAlert className="text-yellow-300 animate-bounce" size={48} />
+          <h2 className="font-arcade text-2xl uppercase tracking-wide text-white arcade-stroke-sm">Join Failed</h2>
+          <p className="font-rounded text-white/90 text-sm leading-relaxed font-semibold">
+            {error === 'Room not found' ? 'This room no longer exists' : error}
+          </p>
+          {(error === 'Room not found' || error === 'This room no longer exists') && (
+            <p className="font-rounded text-[11px] text-yellow-200 font-bold uppercase tracking-wider animate-pulse">
+              Redirecting to home page shortly...
             </p>
-            {(error === 'Room not found' || error === 'This room no longer exists') && (
-              <p className="font-rounded text-[11px] text-yellow-200 font-bold uppercase tracking-wider animate-pulse">
-                Redirecting to home page shortly...
-              </p>
-            )}
-            <button
-              onClick={() => {
-                setError(null);
-                router.push(HOME_HREF);
-              }}
-              className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase"
-            >
-              Return Home
-            </button>
-          </motion.div>
-        ) : (
-          <PremiumLoader
-            message="Connecting to Lobby..."
-            submessage={`Status: ${connectionStatus.toUpperCase()} • Syncing seating slots...`}
-          />
-        )}
+          )}
+          <button
+            onClick={() => {
+              setError(null);
+              router.push(HOME_HREF);
+            }}
+            className="btn-arcade w-full bg-gradient-to-b from-blue-400 to-blue-600 text-white py-3 px-4 text-sm uppercase"
+          >
+            Return Home
+          </button>
+        </motion.div>
       </div>
     </div>
   );

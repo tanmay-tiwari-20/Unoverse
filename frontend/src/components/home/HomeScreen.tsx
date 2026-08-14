@@ -111,18 +111,14 @@ export default function HomeScreen() {
 
   const connectionStatus = useGameStore((s) => s.connectionStatus);
   const isOnline = connectionStatus === "connected";
+  const [landingReady, setLandingReady] = useState(false);
 
-  // Safety fallback so an offline or slow server does not trap the player forever
-  const [initTimeout, setInitTimeout] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setInitTimeout(true), 3500);
-    return () => clearTimeout(timer);
-  }, []);
+  // The loader remains visible until the real ready state is reached:
+  // profile hydrated + socket connection established (or error state) + landing scene rendered.
+  const isAppReady =
+    profileHydrated && (isOnline || connectionStatus === "error") && landingReady;
+  const showInitialLoader = !isAppReady;
 
-  const showInitialLoader =
-    (!profileHydrated || connectionStatus === "connecting" || connectionStatus === "disconnected") &&
-    !isOnline &&
-    !initTimeout;
 
   // Set when the target room's player slots are all full: the user is informed
   // BEFORE entering that they will join as a spectator, and must confirm. (A room
@@ -325,7 +321,7 @@ export default function HomeScreen() {
     <main className="w-full h-screen-dvh relative bg-[#120c2e] overflow-hidden select-none">
       {/* 3D Background Scene */}
       <div className="absolute inset-0 z-0">
-        <LandingScene />
+        <LandingScene onReady={() => setLandingReady(true)} />
       </div>
 
       {/* Playful color wash + dots over the 3D scene */}
@@ -500,7 +496,7 @@ export default function HomeScreen() {
             key="initial-app-loader"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
             className="fixed inset-0 z-[9999] pointer-events-auto"
           >
             <UnoverseLoader
@@ -508,7 +504,11 @@ export default function HomeScreen() {
               submessage={
                 connectionStatus === "connecting"
                   ? "Connecting to game server..."
-                  : "Initializing profile & resources..."
+                  : !profileHydrated
+                    ? "Initializing player profile..."
+                    : !landingReady
+                      ? "Preparing 3D Arcade..."
+                      : "Loading Unoverse..."
               }
             />
           </motion.div>

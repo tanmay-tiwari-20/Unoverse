@@ -66,7 +66,10 @@ export const TableScene: React.FC = () => {
       <ErrorBoundary
         section="3D Table"
         resetKeys={[room?.code]}
-        fallback={(_error, retry) => <SceneCrashFallback onRetry={retry} />}
+        fallback={(_error, retry) => {
+          if (!sceneReady) setSceneReady(true);
+          return <SceneCrashFallback onRetry={retry} />;
+        }}
       >
         <RoomEnvironment
           numPlayers={numPlayers}

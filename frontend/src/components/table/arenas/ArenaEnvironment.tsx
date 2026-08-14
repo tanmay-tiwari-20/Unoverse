@@ -102,17 +102,36 @@ function ArenaFallback() {
   );
 }
 
+function SceneReadyNotifier({ onReady }: { onReady?: () => void }) {
+  const fired = React.useRef(false);
+  // React Three Fiber hook to wait for the first rendered frame of the mounted arena
+  React.useEffect(() => {
+    if (!fired.current && onReady) {
+      fired.current = true;
+      onReady();
+    }
+  }, [onReady]);
+  return null;
+}
+
 export interface ArenaEnvironmentProps extends ArenaProps {
   /** Concrete or raw arena id; anything unknown resolves to the classic default. */
   arenaId?: ArenaId | string | null;
+  /** Callback fired once the active arena is mounted and rendered */
+  onReady?: () => void;
 }
 
-export function ArenaEnvironment({ arenaId, ...props }: ArenaEnvironmentProps) {
+export function ArenaEnvironment({ arenaId, onReady, ...props }: ArenaEnvironmentProps) {
   const id = resolveArena(arenaId);
 
   // Classic (and any unknown id) renders synchronously — no Suspense, no chunk.
   if (!isThemedArena(id)) {
-    return <ClassicArena {...props} />;
+    return (
+      <>
+        <ClassicArena {...props} />
+        <SceneReadyNotifier onReady={onReady} />
+      </>
+    );
   }
 
   const Themed = LAZY_ARENAS[id];
@@ -120,8 +139,10 @@ export function ArenaEnvironment({ arenaId, ...props }: ArenaEnvironmentProps) {
   return (
     <Suspense fallback={<ArenaFallback />}>
       <Themed {...props} />
+      <SceneReadyNotifier onReady={onReady} />
     </Suspense>
   );
 }
 
 export default ArenaEnvironment;
+

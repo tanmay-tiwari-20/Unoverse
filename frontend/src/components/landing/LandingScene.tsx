@@ -79,14 +79,29 @@ const LandingSceneContent: React.FC = () => {
   );
 };
 
-export const LandingScene: React.FC = () => {
+export interface LandingSceneProps {
+  onReady?: () => void;
+}
+
+export const LandingScene: React.FC<LandingSceneProps> = ({ onReady }) => {
   return (
     // The landing scene is pure decoration behind the join form. If WebGL is
     // unavailable or the scene throws, render nothing at all — the form's own
     // background is already sufficient, and a visible error here would be worse
     // than the missing ambience.
-    <ErrorBoundary section="Landing Scene" fallback={null}>
-      <RoomEnvironment numPlayers={2} localIndex={0} isLandingPage={true}>
+    <ErrorBoundary
+      section="Landing Scene"
+      fallback={() => {
+        onReady?.();
+        return null;
+      }}
+    >
+      <RoomEnvironment
+        numPlayers={2}
+        localIndex={0}
+        isLandingPage={true}
+        onReady={onReady}
+      >
         <LandingSceneContent />
       </RoomEnvironment>
     </ErrorBoundary>
@@ -94,3 +109,4 @@ export const LandingScene: React.FC = () => {
 };
 
 export default LandingScene;
+
