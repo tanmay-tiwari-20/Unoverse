@@ -129,7 +129,7 @@ export function ArenaEnvironment({ arenaId, onReady, ...props }: ArenaEnvironmen
     return (
       <>
         <ClassicArena {...props} />
-        <SceneReadyNotifier onReady={onReady} />
+        <SceneReadyNotifier key={id} onReady={onReady} />
       </>
     );
   }
@@ -139,7 +139,7 @@ export function ArenaEnvironment({ arenaId, onReady, ...props }: ArenaEnvironmen
   return (
     <Suspense fallback={<ArenaFallback />}>
       <Themed {...props} />
-      <SceneReadyNotifier onReady={onReady} />
+      <SceneReadyNotifier key={id} onReady={onReady} />
     </Suspense>
   );
 }
