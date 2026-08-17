@@ -15,7 +15,7 @@
 
 **Create a room. Share the code. Play UNO with anyone, anywhere.**
 
-[✨ Features](#-features) • [🏟️ Arenas](#-themed-arenas) • [🤖 Bots](#-ai-opponents) • [👤 Profiles](#-player-profiles--stats) • [🏗️ Architecture](#-architecture) • [🚀 Getting Started](#-getting-started) • [🃏 House Rules](#-house-rules) • [📁 Project Structure](#-project-structure) • [🚢 Deployment](#-deployment)
+[✨ Features](#-features) • [🏟️ Arenas](#-themed-arenas) • [🤖 Bots](#-ai-opponents) • [👤 Profiles](#-player-profiles--stats) • [🤝 Friends](#-friends--presence) • [🏗️ Architecture](#-architecture) • [🚀 Getting Started](#-getting-started) • [🎮 Controls](#-controls) • [🃏 House Rules](#-house-rules) • [🌍 Platforms](#-cross-platform--crazygames) • [📁 Structure](#-project-structure) • [🚢 Deployment](#-deployment)
 
 </div>
 
@@ -41,9 +41,12 @@
 ### 🌐 Multiplayer & Social
 * **Instant Room Creation**: Launch a room instantly and obtain a shareable 6-character room code.
 * **Invite & Sharing Modal**: Invite friends using the interactive lobby panel to copy invite links or share directly via the native Web Share API.
-* **Real-Time Presence**: Track players vs spectators in the lobby roster with live seat counts (e.g. `4/6`).
+* **Friends & Live Presence**: A full **server-authoritative friends system** — send/accept/decline requests, search players by `Name#TAG` or Player ID, block/unblock, and see each friend's live status (*online · in lobby · playing · watching · away*) the moment it changes.
+* **Cross-Room Invites**: Invite a friend from anywhere straight into your current room, or **jump directly into a friend's game** — no room code to type. Invites are server-issued, time-boxed, and route through the normal seat/spectator join gate.
+* **Privacy Controls**: Per-profile privacy governs who can friend-request you, whether your online status and 3D outfit are visible, and whether friends may join your room — all enforced on the backend.
+* **Live Lobby Roster**: Track players vs spectators in the room roster with live seat counts (e.g. `4/6`).
 * **Interactive Text Chat**: Real-time room chat with user avatars, grouped messages, and automatic scrolling.
-* **Table-Wide Emoji Reactions**: Send animated emoji bubbles visible to the entire table in real-time.
+* **Table-Wide Emoji Reactions**: Send animated emoji bubbles from a radial picker, visible to the entire table in real-time.
 * **WebRTC Voice Chat**: Talk hands-free via peer-to-peer audio. Powered by built-in fallback TURN servers for traversing corporate firewalls and strict NATs.
 * **Graceful Reconnection**: Players and spectators get a 60-second grace window to reconnect via session secrets without losing their seats or hand state.
 
@@ -54,12 +57,20 @@
 * **Cinematic Card Physics**: Beautiful animations for drawing cards, playing cards, and deck shuffling.
 * **Dynamic 3D Action Effects**: Visually rich effects for Skips, Reverses, and card draw actions.
 * **Glow Turn Indicators**: Glowing table seats and active deck rings point to whose turn it is.
+* **Full Input Support**: Play by mouse, touch, or **keyboard** — number keys select cards, arrows navigate the hand, Space/Enter plays, Esc deselects. Plus one-tap **fullscreen**, a landscape-optimized layout, and a portrait-phone rotate nudge.
 * **Adaptive Quality Engine**: An FPS-driven quality manager (high/medium/low tiers) auto-tunes resolution, shadows, particles, and post-processing — plus high-tier selective **bloom** — so the scene stays smooth on everything from a phone to a desktop GPU. Honors `prefers-reduced-motion`.
 
 ### 👤 Profiles & Progression
-* **Guest Player Profiles**: A one-time profile (display name, `#tag` discriminator, and a choice of 16 preset avatars) identifies you across sessions — persisted locally, authenticated by a private secret.
+* **Guest Player Profiles**: A one-time profile identifies you across sessions — a display name, an auto-assigned `#tag` discriminator, and a permanent numeric **Player ID**. Persisted server-side and authenticated by a private secret; only the id + secret ever live in your browser.
+* **40 Playable 3D Characters**: Choose from **40 hand-crafted human avatars** (20 male, 20 female), each with its own 3D outfit — hairstyle, facial hair, accessories, and a full PBR color palette. Your look renders identically as a 2D portrait in menus and as a **fully modeled 3D character** at the table.
 * **Server-Authoritative Lifetime Stats**: Matches, rounds, win rate, points, best/current win streaks, and detailed card/call/challenge counters are computed on the backend from live game state — never trusted from the client.
 * **Match History**: Your recent matches (placement, opponents, winner, duration, rules) are recorded and viewable in the profile modal.
+
+### 🌍 Cross-Platform & PWA
+* **One Codebase, Two Targets**: The same game ships as a self-hosted **web app** and as a **[CrazyGames](https://crazygames.com) HTML5 portal package**. The target is chosen at *build time* — the CrazyGames SDK never enters the web bundle.
+* **Platform Adapter**: A single no-throw `PlatformAdapter` port abstracts sign-in, cross-device storage, invite links, routing, ads, and loading/gameplay lifecycle — a no-op on web, backed by the CrazyGames SDK v3 on the portal. Features are gated by **capabilities**, not platform `if`-checks.
+* **Optional Platform Sign-In**: On CrazyGames, a player's RS256-signed user token is verified server-side (`POST /api/auth/crazygames`) and linked to a permanent Unoverse profile, so stats and friends persist across sessions. Guest play is completely unaffected.
+* **Installable PWA**: On the web build, Unoverse installs as a Progressive Web App (offline shell, landscape orientation, maskable icons) with optional privacy-friendly analytics.
 
 ### ⚡ Performance & Technical Stack
 * **State Selector Optimization**: Selective Zustand subscriptions ensure components only re-render when their specific slices of state change.
@@ -109,11 +120,19 @@ still builds a persistent identity and a lifetime record — no account or passw
 required.
 
 ### Identity
-* A one-time **guest profile** stores a `displayName`, a short `#tag` discriminator
-  (e.g. `#5LHL`) that keeps identical names distinct, and one of **16 preset avatars**.
-* The profile id lives in the browser and is authenticated by a private `secret` that
-  is **never broadcast** to other players — only the derived `PublicProfile`
-  (everything except the secret, plus a computed win rate) is ever shared.
+* A one-time **guest profile** stores a `displayName`, a short auto-generated `#tag`
+  discriminator (e.g. `#5LHL`) that keeps identical names distinct, a permanent numeric
+  **Player ID**, and a chosen **avatar + 3D outfit** (one of **40 human characters** — 20
+  male, 20 female — rendered both as a 2D portrait and a modeled 3D table character).
+* The profile id + private `secret` live in the browser; the secret is **never broadcast**
+  to other players — only the derived `PublicProfile` (no secret, no social graph, plus a
+  computed win rate) is ever shared. Cosmetic choices are persisted **server-side**.
+* **Optional platform identity**: a CrazyGames player can link their portal account to an
+  Unoverse profile (verified RS256 token → a private `externalIds` map), turning a guest
+  into a returning, stat-persisting player without changing anything else about the game.
+* **Privacy settings** control who may send friend requests (everyone / friends-of-friends /
+  nobody), whether your online status and 3D outfit are visible, and whether friends may join
+  your room — all applied at the server boundary.
 
 ### Tracked lifetime stats
 All stats are computed **on the backend from live game state** and never trusted from
@@ -143,8 +162,45 @@ They are exposed over a small REST surface:
 | :--- | :--- | :--- |
 | `POST` | `/api/profiles` | Create a new guest profile. |
 | `GET` | `/api/profiles/:id` | Fetch a public profile (no secret). |
-| `PATCH` | `/api/profiles/:id` | Update display name / avatar (secret-authenticated). |
+| `PATCH` | `/api/profiles/:id` | Update display name / avatar / outfit / privacy (secret-authenticated). |
 | `POST` | `/api/profiles/:id/reset` | Reset lifetime stats (secret-authenticated). |
+| `POST` | `/api/auth/crazygames` | Verify a CrazyGames user token & resolve/link a profile *(portal build only)*. |
+
+---
+
+## 🤝 Friends & Presence
+
+Beyond in-room chat, Unoverse has a complete **server-authoritative social layer** so you can
+build a friends list, see who's online, and pull each other into games — all over Socket.IO,
+with the friend graph persisted on your profile.
+
+### Friends
+* **Requests & graph** — send, accept, decline, cancel, and remove; two people who request
+  each other are auto-matched. Every relationship state (`friends`, `request-sent`,
+  `request-received`, `blocked`, …) is computed on the server, never inferred by the client.
+* **Find players** — search by `Name#TAG`, a bare `#TAG`, or a Player ID.
+* **Block / unblock** — a block severs the friendship, drops pending requests both ways, and
+  voids any live invites.
+* **Inspect** — open a player's public card (stats, win rate, recent matches, favorite arena),
+  with their privacy applied server-side.
+
+### Presence
+* Live status — **online · in lobby · playing · watching · away · offline** — is **derived on
+  the server** from the actual room/game state; a client can never fake it.
+* Multi-tab safe (per-profile socket reference-counting) and pushed **only to your online
+  friends**, so an idle server produces no fan-out traffic.
+
+### Invites
+* **Cross-room invites** — invite a friend from anywhere into your current room; the room code
+  is taken from *your* live presence, not the client payload, so you can't invite someone into
+  a room you aren't in.
+* **Join a friend** — jump straight into a friend's game with no code. Both paths run through
+  the normal `joinRoom` seat/spectator gate, so capacity and spectator rules always apply.
+* Invites are time-boxed (default 90s), server-owned, and redelivered on reconnect.
+
+> The friends layer is entirely **additive** — it registers no listeners on gameplay events
+> and the game never depends on it. In-room chat, emoji reactions, and WebRTC voice are
+> unchanged. The whole system is **Socket.IO-only** (`social:*` events) with no new REST surface.
 
 ---
 
@@ -154,13 +210,13 @@ They are exposed over a small REST surface:
                     ┌─────────────────────────────────────────────┐
                     │              Browser (Client)               │
                     │                                             │
-                    │   Next.js 16 ─── React 19 ─── Zustand       │
-                    │       │              │                      │
-                    │   R3F/drei      Framer Motion               │
-                    │   (3D Table)    (UI Animations)             │
+                    │   Next.js 16 · React 19 · Zustand · Framer  │
+                    │                                             │
+                    │   R3F / drei          Platform Adapter      │
+                    │   (3D Table)          (web / CrazyGames)    │
                     └──────┬──────────────┬───────────────────────┘
                            │              │
-                    HTTPS (SSR)    WSS (Socket.IO)    WebRTC (Voice)
+                    HTTPS (REST)   WSS (Socket.IO)    WebRTC (Voice)
                            │              │                │
                     ┌──────▼──────────────▼────────┐       │
                     │        Backend Server        │       │
@@ -174,12 +230,14 @@ They are exposed over a small REST surface:
                     │   ├── deck.ts (cards)        │       │
                     │   └── scoring.ts             │       │
                     │        │                     │       │
-                    │   Room Manager               │       │
+                    │   Room Mgr · Bot Runner      │       │
+                    │   Social/Presence · Profiles │       │
                     └────────┬─────────────────────┘       │
                              │                             │
                     ┌────────▼─────────┐                   │
                     │   Redis 7        │         Browser ◄─┘
-                    │ (State + Pub/Sub)│
+                    │ State · Pub/Sub  │
+                    │ Rooms · Profiles │
                     └──────────────────┘
 ```
 
@@ -187,12 +245,13 @@ They are exposed over a small REST surface:
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | Next.js 16 (App Router), React 19, React Three Fiber, drei, @react-three/postprocessing (bloom), Tailwind CSS v4, Zustand, Framer Motion, Lucide Icons |
+| **Frontend** | Next.js 16 (App Router), React 19, React Three Fiber, drei, @react-three/postprocessing (bloom), Tailwind CSS v4, Zustand, Framer Motion, Lucide Icons, PWA + Vercel Analytics |
 | **3D / Perf** | Procedural code-split arenas • FPS-driven adaptive quality (high/medium/low) • selective bloom • `prefers-reduced-motion` aware |
-| **Backend** | Node.js 20+, Express 4, Socket.IO 4, TypeScript 5, Zod 4, compression |
-| **Realtime** | Socket.IO (game state + chat) • WebRTC (peer-to-peer voice, fallback TURN) |
-| **Data** | Redis 7 (persistence + Socket.IO adapter) • In-memory (development fallback) |
-| **DevOps** | Docker Compose • Vercel (frontend) • Railway / Render / Fly.io (backend) |
+| **Backend** | Node.js 20+, Express 4, Socket.IO 4, TypeScript 5, Zod 4, compression, jsonwebtoken (platform auth) |
+| **Realtime** | Socket.IO (game state · chat · friends/presence) • WebRTC (peer-to-peer voice, fallback TURN) |
+| **Data** | Redis 7 (rooms + profiles + Socket.IO adapter) • File store (default) • In-memory (dev fallback) |
+| **Platform** | One codebase → web **and** CrazyGames SDK v3 portal build, selected at build time via `NEXT_PUBLIC_PLATFORM` |
+| **DevOps** | Docker Compose • Vercel (web frontend) • Railway / Render / Fly.io (backend) • CrazyGames (portal) |
 
 ---
 
@@ -247,6 +306,30 @@ npm run dev                    # Starts on http://localhost:3000
 
 ---
 
+## 🎮 Controls
+
+Unoverse plays with **mouse, touch, or keyboard** — the in-game **Controls** panel shows the
+full reference. Keyboard shortcuts activate only during play (your turn, plus jump-ins) and are
+automatically suspended whenever you're typing in chat or any text field.
+
+| Input | Action |
+| :--- | :--- |
+| **Click / Tap card** | Select or play a card |
+| **Drag / Swipe** | Rotate the camera |
+| **Scroll / Pinch** | Zoom in and out |
+| **`1` – `7`** | Select the corresponding card in your hand |
+| **`←` / `→`** | Navigate between cards in your hand |
+| **`Space`** | Play the selected card |
+| **`Enter`** | Play / confirm the selected card |
+| **`Esc`** | Close menus / deselect card |
+
+Prefer a calmer experience? A **Reduced Motion** toggle (auto-enabled when your OS requests it)
+dials animations back, while a graphics panel exposes shadow/VFX quality, post-processing, an
+FPS counter, and camera sensitivity on top of the automatic adaptive-quality engine. On the web
+build there's also a one-tap **Fullscreen** toggle.
+
+---
+
 ## 🃏 House Rules
 
 Hosts can customize gameplay in the lobby. All configurations are validated and enforced server-side.
@@ -263,6 +346,8 @@ Hosts can customize gameplay in the lobby. All configurations are validated and 
 | **Force Play Drawn** | The drawn card *must* be played if it is legal to do so. |
 | **Draw Until Playable** | Keep drawing cards until you find one that can be played. |
 | **Must Play If Playable** | You are blocked from drawing a card if you already hold a playable card. |
+| **Reverse as Skip (2P)** | In a two-player game, a Reverse acts as a Skip (official rule). |
+| **Skip Chaining** | Consecutive Skips chain their skip effect across players. |
 
 </details>
 
@@ -311,6 +396,8 @@ Hosts can customize gameplay in the lobby. All configurations are validated and 
 | **Turn Timer** | Per-turn countdown duration in seconds. |
 | **Auto Reshuffle** | Recycle the discard pile to rebuild the draw deck when it runs out. |
 | **Spectator Mode** | Allow watchers when the table is full (off = full room rejects joins). |
+| **Max Spectators** | Cap on simultaneous watchers; once seats *and* spectator slots are full, further joins are rejected. |
+| **Enable Chat** | Toggle the in-room text chat for the room (emoji reactions are unaffected). |
 | **Rejoin Support** | Disconnected players/spectators reclaim their seats within a 60-second window. |
 | **Target Score** | Cumulative point threshold required to win the match (100–1000). |
 
@@ -333,47 +420,59 @@ Every room has a fixed number of **active player seats** (governed by the *Max P
 
 ```bash
 unoverse/
-├── 📂 backend/                    # Express + Socket.IO server
+├── 📂 backend/                    # Express + Socket.IO server (TypeScript)
 │   ├── 📂 src/
-│   │   ├── 📄 index.ts            # Server entry — socket events & connection state
-│   │   ├── 📂 game/
+│   │   ├── 📄 index.ts            # Server entry — HTTP routes, socket events & wiring
+│   │   ├── 📂 game/               # Server-authoritative UNO rules engine
 │   │   │   ├── 📄 actions.ts      # Move executions (play, draw, UNO call, challenge)
-│   │   │   ├── 📄 rules.ts        # Move validation & rules legality
-│   │   │   ├── 📄 houseRules.ts   # 20+ house rules & dependencies
+│   │   │   ├── 📄 rules.ts        # Move validation & rule legality
+│   │   │   ├── 📄 houseRules.ts   # 20+ house rules, defaults & dependencies
 │   │   │   ├── 📄 deck.ts         # Card deck generation & shuffling
 │   │   │   ├── 📄 gameState.ts    # Game state model initialization
+│   │   │   ├── 📄 turnManager.ts  # Turn rotation & skipping logic
+│   │   │   ├── 📄 roundCompletion.ts # Round & match resolution
 │   │   │   ├── 📄 scoring.ts      # End-of-round point calculations
-│   │   │   └── 📄 turnManager.ts  # Turn rotations & skipping logic
-│   │   ├── 📂 bots/               # CPU opponents — pure brain, turn runner & names
+│   │   │   ├── 📄 autoPlay.ts     # Turn-timeout auto-resolution
+│   │   │   └── 📂 engine/         # Standalone CLI game simulation
+│   │   ├── 📂 bots/               # CPU opponents — pure brain, runner & names
 │   │   │   ├── 📄 botBrain.ts     # Stateless card-scoring decision engine
-│   │   │   ├── 📄 botRunner.ts     # Server-side turn scheduler & thinking delays
+│   │   │   ├── 📄 botRunner.ts    # Server-side turn scheduler & think delays
 │   │   │   └── 📄 botNames.ts     # Human-ish bot name pool
 │   │   ├── 📂 rooms/              # Room state, lifecycle & arena selection
-│   │   ├── 📂 profiles/           # Guest profiles, lifetime stats & storage
-│   │   ├── 📂 validation/         # Zod payload validation schemas
-│   │   └── 📂 test/               # Vitest rules and mechanics test suites
+│   │   ├── 📂 profiles/           # Profiles, Player IDs, stats, external identity & storage
+│   │   ├── 📂 social/             # Friends graph, presence & invite gateway
+│   │   ├── 📂 auth/               # CrazyGames RS256 token verification
+│   │   ├── 📂 validation/         # Zod payload schemas (socket + social)
+│   │   ├── 📂 config/             # Env loading & server configuration
+│   │   ├── 📂 utils/              # Logger, rate limiter & chat moderation
+│   │   └── 📂 scripts/            # Ops scripts (e.g. redis:check)
 │   ├── 📄 Dockerfile
 │   └── 📄 package.json
 │
-├── 📂 frontend/                   # Next.js frontend application
+├── 📂 frontend/                   # Next.js 16 app (React 19 + React Three Fiber)
+│   ├── 📂 scripts/                # CrazyGames build / serve / verify tooling
 │   ├── 📂 src/
-│   │   ├── 📂 app/
-│   │   │   ├── 📄 page.tsx        # Landing page (create / join room)
-│   │   │   └── 📂 lobby/          # Pre-game lobby & settings config
+│   │   ├── 📂 app/                # App Router — layout, manifest, error boundaries
+│   │   │   ├── 📄 page.web.tsx    # Web home  (+ lobby/[roomId]/page.web.tsx)
+│   │   │   ├── 📄 page.cg.tsx     # CrazyGames single-document entry
+│   │   │   └── 📂 lobby/          # Web lobby route
 │   │   ├── 📂 components/
-│   │   │   ├── 📂 table/          # 3D R3F table, cards, seats, and meshes
+│   │   │   ├── 📂 table/          # 3D R3F table, cards, seats, 3D characters, meshes
 │   │   │   │   └── 📂 arenas/     # Six code-split themed 3D worlds + shared kit
+│   │   │   ├── 📂 home/           # Home screen, hero & 3D character preview
 │   │   │   ├── 📂 cards/          # HUD card indicators & hand layouts
-│   │   │   ├── 📂 profile/        # Profile & stats modals
-│   │   │   ├── 📂 social/         # Text chat panels & reactions
-│   │   │   ├── 📂 landing/        # 3D landing page scene
-│   │   │   ├── 📂 providers/      # Error boundaries & app-level providers
-│   │   │   └── 📂 ui/             # Settings, rules, and alert overlays
-│   │   ├── 📂 hooks/              # Socket connections, WebRTC, and viewports
-│   │   ├── 📂 lib/                # Arena registry, quality tiers & profile client
-│   │   ├── 📂 store/              # Zustand game, audio, and profile stores
-│   │   ├── 📂 utils/              # R3F geometry math & seating calculations
-│   │   └── 📂 types/              # Unified TypeScript definitions
+│   │   │   ├── 📂 profile/        # Profile, avatar & outfit pickers
+│   │   │   ├── 📂 social/         # Friends panel, chat, reactions & invite toasts
+│   │   │   ├── 📂 lobby/          # Lobby, HUD, game view & overlays
+│   │   │   ├── 📂 landing/        # 3D landing scene
+│   │   │   ├── 📂 providers/      # Error boundaries, platform & PWA providers
+│   │   │   └── 📂 ui/             # Settings, rules, help & alert overlays (+ ui/kit)
+│   │   ├── 📂 hooks/              # Socket, WebRTC, keyboard, fullscreen & platform hooks
+│   │   ├── 📂 lib/                # Adapters, arenas, cosmetics, quality & API clients
+│   │   │   └── 📂 platform/       # web / CrazyGames adapter port & capabilities
+│   │   ├── 📂 store/              # Zustand stores (game, profile, social, settings, voice)
+│   │   ├── 📂 utils/              # Seating, layout, sound & client-snapshot helpers
+│   │   └── 📂 types/              # Shared TypeScript definitions
 │   └── 📄 package.json
 │
 ├── 📄 docker-compose.yml          # Multi-container local orchestration
@@ -416,6 +515,32 @@ unoverse/
 | `ROOM_EMPTY_TTL_MS` | `600000` | Age after which a member-less room is deleted. |
 | `ROOM_FINISHED_TTL_MS` | `300000` | Age after which a member-less **finished** room is deleted. |
 
+#### Profiles & Social (all optional — safe defaults)
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PROFILE_DIR` | `./.data/profiles` | Directory for the profile file store (only when `STORE=file`). |
+| `RECENT_MATCHES_MAX` | `20` | Recent completed matches kept per profile for the history UI. |
+| `PROFILE_MIN_HUMANS` | `1` | Minimum human participants for a round to count toward lifetime stats (set `2` to ignore solo-vs-bots). |
+| `SOCIAL_MAX_FRIENDS` | `200` | Maximum friends per profile. |
+| `SOCIAL_MAX_OUTGOING_REQUESTS` / `SOCIAL_MAX_INCOMING_REQUESTS` | `50` / `100` | Pending friend-request caps. |
+| `SOCIAL_SEARCH_LIMIT` | `20` | Max results returned per player search. |
+| `SOCIAL_INVITE_TTL_MS` | `90000` | How long a room invite stays valid before it self-expires. |
+| `SOCIAL_MAX_OUTGOING_INVITES` | `10` | Max simultaneous outgoing invites per sender. |
+| `SOCIAL_AWAY_AFTER_MS` / `SOCIAL_AWAY_SWEEP_MS` | `300000` / `60000` | Idle-to-"away" threshold and how often presence is swept. |
+
+#### CrazyGames platform auth (portal build only)
+
+Only needed on the backend that serves the CrazyGames build — leave unset for a plain web deployment.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `CRAZYGAMES_AUTH_ENABLED` | `false` | Set `true` to mount `POST /api/auth/crazygames` and accept platform sign-in. |
+| `CRAZYGAMES_PUBLIC_KEY_URL` | `https://sdk.crazygames.com/publicKey.json` | Where the RS256 public key used to verify user tokens is published. |
+| `CRAZYGAMES_GAME_ID` | — | Expected `gameId` claim; when set, tokens minted for another game are rejected. |
+| `CRAZYGAMES_PUBLIC_KEY_TTL_MS` | `3600000` | How long a fetched public key is cached before it is refreshed. |
+| `CRAZYGAMES_MAX_TOKEN_BYTES` | `8192` | Max accepted token size before parsing. |
+
 ### Frontend (`frontend/.env.local`)
 
 | Variable | Default | Description |
@@ -424,6 +549,11 @@ unoverse/
 | `NEXT_PUBLIC_TURN_URL` | — | WebRTC TURN relay server URLs (comma-separated, optional fallback). |
 | `NEXT_PUBLIC_TURN_USERNAME` | — | WebRTC TURN server username credential (optional). |
 | `NEXT_PUBLIC_TURN_CREDENTIAL` | — | WebRTC TURN server password credential (optional). |
+| `NEXT_PUBLIC_PLATFORM` | `web` | Build target selector. Only the exact value `crazygames` produces the portal build; anything else (unset/typo) builds for web. |
+| `NEXT_PUBLIC_SOURCE_MAPS` | — | Set empty by `build:crazygames` to drop source maps from the uploaded package. |
+
+> [!NOTE]
+> `NEXT_PUBLIC_*` values are inlined at **build time**, so a change requires a rebuild — they cannot be flipped at runtime.
 
 ---
 
@@ -458,8 +588,10 @@ npm run sim
 | `npm run dev` | Hot-reloading ts-node dev server |
 | `npm run build` | Compiles TypeScript → `dist/` |
 | `npm start` | Runs compiled production code |
-| `npm test` | Runs backend rules unit tests |
-| `npm run sim` | Simulates a game locally |
+| `npm test` | Runs the backend test suite (Vitest) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run sim` | Simulates a full game locally |
+| `npm run redis:check` | Verifies the `REDIS_URL` connection |
 
 </td>
 <td>
@@ -467,13 +599,43 @@ npm run sim
 | Command | Description |
 | :--- | :--- |
 | `npm run dev` | Next.js local dev server |
-| `npm run build` | Production Next.js build |
+| `npm run build` | Production Next.js (web) build |
 | `npm start` | Serves local production build |
 | `npm run lint` | Runs ESLint verification check |
+| `npm run build:crazygames` | Builds the static CrazyGames portal package |
+| `npm run serve:crazygames` | Serves the portal package for local testing |
 
 </td>
 </tr>
 </table>
+
+---
+
+## 🌍 Cross-Platform & CrazyGames
+
+Unoverse builds from **one codebase** to two hosting targets, chosen at build time by the
+`NEXT_PUBLIC_PLATFORM` env var. The web build is untouched by any of the portal tooling, and
+the CrazyGames SDK never enters the web bundle.
+
+| Target | How it's built | Notes |
+| :--- | :--- | :--- |
+| **Web** *(default)* | `npm run build` | Standard Next.js app + installable PWA. All platform hooks are no-ops. |
+| **CrazyGames** | `npm run build:crazygames` | Static export → `crazygames-build/`, wired to the CrazyGames SDK v3. |
+
+* **Build-time seam** — the platform is selected via file extensions (`*.web.tsx` / `*.cg.tsx`,
+  resolved by Next's `pageExtensions`) and module aliases (`@platform-impl`, `@platform-head`),
+  not runtime detection. That is what keeps the SDK out of the web bundle entirely.
+* **Capability-gated** — fullscreen, PWA, analytics, ads, platform storage, platform invites and
+  Instant Multiplayer are toggled by `CAPABILITIES` flags rather than `if (isCrazyGames)` checks.
+* **Local verification** — `npm run serve:crazygames` serves the exported package from a
+  subdirectory (mirroring the portal's file host) and fails loudly if a request escapes the mount
+  or a `localhost` URL was baked into the bundle.
+* **Platform sign-in** — set `CRAZYGAMES_AUTH_ENABLED=true` on the backend serving the portal to
+  verify players' RS256 user tokens and link them to persistent Unoverse profiles.
+
+> [!NOTE]
+> The CrazyGames build is a **static export** and cannot mint dynamic room routes, so it reaches
+> the lobby from a single root document via a `?lobby=<code>` query and History-API navigation.
 
 ---
 
@@ -486,6 +648,7 @@ For complete, step-by-step production deployment instructions, see the **[Deploy
 | **Frontend** | Vercel / Netlify / Cloudflare | Standard Next.js hosting. Supports SSR/ISR. |
 | **Backend** | Render / Railway / Fly.io / VPS | **Must** support persistent WebSockets (Serverless/Lambdas not supported). |
 | **Redis Database** | Upstash / Redis Labs / Managed | Required for cross-instance sync, persistence, and scale. |
+| **CrazyGames** *(optional)* | CrazyGames portal | Upload the `build:crazygames` package; point it at a WebSocket backend running with `CRAZYGAMES_AUTH_ENABLED=true`. |
 
 > [!IMPORTANT]
 > The backend server manages live state and maintains active WebSocket streams.
