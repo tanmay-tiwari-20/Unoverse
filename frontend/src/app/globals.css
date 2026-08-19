@@ -406,7 +406,8 @@ select:focus-visible {
   animation: hud-count-bump 0.4s ease-out;
 }
 
-/* Soft attention pulse for the mobile "tap to draw" deck hint */
+/* Soft attention pulse for the deck hint chip ("tap to draw" on touch, and the
+   "no moves — click the deck" cue on every device) */
 @keyframes deck-hint-pulse {
   0%, 100% { opacity: 0.9; transform: translateY(0); }
   50% { opacity: 1; transform: translateY(-3px); }

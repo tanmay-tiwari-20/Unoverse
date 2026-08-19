@@ -9,6 +9,7 @@ import { CinematicSharedTopCard } from './CinematicSharedTopCard';
 import { getHandRingRadii } from '../../utils/tableLayout';
 import { getLayoutSeatCount } from '../../utils/capacity';
 import { useViewport } from '../../hooks/useViewport';
+import { useMustDraw } from '../../hooks/useMustDraw';
 import { SeatBadge } from './SeatBadge';
 import { DeckTapIndicator } from './DeckTapIndicator';
 import * as THREE from 'three';
@@ -84,6 +85,11 @@ export const WebGLCards: React.FC = () => {
   // Coarse device bucket drives the touch-only deck affordance and compact badge
   // sizing. Read once here so no child inside the R3F frame loop subscribes.
   const { isTouch, isMobile } = useViewport();
+
+  // "You have no legal play, drawing is the way forward" — derived from the same
+  // predicate that highlights playable cards in the hand, so the deck only lights
+  // up when the player can see that nothing in their hand is highlighted.
+  const mustDraw = useMustDraw();
 
   const isMyTurn = currentPlayerId === player?.id && (gameStatus === 'playing' || gameStatus === 'awaiting_color_selection') && !isProcessing;
   // Once a playable card has been drawn, a second draw is not allowed — the player
@@ -190,13 +196,17 @@ export const WebGLCards: React.FC = () => {
           <DrawPileHitbox stackHeight={Math.min(15, Math.max(1, drawPileCount)) * 0.002} onDraw={() => drawCard()} />
         )}
 
-        {/* Touch-only "Tap to draw" affordance — mirrors the desktop hover ring so
-            the deck is discoverably tappable on phones. Prominent on your turn,
-            quiet otherwise; never covers the cards. */}
+        {/* Deck affordance. Escalates to a pulsing ring + "click the deck" chip
+            when the player has no legal play (the one state that otherwise reads
+            as a stuck game); otherwise it's the quiet touch-only tap cue.
+            `canDraw &&` keeps the invariant that a cue can never appear unless
+            the hitbox above is mounted, so the deck is always actually clickable
+            while it's being pointed at. */}
         <DeckTapIndicator
           stackHeight={Math.min(15, Math.max(1, drawPileCount)) * 0.002}
           isTouch={isTouch}
           canDraw={canDraw}
+          mustDraw={canDraw && mustDraw}
         />
       </group>
 
