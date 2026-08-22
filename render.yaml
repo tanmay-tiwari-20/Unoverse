@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: unoverse-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
