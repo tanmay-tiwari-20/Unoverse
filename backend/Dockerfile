@@ -17,6 +17,13 @@ RUN npm run build
 FROM node:20-alpine AS production
 WORKDIR /app
 ENV NODE_ENV=production
+# Default listen port for the CONTAINER. Managed platforms inject their own PORT
+# (Railway/Render/Fly do) and that always wins; this only decides what the image
+# does when nobody says otherwise. 8080 is the convention those platforms expect,
+# so the image, the EXPOSE below, the healthcheck and a platform's "target port"
+# setting can never disagree by default. Outside Docker the app still falls back
+# to 3001 (see src/index.ts), which is what local dev and .env.example use.
+ENV PORT=8080
 
 # Only production dependencies (no typescript, vitest, ts-node-dev, etc.).
 COPY package*.json ./
@@ -31,12 +38,12 @@ RUN mkdir -p /app/.data && chown -R node:node /app/.data
 # Run as the built-in unprivileged 'node' user rather than root.
 USER node
 
-# The app reads PORT from env (defaults to 3001). Document the default here.
-EXPOSE 3001
+# The app reads PORT from env (defaults to 8080 in this image, see ENV above).
+EXPOSE 8080
 
 # Container-level health check hitting the /health endpoint. Uses Node's own
 # fetch (available in Node 20) so no extra tooling (curl/wget) is needed.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:'+(process.env.PORT||3001)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "dist/index.js"]

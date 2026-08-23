@@ -422,7 +422,16 @@ const botRunner = new BotRunner({
 });
 
 const app = express();
-const port = process.env.PORT || 3001;
+
+// Managed platforms (Railway, Render, Fly, Heroku) inject the port to listen on.
+// Coerced to a Number so the value is unambiguously a TCP port.
+const port = Number(process.env.PORT) || 3001;
+
+// Bind on EVERY interface, not just loopback. A platform's edge proxy reaches
+// this container from outside its loopback, so a server bound to 127.0.0.1 (or
+// left to whatever Node picks by default) can be fully started and still answer
+// nothing but 502 at the proxy. Overridable via HOST for local-only runs.
+const host = process.env.HOST || '0.0.0.0';
 
 /** Whether the Socket.IO Redis adapter is active (set during start()). Reported
  *  by /health so you can confirm multi-instance broadcasts are really on. */
@@ -442,6 +451,12 @@ try {
 }
 
 // Middlewares
+// Exactly one reverse proxy (the platform's edge) sits in front of this process
+// in every hosted deployment, so trust one hop: `req.ip` / `req.protocol` /
+// `req.secure` then reflect the real client instead of the proxy. The rate
+// limiter below reads X-Forwarded-For directly and is unaffected either way.
+app.set('trust proxy', 1);
+
 app.use(cors({
   origin: corsOrigin,
 }));
@@ -483,6 +498,17 @@ const createRoomLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 const profileWriteLimiter = rateLimit({ windowMs: 60_000, max: 30 });
 
 // --- REST APIs ---
+
+// Service root. An Express app with no '/' route answers `Cannot GET /` with a
+// 404, which is indistinguishable from a broken deployment when someone opens
+// the public URL in a browser. Point them at the real health endpoint instead.
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    service: 'unoverse-backend',
+    status: 'ok',
+    health: '/health',
+  });
+});
 
 // Health check — used by container orchestrators / load balancers to verify the
 // process is alive and serving. Lightweight and unauthenticated by design.
@@ -1532,9 +1558,26 @@ async function start() {
   // Independent of every gameplay timer above; nothing in the game loop reads it.
   stopSocialServices = startSocialServices(io);
 
-  server.listen(port, () => {
+  // A failed bind (port already taken, address not assignable) emits 'error' on
+  // the server rather than throwing. Without this listener the process-wide
+  // uncaughtException net below would swallow it and keep a process alive that
+  // is listening on nothing — a container that "starts fine" and serves no
+  // traffic. Fail loudly instead so the platform can retry the deploy.
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    logger.error(`[STARTUP] Could not bind ${host}:${port} (${err?.code || 'unknown'}): ${err?.message}`);
+    process.exit(1);
+  });
+
+  server.listen(port, host, () => {
+    const addr = server.address();
+    const bound = typeof addr === 'string' ? addr : `${addr?.address}:${addr?.port}`;
     logger.info(`===============================================`);
     logger.info(`  Unoverse Backend Server running on port ${port}  `);
+    // The ACTUAL bound socket, read back from the OS — the one line that
+    // distinguishes "listening where the platform's proxy can reach it" from
+    // "listening on loopback only".
+    logger.info(`  Bound to:  ${bound}  (HOST=${host}, PORT=${port})`);
+    logger.info(`  Health:    GET /health`);
     logger.info(`  Log level: ${logger.level}`);
     logger.info(`  Storage:   ${(process.env.STORE || 'file').toLowerCase()}`);
     logger.info(`  Socket.IO: ${redisAdapterEnabled ? 'Redis adapter (multi-instance)' : 'in-memory adapter (single instance)'}`);
