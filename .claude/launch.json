@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crazygames-pkg",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "serve:crazygames"],
+      "cwd": "frontend",
+      "port": 8080
+    }
+  ]
+}
