@@ -8,8 +8,7 @@
     "build:crazygames": "node scripts/build-crazygames.mjs",
     "serve:crazygames": "node scripts/serve-crazygames.mjs",
     "start": "next start",
-    "lint": "eslint",
-    "test": "vitest run"
+    "lint": "eslint"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -35,10 +34,9 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "vitest": "^3.2.4"
+    "typescript": "^5"
   },
   "engines": {
-    "node": "20.19.1"
+    "node": ">=20.0.0"
   }
 }

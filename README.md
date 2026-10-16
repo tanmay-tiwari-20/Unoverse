@@ -257,21 +257,6 @@ with the friend graph persisted on your profile.
 
 ## 🚀 Getting Started
 
-### Root commands
-
-The repository pins Node.js in `.nvmrc` and exposes portable commands from the root.
-Install dependencies in `backend/` and `frontend/`, then run:
-
-```bash
-npm test             # backend and frontend tests
-npm run build       # backend TypeScript build, then frontend production build
-npm run lint        # frontend ESLint
-make test           # same full test command for CI/Linux
-```
-
-Use `npm run test:backend` or `npm run test:frontend` for a targeted suite.
-
-
 ### Prerequisites
 
 * **Node.js 20+** (uses native `process.loadEnvFile`)
@@ -653,11 +638,6 @@ the CrazyGames SDK never enters the web bundle.
 > the lobby from a single root document via a `?lobby=<code>` query and History-API navigation.
 
 ---
-
-
-## 🐛 Reporting a bug
-
-Please use the [bug report template](https://github.com/tanmay-tiwari-20/unoverse/issues/new?template=bug_report.yml). Include the smallest reproduction, the exact command or route that failed, and your OS/browser/Node/Docker details. Redact profile secrets, Redis URLs, TURN credentials, passwords, tokens, and private player data from logs.
 
 ## 🚢 Deployment
 
