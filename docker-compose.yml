@@ -1,6 +1,7 @@
-# Local full-stack for smoke-testing the deploy path: backend + Redis.
-# Brings up the backend exactly as it runs in production (Docker image, Redis
-# store + Socket.IO Redis adapter). Run the frontend separately with
+# Local full-stack services for smoke-testing the deploy path: backend + Redis.
+# The Compose backend is intentionally a DEVELOPMENT service: production rejects
+# wildcard CORS, while this local stack is meant to accept the separately-run
+# frontend on localhost. Run the frontend separately with
 # `cd frontend && npm run dev` pointed at http://localhost:3001.
 #
 #   docker compose up --build
@@ -34,13 +35,15 @@ services:
       - "3001:3001"
     environment:
       PORT: "3001"
-      NODE_ENV: production
-      LOG_LEVEL: info
+      NODE_ENV: development
+      LOG_LEVEL: debug
       # Use Redis for both durable room state and cross-instance broadcasts.
       STORE: redis
       REDIS_URL: redis://redis:6379
-      # For local testing allow any origin; lock this down in real deploys.
-      CORS_ORIGIN: "*"
+      # The local frontend runs on port 3000. Add another explicit origin here
+      # when using a different local preview host; production must use the exact
+      # deployed frontend origin(s), never "*".
+      CORS_ORIGIN: http://localhost:3000
       TURN_TIMEOUT_MS: "45000"
     depends_on:
       redis:

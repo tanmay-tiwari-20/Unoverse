@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage: install all deps and compile TypeScript ----
-FROM node:20-alpine AS build
+FROM node:20.19.1-alpine3.21 AS build
 WORKDIR /app
 
 # Install dependencies first (better layer caching).
@@ -14,7 +14,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- Production stage: slim image with only runtime deps + compiled output ----
-FROM node:20-alpine AS production
+FROM node:20.19.1-alpine3.21 AS production
 WORKDIR /app
 ENV NODE_ENV=production
 # Default listen port for the CONTAINER. Managed platforms inject their own PORT
