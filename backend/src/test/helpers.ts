@@ -41,6 +41,7 @@ export interface StateOverrides {
   pendingDrawType?: 'draw_two' | 'wild_draw_four' | null;
   drawnCardId?: string | null;
   unoCalled?: Record<string, boolean>;
+  pendingUnoPlayerId?: string | null;
   winnerId?: string | null;
   rules?: Partial<HouseRules>;
   swapChooserId?: string | null;
@@ -71,6 +72,7 @@ export const makeState = (overrides: StateOverrides = {}): UnoGameState => {
     swapChooserId: overrides.swapChooserId ?? null,
     winnerId: overrides.winnerId ?? null,
     unoCalled: overrides.unoCalled ?? unoCalled,
+    pendingUnoPlayerId: overrides.pendingUnoPlayerId ?? null,
     rules: normalizeHouseRules(overrides.rules),
     drawStack: overrides.drawStack ?? 0,
     pendingDrawType: overrides.pendingDrawType ?? null,

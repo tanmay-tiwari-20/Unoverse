@@ -39,6 +39,7 @@ export const ActionEffects3D: React.FC = () => {
   const discardPile = useGameStore((s) => s.discardPile);
   const discardCount = useGameStore((s) => s.discardCount);
   const gameStatus = useGameStore((s) => s.gameStatus);
+  const skipEffectEnabled = useGameStore((s) => s.houseRules.skipChaining);
 
   const [effects, setEffects] = useState<ActiveEffect[]>([]);
 
@@ -92,7 +93,7 @@ export const ActionEffects3D: React.FC = () => {
     if (topCard && discardCount > prevDiscardCountRef.current && topCard.id !== prevTopCardIdRef.current) {
       const eid = `effect-${now}-${Math.random().toString(36).substring(2, 6)}`;
       
-      if (topCard.value === 'skip') {
+      if (topCard.value === 'skip' && skipEffectEnabled) {
         newEffects.push({ id: eid, type: 'skip', startTime: now });
       } else if (topCard.value === 'reverse') {
         newEffects.push({ id: eid, type: 'reverse', startTime: now });
@@ -162,7 +163,7 @@ export const ActionEffects3D: React.FC = () => {
     prevTopCardIdRef.current = topCard?.id ?? null;
     prevHandSizesRef.current = currentSizes;
     prevUnoCalledRef.current = { ...unoCalled };
-  }, [discardPile, discardCount, playerCards, gameStatus, unoCalled, playersList, getPlayerWorldPos]);
+  }, [discardPile, discardCount, playerCards, gameStatus, unoCalled, playersList, getPlayerWorldPos, skipEffectEnabled]);
 
   const removeEffect = (id: string) => {
     setEffects(prev => prev.filter(e => e.id !== id));
@@ -177,7 +178,7 @@ export const ActionEffects3D: React.FC = () => {
 
   return (
     <group>
-      {effects.map(effect => (
+      {effects.filter(effect => skipEffectEnabled || effect.type !== 'skip').map(effect => (
         <EffectItem key={effect.id} effect={effect} onComplete={() => removeEffect(effect.id)} />
       ))}
     </group>

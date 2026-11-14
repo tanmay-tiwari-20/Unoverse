@@ -7,6 +7,7 @@ import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
 import { useIsMyTurn } from '../../hooks/useIsMyTurn';
 import { drawStackPrompt } from '../../lib/cards/cardEngine';
+import { getUnoCallPhase } from '../../lib/cards/unoCalls';
 
 /**
  * The optional/limited-time actions that appear under the turn banner: draw
@@ -22,17 +23,26 @@ export const GameActionPrompts: React.FC = () => {
   const gameStatus = useGameStore((s) => s.gameStatus);
   const isSpectator = useGameStore((s) => s.isSpectator);
   const isProcessing = useGameStore((s) => s.isProcessing);
-  const setIsProcessing = useGameStore((s) => s.setIsProcessing);
   const drawStack = useGameStore((s) => s.drawStack);
   const pendingDrawType = useGameStore((s) => s.pendingDrawType);
   const challengeableById = useGameStore((s) => s.challengeableById);
   const drawnCardId = useGameStore((s) => s.drawnCardId);
   const houseRules = useGameStore((s) => s.houseRules);
   const unoCalled = useGameStore((s) => s.unoCalled);
+  const pendingUnoPlayerId = useGameStore((s) => s.pendingUnoPlayerId);
   const myHandCount = useGameStore((s) => (s.playerCards[s.player?.seatNumber || 1] || []).length);
   const isMyTurn = useIsMyTurn();
 
   const { callUno, passTurn, challengeWildFour } = useSocket();
+  const unoCallPhase = getUnoCallPhase({
+    playerId: player?.id ?? null,
+    handCount: myHandCount,
+    gameStatus,
+    isSpectator,
+    rules: houseRules,
+    unoCalled,
+    pendingUnoPlayerId,
+  });
 
   return (
     <>
@@ -67,24 +77,42 @@ export const GameActionPrompts: React.FC = () => {
         </motion.button>
       )}
 
-      {/* Declare UNO Button — shown while holding exactly 2 cards. Declaring
-          now exempts you from the automatic +4 penalty that hits when a
-          play would otherwise drop you to a single undeclared card. */}
-      {myHandCount === 2 && gameStatus === 'playing' && !isSpectator && houseRules.mustSayUno &&
-        houseRules.unoCallMode === 'manual' && !(player && unoCalled[player.id]) && (
-        <motion.button
-          disabled={isProcessing}
-          whileTap={{ scale: 0.92, y: 4 }}
-          animate={{ scale: [1, 1.08, 1] }}
-          transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
-          onClick={() => {
-            setIsProcessing(true);
-            callUno();
-          }}
-          className="btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600 short:mt-1 short:px-5 short:py-2 short:text-sm"
-        >
-          <Siren size={18} /> CALL UNO!
-        </motion.button>
+      {/* Pre-call at two cards; at one, only the server's open grace permits it.
+          The deadline is an action, not the turn timer or a client countdown. */}
+      {unoCallPhase && (
+        <div className="flex flex-col items-center gap-1">
+          <motion.button
+            disabled={isProcessing}
+            whileTap={{ scale: 0.92, y: 4 }}
+            animate={{ scale: [1, 1.08, 1] }}
+            transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
+            onClick={() => {
+              // Re-read the live snapshot so a button painted before grace closed
+              // cannot send a late call after the closing update has arrived.
+              const state = useGameStore.getState();
+              const me = state.player;
+              if (state.isProcessing || !getUnoCallPhase({
+                playerId: me?.id ?? null,
+                handCount: me ? (state.playerCards[me.seatNumber] ?? []).length : 0,
+                gameStatus: state.gameStatus,
+                isSpectator: state.isSpectator,
+                rules: state.houseRules,
+                unoCalled: state.unoCalled,
+                pendingUnoPlayerId: state.pendingUnoPlayerId,
+              })) return;
+              state.setIsProcessing(true);
+              callUno();
+            }}
+            className="btn-arcade mt-2 text-white uppercase inline-flex items-center gap-1.5 px-7 py-3 text-lg bg-gradient-to-b from-red-500 to-orange-600 short:mt-1 short:px-5 short:py-2 short:text-sm"
+          >
+            <Siren size={18} /> {unoCallPhase === 'late' ? 'CALL UNO NOW!' : 'CALL UNO!'}
+          </motion.button>
+          {unoCallPhase === 'late' && (
+            <span className="font-rounded max-w-xs text-[11px] font-bold leading-snug text-amber-100" role="status">
+              Call before the next successful gameplay action.
+            </span>
+          )}
+        </div>
       )}
 
       {/* Draw-then-play decision — the player drew and now has a playable

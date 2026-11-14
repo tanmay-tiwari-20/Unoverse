@@ -100,6 +100,7 @@ describe('UNO calling modes', () => {
       hands: { p1: [card('red', '5')], p2: [card('green', '2')] },
       discardPile: [card('red', '3')],
       rules: { mustSayUno: true, unoCallMode: 'manual', allowLateUno: true },
+      pendingUnoPlayerId: 'p1',
     });
     expect(() => callUnoAction(s, 'p1')).not.toThrow();
     expect(s.unoCalled['p1']).toBe(true);

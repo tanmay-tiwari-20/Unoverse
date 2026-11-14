@@ -30,6 +30,7 @@ import {
 } from './game/actions';
 import { autoResolveTimedOutTurn } from './game/autoPlay';
 import { createGameSnapshot } from './game/clientSnapshot';
+import { UnoPenaltyNotifier } from './game/unoNotifications';
 import { recoverActivePlayerId } from './game/turnManager';
 import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
@@ -260,6 +261,8 @@ function recoverStaleTurn(room: Room): boolean {
 }
 
 // Helper to sanitize and broadcast game state to each player individually
+const unoPenaltyNotifier = new UnoPenaltyNotifier((code, notice) => io.to(code).emit('uno-penalty', notice));
+
 function broadcastGameState(code: string) {
   if (shuttingDown) return;
   const room = roomManager.getRoom(code);
@@ -273,6 +276,7 @@ function broadcastGameState(code: string) {
   // Arm/refresh the turn timer before building the payload so the deadline is
   // included in this broadcast.
   armTurnTimer(code);
+  unoPenaltyNotifier.announce(room);
 
   const activePlayerObj = room.players.find(p => p.id === game.currentPlayerId);
   const activePlayerName = activePlayerObj ? activePlayerObj.name : 'Unknown';
@@ -356,12 +360,6 @@ const botRunner = new BotRunner({
           challengerName: actor?.name ?? 'A player',
           accusedName: accused?.name ?? 'A player',
           success: !!action.challengeSuccess,
-        });
-      }
-      if ((action.type === 'play' || action.type === 'jump_in') && action.unoPenalty) {
-        io.to(code).emit('uno-penalty', {
-          playerId: action.playerId,
-          playerName: actor?.name ?? 'A player',
         });
       }
     }
@@ -1143,15 +1141,6 @@ io.on('connection', (socket) => {
 
       broadcastGameState(currentRoomCode);
 
-      // Notify the room when a play triggered the automatic +4 UNO penalty so
-      // clients can surface it (the player forgot to declare UNO at 2 cards).
-      if (updatedGame.lastAction?.type === 'play' && updatedGame.lastAction.unoPenalty) {
-        io.to(currentRoomCode).emit('uno-penalty', {
-          playerId: updatedGame.lastAction.playerId,
-          playerName: player ? player.name : 'A player',
-        });
-      }
-
       if (updatedGame.status === 'ended') {
         clearTurnTimer(currentRoomCode);
         // Bank the round's points onto the match scoreboard before announcing.
@@ -1281,9 +1270,6 @@ io.on('connection', (socket) => {
       const player = room.players.find(p => p.id === socket.id);
       logger.debug(`[JUMP_IN] ${player?.name ?? socket.id} jumped in with ${cardId}`);
       broadcastGameState(currentRoomCode);
-      if (room.game.lastAction?.type === 'play' && room.game.lastAction.unoPenalty) {
-        io.to(currentRoomCode).emit('uno-penalty', { playerId: socket.id, playerName: player?.name ?? 'A player' });
-      }
       handlePossibleGameEnd(currentRoomCode);
     } catch (error: any) {
       logger.debug(`[Socket] Jump-in rejected:`, error.message);
@@ -1476,6 +1462,9 @@ async function start() {
   roomManager.setStore(store);
   try {
     await roomManager.hydrate();
+    for (const code of roomManager.getAvailableRooms()) {
+      unoPenaltyNotifier.remember(roomManager.getRoom(code)?.game);
+    }
   } catch (err: any) {
     logger.error('[STORE] Hydration failed (starting with no restored rooms):', err?.message);
   }

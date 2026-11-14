@@ -1,5 +1,5 @@
 import { CardItem, CardColor, generateDeck, shuffleDeck } from './deck';
-import { UnoGameState } from './gameState';
+import { UnoGameState, UnoPenalty } from './gameState';
 import { isValidMove, isValidJumpIn } from './rules';
 import { getNextPlayerIndex, getNextActivePlayerId } from './turnManager';
 import { shouldEndRound } from './roundCompletion';
@@ -83,6 +83,41 @@ const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string
   return drawn.length;
 };
 
+/** Called only after an action has passed every legality check. */
+const settlePendingUno = (state: UnoGameState): UnoPenalty[] => {
+  const playerId = state.pendingUnoPlayerId;
+  state.pendingUnoPlayerId = null;
+  if (!playerId || !state.rules.mustSayUno || state.rules.unoCallMode !== 'manual' ||
+      !state.rules.allowLateUno || state.unoCalled[playerId] || state.hands[playerId]?.length !== 1) return [];
+  const drawCount = drawCardsHelper(state, state.rules.unoPenaltyCards, playerId);
+  bumpStat(state, playerId, 'unoPenalties');
+  return [{ playerId, drawCount }];
+};
+
+/** A round may never bank its score while a missed-call penalty is outstanding. */
+const settleUnoBeforeRoundEnd = (state: UnoGameState): void => {
+  const penalties = settlePendingUno(state);
+  if (!penalties.length || !state.lastAction) return;
+  state.lastAction.unoPenalties = [...(state.lastAction.unoPenalties ?? []), ...penalties];
+  if (penalties.some((penalty) => penalty.playerId === state.lastAction!.playerId)) {
+    state.lastAction.unoPenalty = true;
+  }
+};
+
+/** Hand transfers do not move one player's missed-call debt to another seat. */
+const reconcilePendingUno = (state: UnoGameState): void => {
+  if (state.pendingUnoPlayerId && state.hands[state.pendingUnoPlayerId]?.length !== 1) {
+    state.pendingUnoPlayerId = null;
+  }
+};
+
+/** Freeze +4 evidence before this action can deal any missed-UNO cards. */
+const heldActiveColor = (state: UnoGameState, hand: CardItem[]): boolean => {
+  const top = state.discardPile[state.discardPile.length - 1];
+  const color = top?.color === 'wild' ? state.wildColor : top?.color;
+  return !!color && color !== 'wild' && hand.some((card) => card.color === color);
+};
+
 /**
  * Advance the active turn to the next player who still holds cards.
  * If the round is complete (see roundCompletion), it is ended immediately.
@@ -93,6 +128,7 @@ const advanceTurn = (
   skipCount: number = 1
 ): void => {
   if (shouldEndRound(state, players)) {
+    settleUnoBeforeRoundEnd(state);
     state.status = 'ended';
     if (!state.winnerId) {
       const finishedPlayer = players.find(p => (state.hands[p.id]?.length || 0) === 0);
@@ -106,6 +142,7 @@ const advanceTurn = (
 
   const nextId = getNextActivePlayerId(state, players, currentPlayer.seatNumber, skipCount);
   if (!nextId) {
+    settleUnoBeforeRoundEnd(state);
     state.status = 'ended';
     return;
   }
@@ -223,7 +260,7 @@ export const startGameState = (players: Player[], rules?: HouseRules): UnoGameSt
   let direction: 'clockwise' | 'counter-clockwise' = 'clockwise';
 
   // Apply starting card effects
-  if (startingCard.value === 'skip') {
+  if (startingCard.value === 'skip' && activeRules.skipChaining) {
     startPlayerIndex = getNextPlayerIndex(0, direction, players.length, 2);
   } else if (startingCard.value === 'reverse') {
     direction = 'counter-clockwise';
@@ -246,6 +283,7 @@ export const startGameState = (players: Player[], rules?: HouseRules): UnoGameSt
     swapChooserId: null,
     winnerId: null,
     unoCalled,
+    pendingUnoPlayerId: null,
     rules: activeRules,
     drawStack: 0,
     pendingDrawType: null,
@@ -286,7 +324,9 @@ const resolvePlayedCard = (
   state: UnoGameState,
   players: Player[],
   playerId: string,
-  card: CardItem
+  card: CardItem,
+  unoPenalties: UnoPenalty[] = [],
+  heldColorBeforeAction: boolean = false,
 ): void => {
   const rules = state.rules;
   const playerHand = state.hands[playerId];
@@ -312,6 +352,11 @@ const resolvePlayedCard = (
   state.drawnCardId = null;
   // Reset wild color chooser for the new top card.
   state.wildColor = null;
+  const action: NonNullable<UnoGameState['lastAction']> = {
+    type: 'play', playerId, card, unoPenalties,
+    unoPenalty: unoPenalties.some((penalty) => penalty.playerId === playerId),
+  };
+  state.lastAction = action;
 
   // Check if player finished their hand (win). advanceTurn/caller handle status.
   if (playerHand.length === 0) {
@@ -321,21 +366,25 @@ const resolvePlayedCard = (
     // the rest of the round). The winner and every remaining hand are already
     // final at this point, so scoring is identical either way.
     if (shouldEndRound(state, players, state.winnerId)) {
+      settleUnoBeforeRoundEnd(state);
       state.status = 'ended';
-      state.lastAction = { type: 'play', playerId, card, unoPenalty: false };
       return;
     }
   }
 
-  // Auto UNO penalty (only when mustSayUno + manual calling). If this play dropped
-  // the player to exactly 1 card and they never declared UNO, deal penalty cards.
-  let unoPenalty = false;
+  // Manual UNO: pre-calls prevent a penalty; late mode opens a real one-card
+  // grace, while the default mode deals the penalty immediately.
   const penaltyApplies = rules.mustSayUno && rules.unoCallMode === 'manual';
   if (penaltyApplies && playerHand.length === 1 && !state.unoCalled[playerId]) {
-    drawCardsHelper(state, rules.unoPenaltyCards, playerId);
-    unoPenalty = true;
-    bumpStat(state, playerId, 'unoPenalties');
-    logger.debug(`[UNO_PENALTY] ${playerId} reached 1 card without declaring UNO — +${rules.unoPenaltyCards}.`);
+    if (rules.allowLateUno) {
+      state.pendingUnoPlayerId = playerId;
+    } else {
+      const drawCount = drawCardsHelper(state, rules.unoPenaltyCards, playerId);
+      action.unoPenalties!.push({ playerId, drawCount });
+      action.unoPenalty = true;
+      bumpStat(state, playerId, 'unoPenalties');
+      logger.debug(`[UNO_PENALTY] ${playerId} reached 1 card without declaring UNO — +${drawCount}.`);
+    }
   }
   // In auto mode the server declares UNO on the player's behalf.
   if (rules.mustSayUno && rules.unoCallMode === 'auto' && playerHand.length === 1) {
@@ -352,14 +401,8 @@ const resolvePlayedCard = (
 
     // Record bluff context for a possible challenge (only when the rule is on).
     if (rules.challengeWildDrawFour) {
-      const top = state.discardPile[state.discardPile.length - 2]; // card beneath the +4
-      const activeColor = top ? (top.color === 'wild' ? state.wildColorBefore : top.color) : null;
-      // Bluffing detection: did the player hold a card of the color in play?
-      const heldMatch = rules.bluffingWildDrawFour
-        ? playerHand.some((c) => c.color !== 'wild' && c.color === activeColor)
-        : false;
       state.wildFourPlayerId = playerId;
-      state.wildFourWasBluff = heldMatch;
+      state.wildFourWasBluff = rules.bluffingWildDrawFour && heldColorBeforeAction;
     }
     return;
   }
@@ -377,14 +420,14 @@ const resolvePlayedCard = (
     if (opponents.length === 1) {
       // Only one possible target — swap automatically.
       swapHands(state, playerId, opponents[0].id);
-      state.lastAction = { type: 'swap', playerId, card, targetId: opponents[0].id, unoPenalty };
+      action.type = 'swap';
+      action.targetId = opponents[0].id;
       advanceTurn(state, players, 1);
       return;
     }
     if (opponents.length > 1) {
       state.status = 'awaiting_swap_target';
       state.swapChooserId = playerId;
-      state.lastAction = { type: 'play', playerId, card, unoPenalty };
       return;
     }
   }
@@ -392,7 +435,7 @@ const resolvePlayedCard = (
   // Seven-O: rotate on 0.
   if (rules.zeroRotate && card.value === '0') {
     rotateHands(state, players);
-    state.lastAction = { type: 'rotate', playerId, card, unoPenalty };
+    action.type = 'rotate';
     advanceTurn(state, players, 1);
     return;
   }
@@ -412,7 +455,7 @@ const resolvePlayedCard = (
   } else {
     let skipCount = 1;
 
-    if (card.value === 'skip') {
+    if (card.value === 'skip' && rules.skipChaining) {
       skipCount = 2;
     } else if (card.value === 'reverse') {
       state.direction = state.direction === 'clockwise' ? 'counter-clockwise' : 'clockwise';
@@ -423,7 +466,6 @@ const resolvePlayedCard = (
     advanceTurn(state, players, skipCount);
   }
 
-  state.lastAction = { type: 'play', playerId, card, unoPenalty };
 };
 
 /** Swap the full hands of two players (Seven-O "7"). */
@@ -434,6 +476,7 @@ const swapHands = (state: UnoGameState, a: string, b: string): void => {
   // UNO status follows the hand size, so recompute conservatively.
   state.unoCalled[a] = state.hands[a].length === 1 ? state.unoCalled[a] : false;
   state.unoCalled[b] = state.hands[b].length === 1 ? state.unoCalled[b] : false;
+  reconcilePendingUno(state);
 };
 
 /** Rotate every hand one seat in the play direction (Seven-O "0"). */
@@ -449,6 +492,7 @@ const rotateHands = (state: UnoGameState, players: Player[]): void => {
     state.hands[id] = hands[sourceIdx];
     state.unoCalled[id] = false;
   });
+  reconcilePendingUno(state);
 };
 
 /**
@@ -468,9 +512,11 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
 
   const rules = state.rules;
   const topCard = state.discardPile[state.discardPile.length - 1];
+  const heldColorBeforeAction = heldActiveColor(state, state.hands[playerId] ?? []);
 
   // Active draw chain: the player chose not to (or cannot) stack, so they "eat".
   if (state.pendingDrawType && state.drawStack > 0) {
+    const unoPenalties = settlePendingUno(state);
     // stackToEat=true -> draw the full accumulated stack; false -> only the base value.
     const penalty = rules.stackToEat
       ? state.drawStack
@@ -481,7 +527,7 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
     state.wildFourPlayerId = null;
     state.wildFourWasBluff = null;
     state.challengeableById = null;
-    state.lastAction = { type: 'draw', playerId, drawCount: penalty };
+    state.lastAction = { type: 'draw', playerId, drawCount: penalty, unoPenalties };
     advanceTurn(state, players, 1);
     logger.debug(`[DRAW CHAIN] ${playerId} ate ${penalty} cards and was skipped.`);
     return state;
@@ -501,6 +547,8 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
       throw new Error('You must play a playable card — drawing is not allowed.');
     }
   }
+
+  const unoPenalties = settlePendingUno(state);
 
   // Draw. With "draw until playable", keep drawing until a playable card appears
   // (or the deck can produce no more). Otherwise draw exactly one.
@@ -526,7 +574,7 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
       state.hands[playerId].splice(idx, 1);
       state.discardPile.push(drawnCard);
       state.wildColorBefore = state.wildColor;
-      resolvePlayedCard(state, players, playerId, drawnCard);
+      resolvePlayedCard(state, players, playerId, drawnCard, unoPenalties, heldColorBeforeAction);
       logger.debug(`[DRAW] ${playerId} force-played the drawn card.`);
       return state;
     }
@@ -537,15 +585,15 @@ export const drawCardAction = (state: UnoGameState, players: Player[], playerId:
   const hasPlayable = state.hands[playerId].some((c) => isValidMove(c, topCard, state.wildColor, null, rules));
   if (rules.drawThenPlay && drawnCard && hasPlayable) {
     state.drawnCardId = drawnCard.id;
-    state.lastAction = { type: 'draw', playerId, drawCount: state.hands[playerId].length - handBefore };
+    state.lastAction = { type: 'draw', playerId, drawCount: state.hands[playerId].length - handBefore, unoPenalties };
     logger.debug(`[DRAW] ${playerId} drew a playable card — awaiting play-or-pass.`);
     return state;
   }
 
   // Nothing playable, or draw-then-play disabled — pass the turn.
   state.drawnCardId = null;
+  state.lastAction = { type: 'draw', playerId, drawCount: drewAny ? state.hands[playerId].length - handBefore : 0, unoPenalties };
   advanceTurn(state, players, 1);
-  state.lastAction = { type: 'draw', playerId, drawCount: drewAny ? state.hands[playerId].length - handBefore : 0 };
   return state;
 };
 
@@ -564,9 +612,10 @@ export const passTurnAction = (state: UnoGameState, players: Player[], playerId:
     throw new Error('You can only pass after drawing a playable card');
   }
 
+  const unoPenalties = settlePendingUno(state);
   state.drawnCardId = null;
+  state.lastAction = { type: 'pass', playerId, unoPenalties };
   advanceTurn(state, players, 1);
-  state.lastAction = { type: 'pass', playerId };
   logger.debug(`[PASS] ${playerId} kept their drawn card and passed the turn.`);
   return state;
 };
@@ -613,6 +662,9 @@ export const playCardAction = (
     throw new Error('You cannot win by playing this card — you must play or draw another.');
   }
 
+  const heldColorBeforeAction = heldActiveColor(state, playerHand);
+  const unoPenalties = settlePendingUno(state);
+
   // Remember the active color BEFORE we clear it, for +4 bluff detection.
   state.wildColorBefore = state.wildColor;
 
@@ -621,7 +673,7 @@ export const playCardAction = (
   state.discardPile.push(card);
   logger.debug(`[PLAY CARD] TOP CARD:`, card);
 
-  resolvePlayedCard(state, players, playerId, card);
+  resolvePlayedCard(state, players, playerId, card, unoPenalties, heldColorBeforeAction);
   return state;
 };
 
@@ -665,12 +717,14 @@ export const jumpInAction = (
     throw new Error('You cannot win by jumping in with this card');
   }
 
+  const unoPenalties = settlePendingUno(state);
+
   // The jumper becomes the current player, then the play resolves from there.
   state.currentPlayerId = playerId;
   state.wildColorBefore = state.wildColor;
   hand.splice(cardIndex, 1);
   state.discardPile.push(card);
-  resolvePlayedCard(state, players, playerId, card);
+  resolvePlayedCard(state, players, playerId, card, unoPenalties);
   if (state.lastAction) state.lastAction.type = state.lastAction.type === 'play' ? 'jump_in' : state.lastAction.type;
   bumpStat(state, playerId, 'jumpIns');
   logger.debug(`[JUMP_IN] ${playerId} jumped in with ${card.color} ${card.value}.`);
@@ -699,6 +753,9 @@ export const chooseColorAction = (
   state.wildColor = color;
   state.status = 'playing';
   state.colorChooserId = null;
+  // Color selection completes the same card play, so it keeps the UNO grace
+  // but must not replay penalty notifications from that preceding play.
+  if (state.lastAction) state.lastAction = { ...state.lastAction, unoPenalties: [], unoPenalty: false };
 
   const topCard = state.discardPile[state.discardPile.length - 1];
 
@@ -740,7 +797,7 @@ export const swapTargetAction = (
   state.status = 'playing';
   state.swapChooserId = null;
   const swapCard = state.discardPile[state.discardPile.length - 1];
-  state.lastAction = { type: 'swap', playerId, card: swapCard, targetId };
+  state.lastAction = { type: 'swap', playerId, card: swapCard, targetId, unoPenalties: [] };
   advanceTurn(state, players, 1);
   logger.debug(`[SEVEN_SWAP] ${playerId} swapped hands with ${targetId}.`);
   return state;
@@ -768,9 +825,11 @@ export const challengeWildFourAction = (
     throw new Error('You cannot challenge right now');
   }
   const accusedId = state.wildFourPlayerId;
-  if (!accusedId) {
+  if (!accusedId || !state.hands[accusedId]) {
     throw new Error('There is no Wild Draw Four to challenge');
   }
+
+  const unoPenalties = settlePendingUno(state);
 
   const stack = state.drawStack;
   const wasBluff = !!state.wildFourWasBluff;
@@ -786,7 +845,7 @@ export const challengeWildFourAction = (
     // Challenge succeeds: accused draws the stack, challenger keeps their turn.
     drawCardsHelper(state, stack, accusedId);
     bumpStat(state, playerId, 'challengesWon');
-    state.lastAction = { type: 'challenge', playerId, drawCount: stack, targetId: accusedId, challengeSuccess: true };
+    state.lastAction = { type: 'challenge', playerId, drawCount: stack, targetId: accusedId, challengeSuccess: true, unoPenalties };
     logger.debug(`[CHALLENGE] ${playerId} caught ${accusedId}'s +4 bluff (+${stack}).`);
     // currentPlayerId stays the challenger — they now take their normal turn.
   } else {
@@ -794,7 +853,7 @@ export const challengeWildFourAction = (
     const penalty = stack + 2;
     drawCardsHelper(state, penalty, playerId);
     bumpStat(state, playerId, 'challengesLost');
-    state.lastAction = { type: 'challenge', playerId, drawCount: penalty, targetId: accusedId, challengeSuccess: false };
+    state.lastAction = { type: 'challenge', playerId, drawCount: penalty, targetId: accusedId, challengeSuccess: false, unoPenalties };
     logger.debug(`[CHALLENGE] ${playerId} wrongly challenged (+${penalty}) and is skipped.`);
     advanceTurn(state, players, 1);
   }
@@ -809,6 +868,9 @@ export const challengeWildFourAction = (
  */
 export const callUnoAction = (state: UnoGameState, playerId: string): UnoGameState => {
   const rules = state.rules;
+  if (state.status === 'ended' || !state.hands[playerId]?.length) {
+    throw new Error('You cannot call UNO right now');
+  }
   if (!rules.mustSayUno) {
     // UNO calling has no effect when the rule is off, but never error the client.
     state.unoCalled[playerId] = true;
@@ -821,15 +883,15 @@ export const callUnoAction = (state: UnoGameState, playerId: string): UnoGameSta
   }
 
   const hand = state.hands[playerId] || [];
-  // allowLateUno lets a player at exactly 1 card still declare (catching up).
-  const maxForCall = rules.allowLateUno ? 1 : 2;
   if (hand.length > 2) {
     throw new Error('You cannot call UNO with more than 2 cards in hand');
   }
-  if (hand.length < 1 || hand.length > Math.max(2, maxForCall)) {
+  if (hand.length !== 2 && !(hand.length === 1 && rules.allowLateUno && state.pendingUnoPlayerId === playerId)) {
     throw new Error('You cannot call UNO right now');
   }
 
+  if (state.pendingUnoPlayerId === playerId) state.pendingUnoPlayerId = null;
+  if (state.unoCalled[playerId]) return state;
   state.unoCalled[playerId] = true;
   // A successful, intentional manual UNO declaration.
   bumpStat(state, playerId, 'unoCalls');

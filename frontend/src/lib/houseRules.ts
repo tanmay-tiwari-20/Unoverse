@@ -284,7 +284,7 @@ export const HOUSE_RULE_CATEGORIES: RuleCategoryDef[] = [
         control: { type: 'segment', options: [{ value: 'manual', label: 'Manual' }, { value: 'auto', label: 'Auto' }] },
         dependsOn: 'mustSayUno', indent: true,
       },
-      { key: 'allowLateUno', label: 'Late UNO Calls', description: 'Declaring UNO late (before the next player acts) still avoids the penalty.', control: { type: 'toggle' }, dependsOn: 'mustSayUno', indent: true },
+      { key: 'allowLateUno', label: 'Late UNO Calls', description: 'After reaching one card, call UNO before the next successful gameplay action to avoid the penalty. Color and hand-swap choices do not close this window.', control: { type: 'toggle' }, dependsOn: 'mustSayUno', indent: true },
       { key: 'unoPenaltyCards', label: 'UNO Penalty', description: 'Cards drawn for forgetting to call UNO.', control: { type: 'stepper', min: RULE_BOUNDS.unoPenaltyCards.min, max: RULE_BOUNDS.unoPenaltyCards.max, step: 1, unit: 'cards' }, dependsOn: 'mustSayUno', indent: true },
     ],
   },
@@ -295,7 +295,7 @@ export const HOUSE_RULE_CATEGORIES: RuleCategoryDef[] = [
     accent: 'emerald',
     fields: [
       { key: 'reverseAsSkipInTwoPlayer', label: 'Reverse = Skip (2P)', description: 'In a 2-player game, Reverse acts as a Skip.', control: { type: 'toggle' } },
-      { key: 'skipChaining', label: 'Skip Chaining', description: 'Skip cards chain their skip effect.', control: { type: 'toggle' } },
+      { key: 'skipChaining', label: 'Skip Effect', description: 'On: a Skip skips the next player. Off: it matches by color or value like any other card and does not skip anyone.', control: { type: 'toggle' } },
     ],
   },
   {
@@ -425,8 +425,8 @@ export function getActiveRuleExplanations(rules: HouseRules): ActiveRuleExplanat
   } else if (rules.unoCallMode === 'auto') {
     push('uno', 'Auto UNO', 'UNO is called automatically when you reach one card — no penalty.', 'config');
   } else {
-    let t = `Call UNO when you reach one card, or draw ${rules.unoPenaltyCards} penalty ${rules.unoPenaltyCards === 1 ? 'card' : 'cards'}.`;
-    if (rules.allowLateUno) t += ' You may still call it late, before the next player acts.';
+    let t = `Call UNO while holding two cards, before playing your second-to-last card, or draw ${rules.unoPenaltyCards} penalty ${rules.unoPenaltyCards === 1 ? 'card' : 'cards'}.`;
+    if (rules.allowLateUno) t += ' At one card, you may still call while the late-call window is open. It closes on the next successful gameplay action; choosing a color or a hand-swap target does not close it.';
     push('uno', 'Call UNO', t, 'config');
   }
 
@@ -434,7 +434,7 @@ export function getActiveRuleExplanations(rules: HouseRules): ActiveRuleExplanat
   if (!rules.reverseAsSkipInTwoPlayer)
     push('reverseAsSkipInTwoPlayer', 'Reverse in 2-Player', 'In a 2-player game, Reverse does NOT act as a Skip.', 'modifier');
   if (!rules.skipChaining)
-    push('skipChaining', 'Skips Disabled', 'Skip cards do not skip the next player.', 'modifier');
+    push('skipChaining', 'Skip Effect Off', 'Skip cards still match by color or value, but do not skip the next player.', 'modifier');
 
   // --- Winning restrictions ---
   if (rules.numberCardFinishOnly) {

@@ -28,6 +28,7 @@ export function createGameSnapshot(room: Room, recipientId: string | null) {
     winnerId: game.winnerId,
     winnerName: winner?.name ?? null,
     unoCalled: game.unoCalled,
+    pendingUnoPlayerId: game.pendingUnoPlayerId ?? null,
     drawStack: game.drawStack,
     pendingDrawType: game.pendingDrawType,
     challengeableById: game.challengeableById ?? null,

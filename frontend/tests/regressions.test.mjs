@@ -45,6 +45,90 @@ const serverRules = load(path.join(frontend, '../backend/src/game/rules.ts'));
 const serverHouseRules = load(path.join(frontend, '../backend/src/game/houseRules.ts'));
 const card = (color, value) => ({ id: `${color}-${value}`, color, value });
 
+test('manual UNO keeps the two-card pre-call and requires server grace at one card', () => {
+  const { getUnoCallPhase } = load(path.join(frontend, 'src/lib/cards/unoCalls.ts'));
+  const context = {
+    playerId: 'alice', handCount: 2, gameStatus: 'playing', isSpectator: false,
+    rules: houseRules.normalizeHouseRules({ allowLateUno: true }),
+    unoCalled: {}, pendingUnoPlayerId: null,
+  };
+  assert.equal(getUnoCallPhase(context), 'precall');
+  assert.equal(getUnoCallPhase({ ...context, rules: houseRules.normalizeHouseRules({ allowLateUno: false }) }), 'precall');
+  assert.equal(getUnoCallPhase({ ...context, handCount: 1 }), null);
+  assert.equal(getUnoCallPhase({ ...context, handCount: 1, pendingUnoPlayerId: 'bob' }), null);
+  const late = { ...context, handCount: 1, pendingUnoPlayerId: 'alice' };
+  for (const gameStatus of ['playing', 'awaiting_color_selection', 'awaiting_swap_target']) {
+    assert.equal(getUnoCallPhase({ ...late, gameStatus }), 'late');
+  }
+  assert.equal(getUnoCallPhase({ ...late, pendingUnoPlayerId: null }), null);
+  assert.equal(getUnoCallPhase({ ...late, rules: houseRules.normalizeHouseRules({ allowLateUno: false }) }), null);
+  assert.equal(getUnoCallPhase({ ...late, rules: houseRules.normalizeHouseRules({ unoCallMode: 'auto' }) }), null);
+  assert.equal(getUnoCallPhase({ ...late, rules: houseRules.normalizeHouseRules({ mustSayUno: false }) }), null);
+  assert.equal(getUnoCallPhase({ ...late, unoCalled: { alice: true } }), null);
+  assert.equal(getUnoCallPhase({ ...late, gameStatus: 'ended' }), null);
+  assert.equal(getUnoCallPhase({ ...late, handCount: 0 }), null);
+  assert.equal(getUnoCallPhase({ ...late, handCount: 3 }), null);
+  assert.equal(getUnoCallPhase({ ...late, isSpectator: true }), null);
+  assert.equal(getUnoCallPhase({ ...late, playerId: null }), null);
+});
+
+test('UNO snapshot updates expire stale grace and room resets clear it', () => {
+  const read = moduleLoader();
+  const { useGameStore } = read(path.join(frontend, 'src/store/useGameStore.ts'));
+  const { getUnoCallPhase } = read(path.join(frontend, 'src/lib/cards/unoCalls.ts'));
+  const payload = {
+    handCounts: { 1: 1, 2: 3 }, ownSeat: 1, hand: [card('blue', '7')],
+    discardTop: [card('red', '7')], discardCount: 2, drawPileCount: 100,
+    currentPlayerId: 'bob', currentPlayerSeat: 2, direction: 'clockwise',
+    wildColor: null, gameStatus: 'playing', colorChooserId: null,
+    winnerId: null, winnerName: null, unoCalled: {},
+    houseRules: houseRules.normalizeHouseRules({ allowLateUno: true }),
+  };
+  const phase = () => {
+    const state = useGameStore.getState();
+    return getUnoCallPhase({
+      playerId: 'alice', handCount: state.playerCards[1].length,
+      gameStatus: state.gameStatus, isSpectator: state.isSpectator,
+      rules: state.houseRules, unoCalled: state.unoCalled, pendingUnoPlayerId: state.pendingUnoPlayerId,
+    });
+  };
+  useGameStore.getState().setGameState({ ...payload, pendingUnoPlayerId: 'alice' });
+  assert.equal(phase(), 'late');
+  // Turn ownership is deliberately bob: alice must still be able to late-call.
+  assert.equal(useGameStore.getState().currentPlayerId, 'bob');
+  const penalties = [{ playerId: 'alice', drawCount: 0 }, { playerId: 'bob', drawCount: 3 }];
+  useGameStore.getState().setGameState({
+    ...payload, pendingUnoPlayerId: null,
+    lastAction: { type: 'play', playerId: 'bob', unoPenalty: true, unoPenalties: penalties },
+  });
+  assert.deepEqual(useGameStore.getState().lastAction.unoPenalties, penalties);
+  assert.equal(useGameStore.getState().lastAction.unoPenalty, true);
+  useGameStore.getState().setGameState({ ...payload, pendingUnoPlayerId: null });
+  assert.equal(phase(), null);
+  useGameStore.getState().setGameState({ ...payload, pendingUnoPlayerId: 'alice' });
+  useGameStore.getState().setGameState(payload); // older server: absent grace must mean closed
+  assert.equal(phase(), null);
+  useGameStore.getState().setGameState({ ...payload, pendingUnoPlayerId: 'alice' });
+  useGameStore.getState().clearAllCards();
+  assert.equal(useGameStore.getState().pendingUnoPlayerId, null);
+  useGameStore.getState().setGameState({ ...payload, pendingUnoPlayerId: 'alice' });
+  useGameStore.getState().reset();
+  assert.equal(useGameStore.getState().pendingUnoPlayerId, null);
+});
+
+test('rule descriptions preserve the Skip key/default and explain the action deadline', () => {
+  const skip = houseRules.HOUSE_RULE_CATEGORIES.flatMap((category) => category.fields)
+    .find((field) => field.key === 'skipChaining');
+  assert.equal(skip.label, 'Skip Effect');
+  assert.equal(houseRules.DEFAULT_HOUSE_RULES.skipChaining, true);
+  assert.match(skip.description, /Off:.*matches by color or value.*does not skip/);
+  const explanations = houseRules.getActiveRuleExplanations(houseRules.normalizeHouseRules({ skipChaining: false, allowLateUno: true }));
+  const skipExplanation = explanations.find((item) => item.key === 'skipChaining');
+  assert.ok(skipExplanation);
+  assert.match(JSON.stringify(skipExplanation), /still match by color or value/);
+  assert.match(JSON.stringify(explanations.find((item) => item.key === 'uno')), /next successful gameplay action/);
+});
+
 test('client card legality agrees with server stacking and finishing rules', () => {
   const ruleSets = [
     {}, { stacking: false }, { stackDrawTwoOnWildFour: true },

@@ -180,6 +180,19 @@ export class RoomManager {
       room.houseRules = normalizeHouseRules(room.houseRules);
       // Rooms persisted before arenas existed default to the classic world.
       room.arena = resolveArena(room.arena);
+      if (room.game) {
+        // Legacy snapshots carry no late-UNO debt. A saved debt belongs to the
+        // original seated actor, never whichever player now holds one card.
+        const game = room.game;
+        const pending = game.pendingUnoPlayerId;
+        game.pendingUnoPlayerId = typeof pending === 'string'
+          && game.status !== 'ended'
+          && room.players.some((player) => player.id === pending)
+          && game.hands[pending]?.length === 1
+          && !game.unoCalled[pending]
+          && game.rules?.mustSayUno && game.rules.unoCallMode === 'manual'
+          && game.rules.allowLateUno ? pending : null;
+      }
       // Seats persisted before seat uids existed get one now, and a name-keyed
       // scoreboard is re-keyed onto them, so an in-progress match survives the
       // upgrade with every running total intact.
@@ -901,6 +914,10 @@ export class RoomManager {
             game.currentPlayerId = playerSocketId;
           }
 
+          if (game.pendingUnoPlayerId === oldSocketId) {
+            game.pendingUnoPlayerId = playerSocketId;
+          }
+
           if (game.colorChooserId === oldSocketId) {
             game.colorChooserId = playerSocketId;
           }
@@ -939,6 +956,9 @@ export class RoomManager {
           }
           if (game.lastAction && game.lastAction.targetId === oldSocketId) {
             game.lastAction.targetId = playerSocketId;
+          }
+          for (const penalty of game.lastAction?.unoPenalties ?? []) {
+            if (penalty.playerId === oldSocketId) penalty.playerId = playerSocketId;
           }
         }
       }
@@ -1077,6 +1097,12 @@ export class RoomManager {
         this.cancelDisconnectTimer(code, leftPlayer.uid);
 
         logger.debug(`[ROOM_LEAVE] Player: ${leftPlayer.name}, Socket: ${playerSocketId}, Room: ${code}`);
+
+        // Removing the debtor cancels their late-call window. Another player's
+        // departure or reconnect must not close or transfer this window.
+        if (room.game?.pendingUnoPlayerId === playerSocketId) {
+          room.game.pendingUnoPlayerId = null;
+        }
 
         // Bots never play on without a human at the table: once the last human
         // player leaves, every bot leaves with them (the room below is then

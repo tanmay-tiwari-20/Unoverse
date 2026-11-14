@@ -51,6 +51,7 @@ export interface GameLastAction {
   playerId: string;
   card?: CardItem;
   unoPenalty?: boolean;
+  unoPenalties?: Array<{ playerId: string; drawCount: number }>;
   drawCount?: number;
   targetId?: string;
   challengeSuccess?: boolean;
@@ -94,6 +95,7 @@ interface GameState {
   winnerId: string | null;
   winnerName: string | null;
   unoCalled: Record<string, boolean>; // socketId -> boolean
+  pendingUnoPlayerId: string | null; // one-card player whose server-owned late-call window is open
   drawStack: number; // accumulated +2/+4 cards the next player must stack or draw
   pendingDrawType: 'draw_two' | 'wild_draw_four' | null; // top of an active draw chain
   drawnCardId: string | null; // id of a just-drawn, still-playable card awaiting a play-or-pass decision
@@ -175,6 +177,7 @@ export interface GameUpdatePayload {
     winnerId: string | null;
     winnerName: string | null;
     unoCalled: Record<string, boolean>;
+    pendingUnoPlayerId?: string | null;
     drawStack?: number;
     pendingDrawType?: 'draw_two' | 'wild_draw_four' | null;
     drawnCardId?: string | null;
@@ -253,6 +256,7 @@ export const useGameStore = create<GameState>((set) => ({
   winnerId: null,
   winnerName: null,
   unoCalled: {},
+  pendingUnoPlayerId: null,
   drawStack: 0,
   pendingDrawType: null,
   drawnCardId: null,
@@ -376,6 +380,7 @@ export const useGameStore = create<GameState>((set) => ({
     winnerId: null,
     winnerName: null,
     unoCalled: {},
+    pendingUnoPlayerId: null,
     drawStack: 0,
     pendingDrawType: null,
     drawnCardId: null,
@@ -405,6 +410,8 @@ export const useGameStore = create<GameState>((set) => ({
       winnerId: payload.winnerId,
       winnerName: payload.winnerName,
       unoCalled: payload.unoCalled,
+      // Missing on legacy snapshots means closed; never retain stale eligibility.
+      pendingUnoPlayerId: payload.pendingUnoPlayerId ?? null,
       drawStack: payload.drawStack ?? 0,
       pendingDrawType: payload.pendingDrawType ?? null,
       drawnCardId: payload.drawnCardId ?? null,
@@ -446,6 +453,7 @@ export const useGameStore = create<GameState>((set) => ({
     winnerId: null,
     winnerName: null,
     unoCalled: {},
+    pendingUnoPlayerId: null,
     drawStack: 0,
     pendingDrawType: null,
     drawnCardId: null,

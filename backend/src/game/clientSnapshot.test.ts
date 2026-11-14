@@ -19,6 +19,15 @@ function drawnCardRoom(): Room {
 }
 
 describe('recipient game snapshots', () => {
+  it('shares late-UNO eligibility without exposing any additional hand data', () => {
+    const room = drawnCardRoom();
+    room.game!.pendingUnoPlayerId = 'p1';
+    expect(createGameSnapshot(room, 'p1').pendingUnoPlayerId).toBe('p1');
+    expect(createGameSnapshot(room, 'p2').pendingUnoPlayerId).toBe('p1');
+    expect(createGameSnapshot(room, null).pendingUnoPlayerId).toBe('p1');
+    delete room.game!.pendingUnoPlayerId;
+    expect(createGameSnapshot(room, 'p1').pendingUnoPlayerId).toBeNull();
+  });
   it('reveals the draw decision only to the player who drew the card', () => {
     const room = drawnCardRoom();
     expect(room.game!.drawnCardId).not.toBeNull();

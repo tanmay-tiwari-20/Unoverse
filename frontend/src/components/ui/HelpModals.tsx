@@ -251,7 +251,7 @@ const CORE_RULES: { t: string; d: string }[] = [
   { t: "Goal", d: "Be the first to play every card in your hand to win the round." },
   { t: "Playing a card", d: "On your turn, play a card that matches the top card by color, number, or symbol." },
   { t: "Wild cards", d: "A Wild can be played on anything — you choose the next color to continue." },
-  { t: "Action cards", d: "Skip skips the next player, Reverse flips direction, and +2 / +4 make the next player draw." },
+  { t: "Action cards", d: "With Skip Effect on, Skip skips the next player. Reverse flips direction, and +2 / +4 make the next player draw." },
   { t: "Drawing", d: "No playable card? Draw from the pile." },
   { t: "Calling UNO", d: "When you're down to a single card, remember the UNO rule — this lobby's exact setting is shown below." },
 ];

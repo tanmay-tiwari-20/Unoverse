@@ -2,6 +2,12 @@ import { CardItem, CardColor } from './deck';
 import { HouseRules } from './houseRules';
 import { RoundStatDelta } from '../profiles/profileTypes';
 
+export interface UnoPenalty {
+  playerId: string;
+  /** Actual cards drawn; an exhausted deck may produce fewer than the rule. */
+  drawCount: number;
+}
+
 export interface UnoGameState {
   deck: CardItem[];
   discardPile: CardItem[];
@@ -18,6 +24,11 @@ export interface UnoGameState {
   swapChooserId: string | null; // socketId of the player who must pick a Seven-O swap target
   winnerId: string | null; // socketId of the winner when game ends
   unoCalled: Record<string, boolean>; // socketId -> boolean
+  // Manual late-UNO grace belongs to the player who omitted the call. It expires
+  // on the next valid play/draw/pass/challenge/jump-in, including an extra turn.
+  // Color/swap completion is part of the original play and keeps the grace open.
+  // Optional for snapshots written before late calls had a real decision window.
+  pendingUnoPlayerId?: string | null;
   // The frozen, normalized house rules for THIS game. Snapshotted from the room at
   // start and never mutated mid-game, so every decision the engine makes is driven
   // by this object rather than hardcoded logic.
@@ -47,6 +58,7 @@ export interface UnoGameState {
     playerId: string;
     card?: CardItem;
     unoPenalty?: boolean; // true when a play triggered the automatic UNO penalty
+    unoPenalties?: UnoPenalty[]; // one notification entry per missed-call penalty
     drawCount?: number; // number of cards drawn (e.g. when eating a draw chain)
     targetId?: string; // for swap: the opponent whose hand was taken
     challengeSuccess?: boolean; // for challenge: whether the bluff was caught

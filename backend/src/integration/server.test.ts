@@ -4,25 +4,32 @@ import { createServer } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
+import { promises as fs } from 'node:fs';
 import { io, type Socket } from 'socket.io-client';
+import { card, makeState, players2 } from '../test/helpers';
+import type { Room } from '../rooms/roomManager';
 
 const require = createRequire(import.meta.url);
 const backendDir = fileURLToPath(new URL('../../', import.meta.url));
 let server: ChildProcess | undefined;
 let baseUrl: string;
+let testDataDir: string;
 const sockets: Socket[] = [];
 
-function nextEvent<T = any>(socket: Socket, event: string): Promise<T> {
+function nextEvent<T = any>(socket: Socket, event: string, matches: (payload: T) => boolean = () => true): Promise<T> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       socket.off(event, receive);
       reject(new Error(`Timed out waiting for ${event}`));
     }, 5_000);
     function receive(payload: T) {
+      if (!matches(payload)) return;
       clearTimeout(timeout);
+      socket.off(event, receive);
       resolve(payload);
     }
-    socket.once(event, receive);
+    socket.on(event, receive);
   });
 }
 
@@ -55,7 +62,40 @@ async function twoPlayerRoom() {
   return { host, peer, initial: await started };
 }
 
+async function joinSavedSeat(code: string, seat: 1 | 2) {
+  const socket = await connect();
+  const joined = nextEvent(socket, 'joined-successfully');
+  const snapshot = nextEvent(socket, 'game-updated');
+  socket.emit('join-room', { code, name: seat === 1 ? 'Alice' : 'Bob', secret: `s${seat}` });
+  await joined;
+  return { socket, snapshot: await snapshot };
+}
+
+async function lateUnoRoom(code: string) {
+  const host = await joinSavedSeat(code, 1);
+  const peer = await joinSavedSeat(code, 2);
+  const cardId = host.snapshot.hand.find((card: { value: string }) => card.value === '7').id;
+  const played = nextEvent(host.socket, 'game-updated', (snapshot) => snapshot.lastAction?.card?.id === cardId);
+  host.socket.emit('play-card', { cardId });
+  const grace = await played;
+  expect(grace.pendingUnoPlayerId).toBe(host.socket.id);
+  expect(grace.hand).toHaveLength(1);
+  return { host: host.socket, peer: peer.socket, peerHand: peer.snapshot.hand, grace };
+}
+
 beforeAll(async () => {
+  testDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'unoverse-socket-'));
+  const roomDir = path.join(testDataDir, 'rooms');
+  await fs.mkdir(roomDir);
+  for (const code of ['UNO001', 'UNO002', 'UNO003']) {
+    const players = players2();
+    const game = makeState({
+      hands: { p1: [card('red', '7'), card('blue', '8')], p2: [card('red', '8'), card('yellow', '2')] },
+      rules: { allowLateUno: true, unoPenaltyCards: 2, turnTimer: false },
+    });
+    const room: Room = { code, hostId: 'p1', players, game, houseRules: game.rules, status: 'playing' };
+    await fs.writeFile(path.join(roomDir, `${code}.json`), JSON.stringify(room));
+  }
   const port = await new Promise<number>((resolve, reject) => {
     const probe = createServer();
     probe.once('error', reject);
@@ -71,7 +111,8 @@ beforeAll(async () => {
   ], {
     cwd: backendDir,
     env: {
-      ...process.env, PORT: String(port), NODE_ENV: 'development', STORE: 'memory',
+      ...process.env, PORT: String(port), NODE_ENV: 'development', STORE: 'file',
+      DATA_DIR: roomDir, PROFILE_DIR: path.join(testDataDir, 'profiles'),
       REDIS_URL: '', CORS_ORIGIN: '*', TRUST_PROXY_HOPS: '0', LOG_LEVEL: 'silent',
       CRAZYGAMES_AUTH_ENABLED: 'false', TS_NODE_PROJECT: path.join(backendDir, 'tsconfig.json'),
     },
@@ -97,13 +138,67 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  if (!server || server.exitCode !== null) return;
-  const stopped = new Promise<void>((resolve) => server!.once('exit', () => resolve()));
-  server.kill();
-  await stopped;
+  if (server && server.exitCode === null) {
+    const stopped = new Promise<void>((resolve) => server!.once('exit', () => resolve()));
+    server.kill();
+    await stopped;
+  }
+  if (testDataDir) {
+    const resolved = path.resolve(testDataDir);
+    if (path.dirname(resolved) !== path.resolve(os.tmpdir()) || !path.basename(resolved).startsWith('unoverse-socket-')) {
+      throw new Error('Refusing to remove an unexpected integration data directory');
+    }
+    await fs.rm(resolved, { recursive: true, force: true });
+  }
 }, 10_000);
 
 describe('HTTP and Socket.IO boundaries', () => {
+  it('keeps late UNO open after an invalid request and accepts the real call before the next play', async () => {
+    const { host, peer, peerHand } = await lateUnoRoom('UNO001');
+    const invalid = nextEvent(peer, 'error');
+    peer.emit('play-card', { cardId: peerHand.find((card: { color: string }) => card.color === 'yellow').id });
+    expect((await invalid).message).toMatch(/invalid move/i);
+    const called = nextEvent(host, 'game-updated');
+    host.emit('call-uno');
+    const declared = await called;
+    expect(declared.pendingUnoPlayerId).toBeNull();
+    expect(declared.unoCalled[host.id!]).toBe(true);
+    const advanced = nextEvent(host, 'game-updated');
+    peer.emit('play-card', { cardId: peerHand.find((card: { color: string }) => card.color === 'red').id });
+    expect((await advanced).hand).toHaveLength(1);
+  });
+
+  it('announces the actual deferred penalty once and does not replay it on a later UNO call', async () => {
+    const { host, peer, peerHand } = await lateUnoRoom('UNO002');
+    const notices: any[] = [];
+    host.on('uno-penalty', (notice) => notices.push(notice));
+    const advanced = nextEvent(host, 'game-updated');
+    peer.emit('play-card', { cardId: peerHand.find((card: { color: string }) => card.color === 'red').id });
+    const expired = await advanced;
+    expect(expired.hand).toHaveLength(3);
+    expect(expired.pendingUnoPlayerId).toBe(peer.id);
+    expect(notices).toEqual([{ playerId: host.id, playerName: 'Alice', drawCount: 2 }]);
+    const called = nextEvent(host, 'game-updated');
+    peer.emit('call-uno');
+    expect((await called).pendingUnoPlayerId).toBeNull();
+    expect(notices).toHaveLength(1);
+  });
+
+  it('preserves late UNO eligibility through socket reconnection', async () => {
+    const { host, peer, peerHand } = await lateUnoRoom('UNO003');
+    host.disconnect();
+    const rejoined = await joinSavedSeat('UNO003', 1);
+    expect(rejoined.snapshot.pendingUnoPlayerId).toBe(rejoined.socket.id);
+    const called = nextEvent(rejoined.socket, 'game-updated');
+    rejoined.socket.emit('call-uno');
+    const declared = await called;
+    expect(declared.unoCalled[rejoined.socket.id!]).toBe(true);
+    expect(declared.pendingUnoPlayerId).toBeNull();
+    const advanced = nextEvent(rejoined.socket, 'game-updated');
+    peer.emit('play-card', { cardId: peerHand.find((card: { color: string }) => card.color === 'red').id });
+    expect((await advanced).hand).toHaveLength(1);
+  });
+
   it('hides a private outfit/activity over REST while preserving authenticated owner reads', async () => {
     const created = await fetch(`${baseUrl}/api/profiles`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

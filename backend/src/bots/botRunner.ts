@@ -89,6 +89,16 @@ export class BotRunner {
     }
 
     const game = room.game;
+    // Bots declare through the same action as humans, even when another player
+    // owns the turn. Re-broadcast once, then let that new state schedule actions.
+    const pendingBot = room.players.find((player) => player.isBot && player.id === game.pendingUnoPlayerId);
+    if (pendingBot && game.rules.mustSayUno && game.rules.unoCallMode === 'manual' &&
+        game.rules.allowLateUno && game.hands[pendingBot.id]?.length === 1 && !game.unoCalled[pendingBot.id]) {
+      room.game = callUnoAction(game, pendingBot.id);
+      this.deps.onUnoCalled?.(code, pendingBot.id, pendingBot.name);
+      this.deps.onGameChanged(code);
+      return;
+    }
     const actorId = activeActorId(game);
     const actor = actorId ? room.players.find((p) => p.id === actorId) : undefined;
 
@@ -216,6 +226,12 @@ export class BotRunner {
         const bot = liveRoom.players.find((p) => p.id === candidate.botId);
         if (!bot?.isBot) return;
         try {
+          const rules = liveRoom.game.rules;
+          if (liveRoom.game.hands[bot.id]?.length === 2 && rules.mustSayUno &&
+              rules.unoCallMode === 'manual' && !liveRoom.game.unoCalled[bot.id]) {
+            liveRoom.game = callUnoAction(liveRoom.game, bot.id);
+            this.deps.onUnoCalled?.(code, bot.id, bot.name);
+          }
           liveRoom.game = jumpInAction(liveRoom.game, liveRoom.players, candidate.botId, candidate.cardId);
           logger.debug(`[BOT_JUMP_IN] ${bot.name} jumped in, room ${code}`);
           this.deps.onGameChanged(code);

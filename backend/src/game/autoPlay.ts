@@ -1,7 +1,9 @@
 import { CardColor, CardItem } from './deck';
 import { UnoGameState } from './gameState';
 import { Player } from '../rooms/roomManager';
-import { chooseColorAction, drawCardAction, passTurnAction, swapTargetAction } from './actions';
+import { chooseColorAction, drawCardAction, passTurnAction, playCardAction, swapTargetAction } from './actions';
+import { isValidMove } from './rules';
+import { canFinishWithCard } from './houseRules';
 
 /**
  * Shared auto-play helpers. Used by BOTH the turn-timeout auto-resolver (an AFK
@@ -52,11 +54,26 @@ export function autoResolveTimedOutTurn(game: UnoGameState, players: Player[]): 
       // Already drew a playable card and is sitting on the decision — pass.
       return passTurnAction(game, players, activePlayerId);
     }
+    // A timeout still needs a legal action when house rules forbid drawing.
+    // It uses the same play gate as a human, including late-UNO settlement.
+    if (game.rules.mustPlayIfPlayable && !game.pendingDrawType) {
+      const hand = game.hands[activePlayerId] ?? [];
+      const top = game.discardPile[game.discardPile.length - 1];
+      const playable = top && hand.find((card) =>
+        isValidMove(card, top, game.wildColor, null, game.rules) &&
+        (hand.length > 1 || canFinishWithCard(game.rules, card.color, card.value))
+      );
+      if (playable) return playCardAction(game, players, activePlayerId, playable.id);
+    }
     let updated = drawCardAction(game, players, activePlayerId);
     // If the forced draw produced a playable card, don't make the table wait
     // another full timeout — immediately pass on the stalled player's behalf.
     if (updated.drawnCardId) {
+      const drawPenalties = updated.lastAction?.unoPenalties ?? [];
       updated = passTurnAction(updated, players, activePlayerId);
+      if (updated.lastAction && drawPenalties.length) {
+        updated.lastAction.unoPenalties = [...drawPenalties, ...(updated.lastAction.unoPenalties ?? [])];
+      }
     }
     return updated;
   }

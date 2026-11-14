@@ -67,7 +67,8 @@ export interface HouseRules {
   /** (child of mustSayUno) 'auto' = server declares for you (never penalized);
    *  'manual' = you must press the button. */
   unoCallMode: UnoCallMode;
-  /** (child of manual) Declaring UNO late (before the next player acts) still avoids penalty. */
+  /** (child of manual) Allow a call at one card until the next valid gameplay
+   *  action. Color/swap completion does not close that grace window. */
   allowLateUno: boolean;
   /** (child of manual) Number of penalty cards for forgetting to call UNO. */
   unoPenaltyCards: number;
@@ -75,7 +76,8 @@ export interface HouseRules {
   // --- Turn mechanics ---------------------------------------------------------
   /** In a 2-player game, Reverse acts as Skip (official). */
   reverseAsSkipInTwoPlayer: boolean;
-  /** Consecutive Skips chain their skip effect (affects >2-player edge cases). */
+  /** Whether a played/opening Skip skips seats. Historical key retained for
+   *  saved rooms; false makes Skip act like an ordinary matching card. */
   skipChaining: boolean;
 
   // --- Winning restrictions ---------------------------------------------------

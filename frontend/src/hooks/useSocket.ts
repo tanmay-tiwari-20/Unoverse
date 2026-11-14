@@ -272,15 +272,21 @@ function setupSocketListeners(socketInstance: Socket) {
     useProfileStore.getState().refreshProfile().catch(() => {});
   });
 
-  socketInstance.on('uno-penalty', ({ playerId, playerName }) => {
+  socketInstance.on('uno-penalty', ({ playerId, playerName, drawCount }: { playerId: string; playerName: string; drawCount?: number }) => {
     logger.debug('[Socket] UNO penalty applied to', playerName);
-    soundManager.play('card_draw');
-    const me = useGameStore.getState().player;
+    const state = useGameStore.getState();
+    const me = state.player;
+    const penaltyCards = typeof drawCount === 'number' && Number.isFinite(drawCount) && drawCount >= 0
+      ? drawCount : state.houseRules.unoPenaltyCards;
+    if (penaltyCards > 0) soundManager.play('card_draw');
+    const penalty = penaltyCards === 0
+      ? 'No cards could be drawn.'
+      : `+${penaltyCards} penalty ${penaltyCards === 1 ? 'card' : 'cards'}`;
     const youGotCaught = me?.id === playerId;
     useGameStore.getState().addToast(
       youGotCaught
-        ? "You forgot to call UNO! +4 penalty cards"
-        : `${playerName} forgot to call UNO! +4 penalty cards`,
+        ? `You forgot to call UNO! ${penalty}`
+        : `${playerName} forgot to call UNO! ${penalty}`,
       youGotCaught ? 'error' : 'info'
     );
   });

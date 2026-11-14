@@ -347,7 +347,7 @@ Hosts can customize gameplay in the lobby. All configurations are validated and 
 | **Draw Until Playable** | Keep drawing cards until you find one that can be played. |
 | **Must Play If Playable** | You are blocked from drawing a card if you already hold a playable card. |
 | **Reverse as Skip (2P)** | In a two-player game, a Reverse acts as a Skip (official rule). |
-| **Skip Chaining** | Consecutive Skips chain their skip effect across players. |
+| **Skip Effect** | When enabled, Skip cards skip the next active player. When disabled, they match normally without skipping. |
 
 </details>
 
@@ -371,7 +371,7 @@ Hosts can customize gameplay in the lobby. All configurations are validated and 
 | **Bluffing +4** | A Wild +4 play is illegal if you held another matching color card in your hand. |
 | **Must Say UNO** | Declare UNO when down to your second-to-last card or face drawing penalties. |
 | **UNO Call Mode** | Configured as `manual` (button click) or `auto` (handled automatically by the server). |
-| **Allow Late UNO** | Declaring UNO late (before the next player takes action) still counts. |
+| **Allow Late UNO** | After playing down to one card, declare before the next valid play, draw, pass, challenge, or jump-in to avoid the penalty. Color/swap choices and reconnects keep the grace open; an extra turn's next action closes it. |
 
 </details>
 
