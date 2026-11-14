@@ -244,6 +244,15 @@ describe('Wild / Wild +4 color selection', () => {
 });
 
 describe('Draw-then-play decision window', () => {
+  it('restores recycled wilds using their value even when their IDs are opaque', () => {
+    const recycled = { id: '7c0ec1a3-4a3a-4b69-9fa5-5e6f8e726513', color: 'blue' as const, value: 'wild' as const };
+    const state = makeState({
+      hands: { p1: [card('green', '2')], p2: [card('yellow', '3')] },
+      deck: [], discardPile: [recycled, card('red', '5')],
+    });
+    const next = drawCardAction(state, players2(), 'p1');
+    expect(next.hands.p1.find((card) => card.id === recycled.id)?.color).toBe('wild');
+  });
   it('drawing a playable card keeps the turn and opens the decision', () => {
     // p1 holds only a blue-9 (not playable on red-3); draws a red card on top.
     const s = makeState({

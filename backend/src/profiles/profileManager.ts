@@ -88,9 +88,24 @@ class ProfileManager {
   private dirty: Set<string> = new Set();
   private removed: Set<string> = new Set();
   private flushScheduled = false;
+  private flushPromise: Promise<void> | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private revisions = new Map<string, number>();
+  private storeGeneration = 0;
+  private draining = false;
+  private readonly retryDelayMs = 250;
 
   /** Inject the durable store (called once at startup). */
   public setStore(store: ProfileStore): void {
+    this.storeGeneration++;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.flushPromise = null;
+    this.flushScheduled = false;
+    this.draining = false;
+    this.dirty.clear();
+    this.removed.clear();
+    this.revisions.clear();
     this.store = store;
   }
 
@@ -108,9 +123,7 @@ class ProfileManager {
     this.ids.clear();
     this.legacyIds.clear();
     this.externalIds.clear();
-    this.dirty.clear();
-    this.removed.clear();
-    if (store) this.store = store;
+    this.setStore(store ?? new MemoryProfileStore());
   }
 
   /**
@@ -213,59 +226,101 @@ class ProfileManager {
   // ---- Write-through persistence (mirror of RoomManager) --------------------
 
   public markDirty(id: string): void {
+    this.revisions.set(id, (this.revisions.get(id) ?? 0) + 1);
     this.removed.delete(id);
     this.dirty.add(id);
     this.scheduleFlush();
   }
 
   private markRemoved(id: string): void {
+    this.revisions.set(id, (this.revisions.get(id) ?? 0) + 1);
     this.dirty.delete(id);
     this.removed.add(id);
     this.scheduleFlush();
   }
 
   private scheduleFlush(): void {
-    if (this.flushScheduled) return;
+    if (this.flushScheduled || this.flushPromise || this.retryTimer || this.draining) return;
+    const generation = this.storeGeneration;
     this.flushScheduled = true;
-    queueMicrotask(() => this.flush());
+    queueMicrotask(() => {
+      if (generation !== this.storeGeneration) return;
+      this.flushScheduled = false;
+      void this.flush();
+    });
   }
 
-  private async flush(): Promise<void> {
-    this.flushScheduled = false;
-    const toSave = [...this.dirty];
-    const toRemove = [...this.removed];
-    this.dirty.clear();
-    this.removed.clear();
-
-    await Promise.all([
-      ...toSave.map(async (id) => {
-        const profile = this.profiles.get(id);
-        if (!profile) return;
-        try {
-          await this.store.save(profile);
-        } catch (err: any) {
-          logger.error(`[PROFILE_STORE] Failed to persist profile ${id}:`, err?.message);
-        }
-      }),
-      ...toRemove.map(async (id) => {
-        try {
-          await this.store.remove(id);
-        } catch (err: any) {
-          logger.error(`[PROFILE_STORE] Failed to remove profile ${id}:`, err?.message);
-        }
-      }),
-    ]);
+  /** One tracked loop owns writes; each batch uses immutable, revisioned snapshots. */
+  private flush(): Promise<void> {
+    if (this.flushPromise) return this.flushPromise;
+    const generation = this.storeGeneration;
+    const store = this.store;
+    let failed = false;
+    this.flushPromise = (async () => {
+      while (generation === this.storeGeneration && (this.dirty.size || this.removed.size)) {
+        const saves = [...this.dirty].flatMap((id) => {
+          const profile = this.profiles.get(id);
+          return profile ? [{ id, revision: this.revisions.get(id), snapshot: JSON.parse(JSON.stringify(profile)) as Profile }] : [];
+        });
+        const removals = [...this.removed].map((id) => ({ id, revision: this.revisions.get(id) }));
+        this.dirty.clear();
+        this.removed.clear();
+        await Promise.all([
+          ...saves.map(async ({ id, revision, snapshot }) => {
+            try {
+              await store.save(snapshot);
+            } catch (err: any) {
+              failed = true;
+              if (generation === this.storeGeneration && this.revisions.get(id) === revision) this.dirty.add(id);
+              logger.error(`[PROFILE_STORE] Failed to persist profile ${id} (will retry):`, err?.message);
+            }
+          }),
+          ...removals.map(async ({ id, revision }) => {
+            try {
+              await store.remove(id);
+            } catch (err: any) {
+              failed = true;
+              if (generation === this.storeGeneration && this.revisions.get(id) === revision) this.removed.add(id);
+              logger.error(`[PROFILE_STORE] Failed to remove profile ${id} (will retry):`, err?.message);
+            }
+          }),
+        ]);
+        if (failed) break;
+      }
+    })().finally(() => {
+      if (generation !== this.storeGeneration) return;
+      this.flushPromise = null;
+      if (this.draining || (!this.dirty.size && !this.removed.size)) return;
+      if (failed) {
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          void this.flush();
+        }, this.retryDelayMs);
+        this.retryTimer.unref?.();
+      } else {
+        this.scheduleFlush();
+      }
+    });
+    return this.flushPromise;
   }
 
   /** Flush pending writes and close the store on graceful shutdown. */
   public async shutdown(): Promise<void> {
-    await this.flush();
-    if (this.store.close) {
-      try {
-        await this.store.close();
-      } catch (err: any) {
-        logger.error('[PROFILE_STORE] Error closing store on shutdown:', err?.message);
+    this.draining = true;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    try {
+      // This also awaits a save that was already running when shutdown began.
+      await this.flush();
+      for (let attempt = 0; attempt < 3 && (this.dirty.size || this.removed.size); attempt++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, this.retryDelayMs));
+        await this.flush();
       }
+      if (this.dirty.size || this.removed.size) {
+        throw new Error('Profile persistence still has pending writes after shutdown retries');
+      }
+    } finally {
+      if (this.store.close) await this.store.close();
     }
   }
 
@@ -352,9 +407,16 @@ class ProfileManager {
     return this.resolve(id);
   }
 
-  public getPublicProfile(id: string): PublicProfile | undefined {
+  public getPublicProfile(id: string, viewer?: { id: string; secret: string }): PublicProfile | undefined {
     const p = this.resolve(id);
-    return p ? publicProfile(p) : undefined;
+    if (!p) return undefined;
+    if (!viewer || !this.verify(viewer.id, viewer.secret)) return publicProfile(p);
+    const owner = this.resolve(viewer.id)!;
+    if (owner.id === p.id) return publicProfile(p, 'owner');
+    const friends = owner.social.friends.some((link) => link.id === p.id)
+      && p.social.friends.some((link) => link.id === owner.id)
+      && !owner.social.blocked.includes(p.id) && !p.social.blocked.includes(owner.id);
+    return publicProfile(p, friends ? 'friend' : 'public');
   }
 
   // ---- External identities (platform auth) ---------------------------------
@@ -451,7 +513,7 @@ class ProfileManager {
     p.displayName = trimmed;
     p.updatedAt = Date.now();
     this.markDirty(p.id);
-    return publicProfile(p);
+    return publicProfile(p, 'owner');
   }
 
   /** Change a profile's preset avatar (secret-authenticated). */
@@ -461,7 +523,7 @@ class ProfileManager {
     p.avatarUrl = avatar ? String(avatar).slice(0, 64) : null;
     p.updatedAt = Date.now();
     this.markDirty(p.id);
-    return publicProfile(p);
+    return publicProfile(p, 'owner');
   }
 
   /** Change a profile's cosmetic outfit (secret-authenticated). Purely visual;
@@ -472,7 +534,7 @@ class ProfileManager {
     p.outfit = outfit ? String(outfit).slice(0, 64) : null;
     p.updatedAt = Date.now();
     this.markDirty(p.id);
-    return publicProfile(p);
+    return publicProfile(p, 'owner');
   }
 
   /** Reset all statistics/history (secret-authenticated). Keeps the same Player
@@ -487,7 +549,7 @@ class ProfileManager {
     p.updatedAt = Date.now();
     this.markDirty(p.id);
     logger.debug(`[PROFILE_RESET] ${p.displayName} #${p.id}`);
-    return publicProfile(p);
+    return publicProfile(p, 'owner');
   }
 
   // ---- Server-authoritative stat commits -----------------------------------

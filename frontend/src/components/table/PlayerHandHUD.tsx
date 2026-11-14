@@ -4,7 +4,7 @@ import React from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HtmlCard } from '../cards/HtmlCard';
-import { isValidMove, CardItem } from '../../lib/cards/cardEngine';
+import { canPlayCard, canJumpInWithCard, CardItem } from '../../lib/cards/cardEngine';
 import { useViewport } from '../../hooks/useViewport';
 import { useSocket } from '../../hooks/useSocket';
 import { useKeyboardControls } from '../../hooks/useKeyboardControls';
@@ -37,19 +37,16 @@ export const PlayerHandHUD: React.FC = () => {
 
   const hand = playerCards[player.seatNumber] || [];
   const cardCount = hand.length;
-  const isMyTurn = currentPlayerId === player.id && !isProcessing;
+  const isMyTurn = gameStatus === 'playing' && currentPlayerId === player.id && !isProcessing;
   const topCard = discardPile.length > 0 ? discardPile[discardPile.length - 1] : null;
 
   // Jump-In: when the rule is on and it's NOT our turn, a card that is identical
   // (same color AND value) to the top card can be played out of turn to seize it.
-  const jumpInEnabled = !!houseRules?.jumpIn && gameStatus === 'playing' && !pendingDrawType && !isProcessing;
+  const jumpInEnabled = gameStatus === 'playing' && !isProcessing;
   const canJumpIn = (card: CardItem): boolean =>
     jumpInEnabled &&
     currentPlayerId !== player.id &&
-    !!topCard &&
-    topCard.color !== 'wild' &&
-    card.color === topCard.color &&
-    card.value === topCard.value;
+    canJumpInWithCard(card, topCard, pendingDrawType, houseRules, hand.length);
 
   // ---------------------------------------------------------------------------
   // Responsive sizing. Rather than fixed Tailwind sizes (which made cards tiny
@@ -126,9 +123,9 @@ export const PlayerHandHUD: React.FC = () => {
 
     // Highlight every card that is a legal play this turn (server is the final
     // authority; this just mirrors the same rule for visual affordance).
-    const isPlayable = isMyTurn && !!topCard && isValidMove(card, topCard, wildColor, pendingDrawType);
+    const isPlayable = isMyTurn && canPlayCard(card, topCard, wildColor, pendingDrawType, houseRules, hand.length);
     const isJumpIn = canJumpIn(card);
-    const canPlay = isMyTurn || isJumpIn;
+    const canPlay = isPlayable || isJumpIn;
     const isSelected = selectedCardId === card.id;
 
     const activate = () => {

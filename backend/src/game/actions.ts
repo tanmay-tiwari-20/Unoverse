@@ -56,7 +56,7 @@ const drawCardsHelper = (state: UnoGameState, count: number, recipientId: string
 
       // Reset wild cards back to their default 'wild' color
       const resetCards = recycleCards.map(card => {
-        if (card.id.startsWith('wild-wild')) {
+        if (card.value === 'wild' || card.value === 'wild_draw_four') {
           return { ...card, color: 'wild' as CardColor };
         }
         return card;

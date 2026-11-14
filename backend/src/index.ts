@@ -29,6 +29,7 @@ import {
   challengeWildFourAction,
 } from './game/actions';
 import { autoResolveTimedOutTurn } from './game/autoPlay';
+import { createGameSnapshot } from './game/clientSnapshot';
 import { recoverActivePlayerId } from './game/turnManager';
 import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
@@ -36,10 +37,10 @@ import { socketRateLimiter } from './utils/rateLimiter';
 import { moderateChat, clearSenderHistory } from './utils/chatModeration';
 import {
   resolveCorsOrigin,
+  resolveTrustProxy,
   CorsOriginResolver,
   ROOM_SWEEP_CONFIG,
   TURN_TIMER_RETRY_MS,
-  DISCARD_VISIBLE_COUNT,
   CRAZYGAMES_CONFIG,
 } from './config/serverConfig';
 import { verifyCrazyGamesToken } from './auth/crazyGamesAuth';
@@ -86,6 +87,7 @@ import {
 // authoritative per-turn duration comes from each game's locked house rules.
 const TURN_DURATION_MS = Number(process.env.TURN_TIMEOUT_MS) || 45000;
 const turnTimers = new Map<string, NodeJS.Timeout>();
+let shuttingDown = false;
 // Tracks which turn (status + active socket id) the current timer belongs to, so
 // idempotent re-broadcasts (e.g. a reconnect) don't restart the clock.
 const turnSignatures = new Map<string, string>();
@@ -111,6 +113,7 @@ function clearTurnTimer(code: string) {
 // broadcastGameState after every state change so the deadline rides along in
 // the payload. No-op if the turn signature is unchanged.
 function armTurnTimer(code: string) {
+  if (shuttingDown) return;
   const room = roomManager.getRoom(code);
   if (!room || !room.game) { clearTurnTimer(code); return; }
   const game = room.game;
@@ -143,6 +146,7 @@ function armTurnTimer(code: string) {
 // re-broadcasts. The same helper backs the bot AI's fallbacks, so timeout
 // behavior and bot behavior can never drift apart.
 function handleTurnTimeout(code: string, signature: string) {
+  if (shuttingDown) return;
   const room = roomManager.getRoom(code);
   if (!room || !room.game) { clearTurnTimer(code); return; }
   const game = room.game;
@@ -257,6 +261,7 @@ function recoverStaleTurn(room: Room): boolean {
 
 // Helper to sanitize and broadcast game state to each player individually
 function broadcastGameState(code: string) {
+  if (shuttingDown) return;
   const room = roomManager.getRoom(code);
   if (!room || !room.game) return;
   const game = room.game;
@@ -277,62 +282,9 @@ function broadcastGameState(code: string) {
     logger.debug(`  Player -> playerId: ${p.id}, socketId: ${p.id}, seat: ${p.seatNumber}, cards.length: ${game.hands[p.id]?.length || 0}`);
   });
   
-  // Per-seat hand SIZES. Every hand except the recipient's own renders face-down,
-  // so the client needs only a count and synthesizes the placeholder cards
-  // locally. Previously we shipped one `{id,color:'wild',value:'wild'}` object per
-  // card in every hand (~64 bytes each; 2.7-5 KB per broadcast) to carry exactly
-  // the information a single integer per seat conveys.
-  const handCounts: Record<number, number> = {};
-  room.players.forEach((p) => {
-    handCounts[p.seatNumber] = (game.hands[p.id] || []).length;
-  });
-
-  const activeSeat = activePlayerObj ? activePlayerObj.seatNumber : 1;
-  const winnerObj = game.winnerId ? room.players.find(p => p.id === game.winnerId) : null;
-
-  // One shared payload for every recipient (player or spectator); only `ownSeat` /
-  // `hand` (the recipient's own real cards) and `drawnCardId` (players only) are
-  // overridden per recipient. Keeping a single literal means a future game-state
-  // field can never reach players but silently miss spectators.
-  const basePayload = {
-    handCounts,
-    // Only the VISIBLE top of the discard pile travels, never the round's full
-    // history. The client renders a stack of at most DISCARD_VISIBLE_COUNT cards
-    // and otherwise reads only the top card, so this is everything it can display
-    // — while keeping the payload O(1) instead of growing all round long.
-    discardTop: game.discardPile.slice(-DISCARD_VISIBLE_COUNT),
-    discardCount: game.discardPile.length,
-    drawPileCount: game.deck.length,
-    currentPlayerId: game.currentPlayerId,
-    currentPlayerSeat: activeSeat,
-    direction: game.direction,
-    wildColor: game.wildColor,
-    gameStatus: game.status,
-    colorChooserId: game.colorChooserId,
-    swapChooserId: game.swapChooserId ?? null,
-    winnerId: game.winnerId,
-    winnerName: winnerObj ? winnerObj.name : null,
-    unoCalled: game.unoCalled,
-    drawStack: game.drawStack,
-    pendingDrawType: game.pendingDrawType,
-    challengeableById: game.challengeableById ?? null,
-    drawnCardId: game.drawnCardId ?? null,
-    turnDeadline: game.turnDeadline ?? null,
-    lastAction: game.lastAction,
-    match: room.match ?? null,
-    // The locked, active house rules travel with every game update so clients
-    // render/enforce exactly what the server is enforcing.
-    houseRules: game.rules,
-  };
-
+  // The tested projection includes private data only for its seated owner.
   room.players.forEach((targetPlayer) => {
-    io.to(targetPlayer.id).emit('game-updated', {
-      ...basePayload,
-      // The recipient sees their own real cards; every other seat is a count that
-      // the client renders face-down.
-      ownSeat: targetPlayer.seatNumber,
-      hand: game.hands[targetPlayer.id] || [],
-    });
+    io.to(targetPlayer.id).emit('game-updated', createGameSnapshot(room, targetPlayer.id));
   });
 
   if (activePlayerObj) {
@@ -341,9 +293,10 @@ function broadcastGameState(code: string) {
 
   // Spectators observe the live game in real time — piles, turn order, counts and
   // action banners — with every hand face-down and no pending draw decision.
-  room.spectators?.forEach((s) => {
-    io.to(s.id).emit('game-updated', { ...basePayload, ownSeat: null, hand: [], drawnCardId: null });
-  });
+  if (room.spectators?.length) {
+    const spectatorSnapshot = createGameSnapshot(room, null);
+    room.spectators.forEach((s) => io.to(s.id).emit('game-updated', spectatorSnapshot));
+  }
 
   // Persist the room after every game-state broadcast. All in-game mutations
   // (play/draw/pass/chooseColor/UNO, plus reconnection remaps) flow through here,
@@ -451,11 +404,9 @@ try {
 }
 
 // Middlewares
-// Exactly one reverse proxy (the platform's edge) sits in front of this process
-// in every hosted deployment, so trust one hop: `req.ip` / `req.protocol` /
-// `req.secure` then reflect the real client instead of the proxy. The rate
-// limiter below reads X-Forwarded-For directly and is unaffected either way.
-app.set('trust proxy', 1);
+// Direct requests cannot choose their own rate-limit key via forwarded headers.
+// Hosted deployments explicitly configure their fixed proxy chain length.
+app.set('trust proxy', resolveTrustProxy());
 
 app.use(cors({
   origin: corsOrigin,
@@ -471,7 +422,7 @@ app.use(express.json());
 function rateLimit(opts: { windowMs: number; max: number }) {
   const hits = new Map<string, { count: number; resetAt: number }>();
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const entry = hits.get(ip);
     if (!entry || now > entry.resetAt) {
@@ -686,7 +637,7 @@ if (CRAZYGAMES_CONFIG.enabled) {
       });
 
       res.status(created ? 201 : 200).json({
-        profile: profileManager.getPublicProfile(profile.id),
+        profile: profileManager.getPublicProfile(profile.id, { id: profile.id, secret: profile.secret }),
         secret: profile.secret,
       });
     } catch (error: any) {
@@ -717,20 +668,28 @@ app.post('/api/profiles', profileWriteLimiter, (req, res) => {
     }
     const profile = profileManager.createProfile({ displayName, avatar, outfit });
     // The creator receives the secret; everyone else only ever sees publicProfile.
-    res.status(201).json({ profile: profileManager.getPublicProfile(profile.id), secret: profile.secret });
+    res.status(201).json({
+      profile: profileManager.getPublicProfile(profile.id, { id: profile.id, secret: profile.secret }),
+      secret: profile.secret,
+    });
   } catch (error: any) {
     logger.error('[REST] Error creating profile:', error);
     res.status(500).json({ error: error.message || 'Failed to create profile' });
   }
 });
 
-// Public view of a profile (stats, history, dates) for the profile UI. No secret.
+// Public reads enforce privacy; the owner can authenticate to view hidden fields.
 app.get('/api/profiles/:id', (req, res) => {
-  const profile = profileManager.getPublicProfile(req.params.id);
+  const authorization = req.get('authorization');
+  const secret = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
+  const profile = profileManager.getPublicProfile(
+    req.params.id, secret ? { id: req.params.id, secret } : undefined,
+  );
   if (!profile) {
     res.status(404).json({ error: 'Profile not found' });
     return;
   }
+  res.set('Cache-Control', 'no-store');
   res.status(200).json({ profile });
 });
 
@@ -742,7 +701,7 @@ app.patch('/api/profiles/:id', profileWriteLimiter, (req, res) => {
       res.status(403).json({ error: 'Not authorized to edit this profile' });
       return;
     }
-    let profile = profileManager.getPublicProfile(req.params.id);
+    let profile = profileManager.getPublicProfile(req.params.id, { id: req.params.id, secret });
     if (typeof req.body?.displayName === 'string' && req.body.displayName.trim()) {
       profile = profileManager.renameProfile(req.params.id, secret, req.body.displayName);
     }
@@ -1504,6 +1463,7 @@ io.on('connection', (socket) => {
 
 /** Disposer for the social layer's background timers (set by start()). */
 let stopSocialServices: (() => void) | null = null;
+let roomSweepTimer: NodeJS.Timeout | null = null;
 
 // Start Server — build the durable store, rehydrate any in-progress rooms, then
 // begin accepting connections so reconnecting players find their game intact.
@@ -1547,12 +1507,13 @@ async function start() {
   // window — while never touching a room that still has an active player or
   // spectator. Deleting a room also removes its persisted snapshot. All timings
   // are env-configurable via ROOM_SWEEP_CONFIG.
-  setInterval(() => {
+  roomSweepTimer = setInterval(() => {
     roomManager.sweepIdleRooms({
       emptyTtlMs: ROOM_SWEEP_CONFIG.emptyRoomTtlMs,
       finishedTtlMs: ROOM_SWEEP_CONFIG.finishedRoomTtlMs,
     });
-  }, ROOM_SWEEP_CONFIG.intervalMs).unref();
+  }, ROOM_SWEEP_CONFIG.intervalMs);
+  roomSweepTimer.unref();
 
   // Friends & Social System: invite-expiry delivery + the idle ("Away") sweep.
   // Independent of every gameplay timer above; nothing in the game loop reads it.
@@ -1601,7 +1562,6 @@ start().catch((err: any) => {
 // Graceful shutdown. Container platforms send SIGTERM on deploy/scale-down; we
 // stop accepting connections, close sockets, flush pending persistence, then exit.
 // A hard timeout guarantees we don't hang the platform's shutdown grace window.
-let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -1616,6 +1576,9 @@ async function shutdown(signal: string) {
   try {
     io.close();                       // stop Socket.IO, disconnect clients
     stopSocialServices?.();           // clear the social away-sweep timer
+    if (roomSweepTimer) clearInterval(roomSweepTimer);
+    for (const code of turnTimers.keys()) clearTurnTimer(code);
+    botRunner.shutdown();
     await new Promise<void>((resolve) => server.close(() => resolve())); // stop HTTP
     await roomManager.shutdown();     // flush pending room writes + close store
     await profileManager.shutdown();  // flush pending profile writes + close store

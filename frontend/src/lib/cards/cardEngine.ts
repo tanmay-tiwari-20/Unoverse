@@ -1,3 +1,5 @@
+import { DEFAULT_HOUSE_RULES, type HouseRules } from '../houseRules';
+
 export type CardColor = 'red' | 'blue' | 'green' | 'yellow' | 'wild';
 
 export type CardValue =
@@ -124,21 +126,23 @@ export const generateRandomCard = (): CardItem => {
  * Validates whether a card can be played on top of the current discard card.
  *
  * When a draw chain is active (pendingDrawType set), normal matching is
- * suspended and only legal stacks are allowed: +2 on +2, +4 on +2, +4 on +4 —
- * but never +2 on +4. Mirrors the server-authoritative rule in backend/rules.ts.
+ * suspended and the active house rules determine which draw cards may stack.
+ * Mirrors the server-authoritative rule in backend/game/rules.ts.
  */
 export const isValidMove = (
   card: CardItem,
   topCard: CardItem | null,
   wildColor: CardColor | null,
-  pendingDrawType: 'draw_two' | 'wild_draw_four' | null = null
+  pendingDrawType: 'draw_two' | 'wild_draw_four' | null = null,
+  rules: HouseRules = DEFAULT_HOUSE_RULES
 ): boolean => {
   if (!topCard) return true; // Safety fallback if discard pile is empty
 
   // 0. An active draw chain overrides everything: only legal stacks are allowed.
   if (pendingDrawType) {
+    if (!rules.stacking) return false;
     if (card.value === 'wild_draw_four') return true; // +4 stacks on anything
-    if (card.value === 'draw_two') return pendingDrawType === 'draw_two'; // +2 only on +2
+    if (card.value === 'draw_two') return pendingDrawType === 'draw_two' || rules.stackDrawTwoOnWildFour;
     return false;
   }
 
@@ -156,4 +160,54 @@ export const isValidMove = (
   // 3. Match color or match value
   return card.color === topCard.color || card.value === topCard.value;
 };
+
+/** The server applies these restrictions only when a play empties the hand. */
+export function canFinishWithCard(rules: HouseRules, card: CardItem): boolean {
+  const isNumber = /^[0-9]$/.test(card.value);
+  if (rules.numberCardFinishOnly) return isNumber;
+  if (isNumber) return true;
+  if (card.value === 'draw_two' || card.value === 'wild_draw_four') {
+    return rules.allowWinWithDrawCard && (card.color !== 'wild' || rules.allowWinWithWild);
+  }
+  if (card.color === 'wild') return rules.allowWinWithWild;
+  if (card.value === 'skip' || card.value === 'reverse') return rules.allowWinWithActionCard;
+  return true;
+}
+
+/** Shared by hand highlights, keyboard actions, and the forced-draw cue. */
+export function canPlayCard(
+  card: CardItem,
+  topCard: CardItem | null,
+  wildColor: CardColor | null,
+  pendingDrawType: 'draw_two' | 'wild_draw_four' | null,
+  rules: HouseRules,
+  handCount: number,
+): boolean {
+  return !!topCard && isValidMove(card, topCard, wildColor, pendingDrawType, rules) &&
+    (handCount > 1 || canFinishWithCard(rules, card));
+}
+
+export function canJumpInWithCard(
+  card: CardItem,
+  topCard: CardItem | null,
+  pendingDrawType: 'draw_two' | 'wild_draw_four' | null,
+  rules: HouseRules,
+  handCount: number,
+): boolean {
+  return rules.jumpIn && !pendingDrawType && !!topCard &&
+    card.color !== 'wild' && topCard.color !== 'wild' &&
+    card.color === topCard.color && card.value === topCard.value &&
+    (handCount > 1 || canFinishWithCard(rules, card));
+}
+
+export function drawStackPrompt(
+  pendingDrawType: 'draw_two' | 'wild_draw_four',
+  drawStack: number,
+  rules: HouseRules,
+): string {
+  const penalty = rules.stackToEat ? drawStack : pendingDrawType === 'wild_draw_four' ? 4 : 2;
+  if (!rules.stacking) return `Draw ${penalty} cards!`;
+  const options = pendingDrawType === 'draw_two' || rules.stackDrawTwoOnWildFour ? '+2 / +4' : '+4';
+  return `Stack a ${options} or draw ${penalty}!`;
+}
 

@@ -10,7 +10,7 @@ import { HouseRules, normalizeHouseRules } from '../game/houseRules';
  */
 
 let cardSeq = 0;
-/** Make a card with a stable, unique id (value baked into the id, like the real deck). */
+/** Make a card with a stable, unique test id. Production IDs are opaque UUIDs. */
 export const card = (color: CardColor, value: CardValue): CardItem => ({
   id: `${color}-${value}-test${cardSeq++}`,
   color,

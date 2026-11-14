@@ -39,8 +39,8 @@ services:
       # Use Redis for both durable room state and cross-instance broadcasts.
       STORE: redis
       REDIS_URL: redis://redis:6379
-      # For local testing allow any origin; lock this down in real deploys.
-      CORS_ORIGIN: "*"
+      # Production mode requires an explicit allow-list, including for smoke tests.
+      CORS_ORIGIN: "http://localhost:3000,http://127.0.0.1:3000"
       TURN_TIMEOUT_MS: "45000"
     depends_on:
       redis:

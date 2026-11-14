@@ -24,7 +24,7 @@
 ## ✨ Features
 
 ### 🎮 Gameplay Engine
-* **Server-Authoritative Validation**: Fully cheat-proof game logic checked and validated on the backend.
+* **Server-Authoritative Validation**: Game actions are checked on the backend, with private hands and draw decisions scoped to their owners.
 * **Flexible Room Capacity**: Support rooms of **2–10 active players** with host-configurable seat limits.
 * **20+ Configurable House Rules**: Customize rules like *Jump-In*, *Seven Swap*, *Zero Rotate*, *Stacking*, and many more.
 * **UNO Declaration System**: Choose between `manual` (button press) or `auto` declaration modes.
@@ -34,7 +34,7 @@
 
 ### 🤖 AI Opponents
 * **Play Solo or Fill the Table**: Add CPU opponents from the lobby with simple `+`/`−` controls, or hit **"Fill & Play vs Bots"** to top up empty seats and start instantly — no waiting for friends.
-* **Provably Fair**: Bots have no socket and no special access. Every bot move is routed through the *exact same* server-authoritative action functions as human players, so a bot **literally cannot cheat** — a bad decision is rejected just like a bad human request.
+* **Shared Rule Validation**: Bots have no socket. Every bot move uses the same server-authoritative action functions as human players, so invalid bot actions are rejected by the game engine.
 * **A Real Strategy Brain**: A pure, stateless decision engine scores every legal card — dumping cheap numbers, saving Wilds for the endgame, unloading action cards when the next player is close to winning, avoiding challengeable +4 bluffs, and calling UNO before its second-to-last card.
 * **Human-ish Timing**: Bots "think" for 1.2–2.6s before acting and occasionally **jump in** out of turn, so tables feel natural rather than robotic.
 
@@ -261,7 +261,7 @@ with the friend graph persisted on your profile.
 
 * **Node.js 20+** (uses native `process.loadEnvFile`)
 * **npm** (comes bundled with Node)
-* **Redis** *(optional — only required for production horizontal scale & state persistence)*
+* **Redis** *(optional for local development; recommended for production state persistence. Run one backend instance.)*
 
 ### 1️⃣ Clone & Install
 
@@ -647,7 +647,7 @@ For complete, step-by-step production deployment instructions, see the **[Deploy
 | :--- | :--- | :--- |
 | **Frontend** | Vercel / Netlify / Cloudflare | Standard Next.js hosting. Supports SSR/ISR. |
 | **Backend** | Render / Railway / Fly.io / VPS | **Must** support persistent WebSockets (Serverless/Lambdas not supported). |
-| **Redis Database** | Upstash / Redis Labs / Managed | Required for cross-instance sync, persistence, and scale. |
+| **Redis Database** | Upstash / Redis Labs / Managed | Durable snapshots and Socket.IO messaging; authoritative state currently requires one backend instance. |
 | **CrazyGames** *(optional)* | CrazyGames portal | Upload the `build:crazygames` package; point it at a WebSocket backend running with `CRAZYGAMES_AUTH_ENABLED=true`. |
 
 > [!IMPORTANT]

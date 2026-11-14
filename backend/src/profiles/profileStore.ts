@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { Profile } from './profileTypes';
 import { logger } from '../utils/logger';
 import { getRedis, isRedisConfigured } from '../config/redis';
@@ -42,7 +43,18 @@ export class MemoryProfileStore implements ProfileStore {
  * machine. This is the store that reads/writes the existing seed files.
  */
 export class FileProfileStore implements ProfileStore {
+  private writes = new Map<string, Promise<void>>();
   constructor(private dir: string) {}
+
+  private async serialize(target: string, operation: () => Promise<void>): Promise<void> {
+    const next = (this.writes.get(target) ?? Promise.resolve()).catch(() => {}).then(operation);
+    this.writes.set(target, next);
+    try {
+      await next;
+    } finally {
+      if (this.writes.get(target) === next) this.writes.delete(target);
+    }
+  }
 
   private fileFor(id: string): string {
     // Profile ids are UUIDs; still guard against path traversal by allowing only
@@ -72,16 +84,23 @@ export class FileProfileStore implements ProfileStore {
   }
 
   async save(profile: Profile): Promise<void> {
-    await this.ensureDir();
     const target = this.fileFor(profile.id);
-    const tmp = `${target}.${process.pid}.tmp`;
     const data = JSON.stringify(profile);
-    await fs.writeFile(tmp, data, 'utf8');
-    await fs.rename(tmp, target); // atomic replace
+    await this.serialize(target, async () => {
+      await this.ensureDir();
+      const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await fs.writeFile(tmp, data, 'utf8');
+        await fs.rename(tmp, target); // atomic replace
+      } finally {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+      }
+    });
   }
 
   async remove(id: string): Promise<void> {
-    await fs.rm(this.fileFor(id), { force: true });
+    const target = this.fileFor(id);
+    await this.serialize(target, () => fs.rm(target, { force: true }));
   }
 }
 

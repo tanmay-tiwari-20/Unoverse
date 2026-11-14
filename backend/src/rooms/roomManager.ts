@@ -127,7 +127,7 @@ export interface Room {
   createdAt?: number;
 }
 
-class RoomManager {
+export class RoomManager {
   private rooms: Map<string, Room> = new Map();
   // Map key: `${roomCode}:${seatUid}` -> NodeJS.Timeout. Keyed on the stable seat
   // uid rather than the player's name, so two same-named players in one room get
@@ -143,9 +143,26 @@ class RoomManager {
   private dirty: Set<string> = new Set();
   private removed: Set<string> = new Set();
   private flushScheduled = false;
+  private flushPromise: Promise<void> | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private revisions = new Map<string, number>();
+  private storeGeneration = 0;
+  private draining = false;
+  private static readonly RETRY_DELAY_MS = 250;
+  private static readonly SHUTDOWN_RETRIES = 3;
 
   /** Inject the durable store (called once at startup). */
   public setStore(store: RoomStore): void {
+    // Tests replace stores between cases. An older in-flight write may finish,
+    // but it must never retry into the newly injected store.
+    this.storeGeneration++;
+    this.clearRetryTimer();
+    this.dirty.clear();
+    this.removed.clear();
+    this.revisions.clear();
+    this.flushScheduled = false;
+    this.flushPromise = null;
+    this.draining = false;
     this.store = store;
   }
 
@@ -236,6 +253,7 @@ class RoomManager {
   /** Mark a room dirty so its latest snapshot is written on the next flush. */
   public markDirty(code: string): void {
     const upper = code.toUpperCase();
+    this.revisions.set(upper, (this.revisions.get(upper) ?? 0) + 1);
     this.removed.delete(upper);
     this.dirty.add(upper);
     this.scheduleFlush();
@@ -243,44 +261,113 @@ class RoomManager {
 
   private markRemoved(code: string): void {
     const upper = code.toUpperCase();
+    this.revisions.set(upper, (this.revisions.get(upper) ?? 0) + 1);
     this.dirty.delete(upper);
     this.removed.add(upper);
     this.scheduleFlush();
   }
 
   private scheduleFlush(): void {
-    if (this.flushScheduled) return;
+    if (this.flushScheduled || this.flushPromise || this.retryTimer || this.draining) return;
     this.flushScheduled = true;
+    const generation = this.storeGeneration;
     // queueMicrotask lets a whole synchronous handler finish mutating before we
     // serialize once, rather than writing after every field change.
-    queueMicrotask(() => this.flush());
+    queueMicrotask(() => {
+      if (generation !== this.storeGeneration) return;
+      this.flushScheduled = false;
+      void this.flush();
+    });
   }
 
-  private async flush(): Promise<void> {
-    this.flushScheduled = false;
-    const toSave = [...this.dirty];
-    const toRemove = [...this.removed];
-    this.dirty.clear();
-    this.removed.clear();
+  private clearRetryTimer(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
 
-    await Promise.all([
-      ...toSave.map(async (code) => {
-        const room = this.rooms.get(code);
-        if (!room) return; // deleted before flush
-        try {
-          await this.store.save(room);
-        } catch (err: any) {
-          logger.error(`[STORE] Failed to persist room ${code}:`, err?.message);
-        }
-      }),
-      ...toRemove.map(async (code) => {
-        try {
-          await this.store.remove(code);
-        } catch (err: any) {
-          logger.error(`[STORE] Failed to remove room ${code}:`, err?.message);
-        }
-      }),
-    ]);
+  private scheduleRetry(): void {
+    if (this.retryTimer || this.draining) return;
+    const generation = this.storeGeneration;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (generation === this.storeGeneration) void this.flush();
+    }, RoomManager.RETRY_DELAY_MS);
+    this.retryTimer.unref();
+  }
+
+  /** One tracked loop serializes batches, including writes already in flight. */
+  private flush(): Promise<void> {
+    if (this.flushPromise) return this.flushPromise;
+    this.clearRetryTimer();
+    const generation = this.storeGeneration;
+    const store = this.store;
+    const pending = this.flushBatches(store, generation).catch((err: any) => {
+      logger.error('[STORE] Room snapshot flush failed:', err?.message);
+      if (generation === this.storeGeneration) this.scheduleRetry();
+    }).finally(() => {
+      if (generation !== this.storeGeneration) return;
+      this.flushPromise = null;
+      if (this.dirty.size || this.removed.size) this.scheduleFlush();
+    });
+    this.flushPromise = pending;
+    return pending;
+  }
+
+  private async flushBatches(store: RoomStore, generation: number): Promise<void> {
+    while (generation === this.storeGeneration && (this.dirty.size || this.removed.size)) {
+      // Capture immutable snapshots before any await. A store may serialize its
+      // input later, after another socket action has mutated the live room.
+      const saves = [...this.dirty].map((code) => ({
+        code,
+        revision: this.revisions.get(code),
+        snapshot: this.rooms.has(code)
+          ? JSON.parse(JSON.stringify(this.rooms.get(code))) as Room
+          : null,
+      }));
+      const removals = [...this.removed].map((code) => ({
+        code,
+        revision: this.revisions.get(code),
+      }));
+      this.dirty.clear();
+      this.removed.clear();
+      let failed = false;
+
+      await Promise.all([
+        ...saves.map(async ({ code, revision, snapshot }) => {
+          if (!snapshot) return;
+          try {
+            await store.save(snapshot);
+          } catch (err: any) {
+            failed = true;
+            // A newer save/delete is already queued when its revision changed.
+            // Retrying this stale save could resurrect a room that was removed.
+            if (generation === this.storeGeneration && this.revisions.get(code) === revision) {
+              this.dirty.add(code);
+            }
+            logger.error(`[STORE] Failed to persist room ${code} (will retry):`, err?.message);
+          }
+        }),
+        ...removals.map(async ({ code, revision }) => {
+          try {
+            await store.remove(code);
+            if (generation === this.storeGeneration && this.revisions.get(code) === revision) {
+              this.revisions.delete(code);
+            }
+          } catch (err: any) {
+            failed = true;
+            if (generation === this.storeGeneration && this.revisions.get(code) === revision) {
+              this.removed.add(code);
+            }
+            logger.error(`[STORE] Failed to remove room ${code} (will retry):`, err?.message);
+          }
+        }),
+      ]);
+
+      if (failed) {
+        if (generation === this.storeGeneration) this.scheduleRetry();
+        return;
+      }
+    }
   }
 
   /**
@@ -288,7 +375,19 @@ class RoomManager {
    * the last few mutations aren't lost when a container receives SIGTERM.
    */
   public async shutdown(): Promise<void> {
+    this.draining = true;
+    // No delayed seat removal may mutate a room after its final snapshot drains.
+    for (const timer of this.disconnectTimers.values()) clearTimeout(timer);
+    this.disconnectTimers.clear();
+    this.clearRetryTimer();
     await this.flush();
+    for (let retry = 0; (this.dirty.size || this.removed.size) && retry < RoomManager.SHUTDOWN_RETRIES; retry++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, RoomManager.RETRY_DELAY_MS));
+      await this.flush();
+    }
+    if (this.dirty.size || this.removed.size) {
+      throw new Error('Room persistence did not drain after shutdown retries');
+    }
     if (this.store.close) {
       try {
         await this.store.close();
@@ -806,6 +905,18 @@ class RoomManager {
             game.colorChooserId = playerSocketId;
           }
 
+          if (game.swapChooserId === oldSocketId) {
+            game.swapChooserId = playerSocketId;
+          }
+
+          if (game.wildFourPlayerId === oldSocketId) {
+            game.wildFourPlayerId = playerSocketId;
+          }
+
+          if (game.challengeableById === oldSocketId) {
+            game.challengeableById = playerSocketId;
+          }
+
           if (game.winnerId === oldSocketId) {
             game.winnerId = playerSocketId;
           }
@@ -825,6 +936,9 @@ class RoomManager {
           // Remap lastAction playerId if it references the old socket
           if (game.lastAction && game.lastAction.playerId === oldSocketId) {
             game.lastAction.playerId = playerSocketId;
+          }
+          if (game.lastAction && game.lastAction.targetId === oldSocketId) {
+            game.lastAction.targetId = playerSocketId;
           }
         }
       }
@@ -1154,6 +1268,9 @@ class RoomManager {
     }
     if (room.hostId !== hostSocketId) {
       throw new Error('Only the host can start the game');
+    }
+    if (room.game && room.game.status !== 'ended') {
+      throw new Error('A round is already in progress');
     }
 
     if (fillWithBots && room.status === 'lobby') {

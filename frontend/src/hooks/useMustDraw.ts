@@ -1,7 +1,7 @@
 'use client';
 
 import { useGameStore } from '../store/useGameStore';
-import { isValidMove } from '../lib/cards/cardEngine';
+import { canPlayCard } from '../lib/cards/cardEngine';
 
 /**
  * True when it is the local player's turn and drawing from the deck is the ONLY
@@ -13,7 +13,7 @@ import { isValidMove } from '../lib/cards/cardEngine';
  * escalate itself into an explicit call to action.
  *
  * Deliberately DERIVED, never stored, and it reuses the exact predicate
- * (`isValidMove`) that PlayerHandHUD uses to highlight playable cards. So the
+ * (`canPlayCard`) that PlayerHandHUD uses to highlight playable cards. So the
  * cue can only ever appear when the player genuinely sees zero highlighted
  * cards — the two can't drift apart. No new game logic lives here; the server
  * remains the sole authority on what is legal.
@@ -37,7 +37,7 @@ export const useMustDraw = (): boolean =>
     const topCard = s.discardPile.length > 0 ? s.discardPile[s.discardPile.length - 1] : null;
     if (hand.length === 0 || !topCard) return false;
 
-    return !hand.some((card) => isValidMove(card, topCard, s.wildColor, s.pendingDrawType));
+    return !hand.some((card) => canPlayCard(card, topCard, s.wildColor, s.pendingDrawType, s.houseRules, hand.length));
   });
 
 export default useMustDraw;

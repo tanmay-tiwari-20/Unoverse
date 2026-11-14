@@ -13,6 +13,12 @@ describe('generateDeck', () => {
     expect(ids.size).toBe(108);
   });
 
+  it('uses opaque IDs that do not reveal card color or value', () => {
+    for (const card of deck) {
+      expect(card.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    }
+  });
+
   it('has exactly one 0 and two of each 1-9 per color', () => {
     const colors = ['red', 'blue', 'green', 'yellow'] as const;
     for (const color of colors) {

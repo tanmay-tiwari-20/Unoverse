@@ -303,6 +303,16 @@ const parseOrigins = (raw: string): string[] =>
 const isLocalhostOrigin = (origin: string): boolean =>
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin);
 
+/** Forwarded addresses are ignored unless the deployment explicitly trusts a proxy. */
+export function resolveTrustProxy(): false | number {
+  const raw = (process.env.TRUST_PROXY_HOPS || '').trim();
+  if (!raw || raw === '0') return false;
+  if (!/^[1-9]\d*$/.test(raw) || Number(raw) > 8) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer from 0 to 8');
+  }
+  return Number(raw);
+}
+
 /**
  * Resolve the CORS origin policy for BOTH Express and Socket.IO (they share the
  * same `cors` implementation, so one resolver drives both — no drift).

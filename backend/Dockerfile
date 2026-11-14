@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage: install all deps and compile TypeScript ----
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 
 # Install dependencies first (better layer caching).
@@ -14,7 +14,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- Production stage: slim image with only runtime deps + compiled output ----
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 WORKDIR /app
 ENV NODE_ENV=production
 # Default listen port for the CONTAINER. Managed platforms inject their own PORT
@@ -42,7 +42,7 @@ USER node
 EXPOSE 8080
 
 # Container-level health check hitting the /health endpoint. Uses Node's own
-# fetch (available in Node 20) so no extra tooling (curl/wget) is needed.
+# fetch so no extra tooling (curl/wget) is needed.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 

@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 export type CardColor = 'red' | 'blue' | 'green' | 'yellow' | 'wild';
 
 export type CardValue =
@@ -23,11 +25,6 @@ export interface CardItem {
   value: CardValue;
 }
 
-// Generate a random ID
-const generateUniqueId = (): string => {
-  return Math.random().toString(36).substring(2, 9);
-};
-
 // Generate a complete official UNO deck (108 cards)
 export const generateDeck = (): CardItem[] => {
   const deck: CardItem[] = [];
@@ -38,7 +35,7 @@ export const generateDeck = (): CardItem[] => {
   colors.forEach((color) => {
     // One '0' card per color
     deck.push({
-      id: `${color}-0-${generateUniqueId()}`,
+      id: randomUUID(),
       color,
       value: '0',
     });
@@ -46,12 +43,12 @@ export const generateDeck = (): CardItem[] => {
     // Two of each number 1-9 and action card per color
     values.forEach((value) => {
       deck.push({
-        id: `${color}-${value}-${generateUniqueId()}-1`,
+        id: randomUUID(),
         color,
         value,
       });
       deck.push({
-        id: `${color}-${value}-${generateUniqueId()}-2`,
+        id: randomUUID(),
         color,
         value,
       });
@@ -61,12 +58,12 @@ export const generateDeck = (): CardItem[] => {
   // Add Wild cards (4 of each)
   for (let i = 0; i < 4; i++) {
     deck.push({
-      id: `wild-wild-${generateUniqueId()}-${i}`,
+      id: randomUUID(),
       color: 'wild',
       value: 'wild',
     });
     deck.push({
-      id: `wild-wild_draw_four-${generateUniqueId()}-${i}`,
+      id: randomUUID(),
       color: 'wild',
       value: 'wild_draw_four',
     });

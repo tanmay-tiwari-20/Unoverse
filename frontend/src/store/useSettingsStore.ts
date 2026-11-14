@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { getReducedMotionPreference } from '../hooks/useReducedMotion';
 import { platformStorage, usePlatformStorage } from '../lib/platform/storage';
 import type { QualityTier } from '../lib/quality/qualityTiers';
+import { createSafeJSONStorage } from '../lib/safeStorage';
 
 interface SettingsState {
   // UI State (Not persisted)
@@ -87,6 +88,27 @@ interface SettingsState {
   setAllowPortrait: (allowed: boolean) => void;
 }
 
+// Runtime UI flags and the device's adaptive tier never enter the saved state.
+const persistedSettings = (state: SettingsState) => ({
+  masterVolume: state.masterVolume,
+  gameVolume: state.gameVolume,
+  ambientVolume: state.ambientVolume,
+  micVolume: state.micVolume,
+  voiceVolume: state.voiceVolume,
+  showFPS: state.showFPS,
+  shadowQuality: state.shadowQuality,
+  vfxQuality: state.vfxQuality,
+  postProcessing: state.postProcessing,
+  performanceMode: state.performanceMode,
+  adaptiveQuality: state.adaptiveQuality,
+  cardAnimations: state.cardAnimations,
+  cameraMotion: state.cameraMotion,
+  cameraSensitivity: state.cameraSensitivity,
+  reducedMotion: state.reducedMotion,
+  showLastPlayedBy: state.showLastPlayedBy,
+  allowPortrait: state.allowPortrait,
+});
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
@@ -163,36 +185,10 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'uno-real-settings', // unique name
-      // Web keeps zustand's default localStorage engine — same key, same
-      // synchronous rehydration, byte-for-byte the behaviour it has today. On
-      // CrazyGames these preferences live in the platform's data module instead,
-      // so they follow the player between devices. Preferences only: no secrets
-      // pass through here.
-      ...(usePlatformStorage
-        ? { storage: createJSONStorage(() => platformStorage) }
-        : {}),
-      partialize: (state) => ({
-        // Only persist the actual settings, not the UI modal states
-        masterVolume: state.masterVolume,
-        gameVolume: state.gameVolume,
-        ambientVolume: state.ambientVolume,
-        micVolume: state.micVolume,
-        voiceVolume: state.voiceVolume,
-        showFPS: state.showFPS,
-        shadowQuality: state.shadowQuality,
-        vfxQuality: state.vfxQuality,
-        postProcessing: state.postProcessing,
-        performanceMode: state.performanceMode,
-        adaptiveQuality: state.adaptiveQuality,
-        // NOTE: `autoTier` is intentionally absent — it is live device state,
-        // not a preference. See its declaration above.
-        cardAnimations: state.cardAnimations,
-        cameraMotion: state.cameraMotion,
-        cameraSensitivity: state.cameraSensitivity,
-        reducedMotion: state.reducedMotion,
-        showLastPlayedBy: state.showLastPlayedBy,
-        allowPortrait: state.allowPortrait,
-      }),
+      // Keep synchronous web hydration, with a memory fallback for blocked storage.
+      // CrazyGames preferences still use platform storage; credentials never do.
+      storage: createSafeJSONStorage<ReturnType<typeof persistedSettings>>(usePlatformStorage ? platformStorage : undefined),
+      partialize: persistedSettings,
       // On first load (no persisted data), respect the OS reduced-motion pref
       // and auto-disable heavy animation settings.
       onRehydrateStorage: () => (state) => {

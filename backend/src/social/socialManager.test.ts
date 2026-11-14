@@ -217,6 +217,25 @@ describe('SocialManager — privacy gates', () => {
 
     presenceManager.unbind('socket-hidden');
   });
+
+  it('withholds activity timestamps from non-friend inspection when online status is private', () => {
+    const viewer = mkProfile();
+    const subject = mkProfile();
+    subject.lastSeenAt = 123;
+    subject.totalPlayTimeMs = 456;
+    profileManager.setPrivacy(subject.id, subject.secret, { showOnlineStatus: false });
+
+    const publicView = socialManager.inspect(viewer.id, subject.id);
+    expect(publicView.lastSeenAt).toBe(0);
+    expect(publicView.totalPlayTimeMs).toBe(0);
+    expect(publicView.presence.lastSeenAt).toBe(0);
+    expect(publicView.hidden.onlineStatus).toBe(true);
+
+    socialManager.sendRequest(viewer.id, subject.id);
+    socialManager.acceptRequest(subject.id, viewer.id);
+    expect(socialManager.inspect(viewer.id, subject.id).lastSeenAt).toBe(123);
+    expect(socialManager.inspect(subject.id, subject.id).totalPlayTimeMs).toBe(456);
+  });
 });
 
 describe('SocialManager — search', () => {

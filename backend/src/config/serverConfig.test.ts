@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveCorsOrigin } from './serverConfig';
+import { resolveCorsOrigin, resolveTrustProxy } from './serverConfig';
 
 /**
  * CORS policy must be safe-by-default: open in dev (localhost always allowed),
@@ -7,10 +7,39 @@ import { resolveCorsOrigin } from './serverConfig';
  * reads NODE_ENV + CORS_ORIGIN at call time, so we drive it via env here.
  */
 
-const origEnv = { NODE_ENV: process.env.NODE_ENV, CORS_ORIGIN: process.env.CORS_ORIGIN };
+const origEnv = {
+  NODE_ENV: process.env.NODE_ENV,
+  CORS_ORIGIN: process.env.CORS_ORIGIN,
+  TRUST_PROXY_HOPS: process.env.TRUST_PROXY_HOPS,
+};
 afterEach(() => {
-  process.env.NODE_ENV = origEnv.NODE_ENV;
-  process.env.CORS_ORIGIN = origEnv.CORS_ORIGIN;
+  for (const [key, value] of Object.entries(origEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
+describe('trusted proxy boundary', () => {
+  it('ignores forwarded addresses for an unconfigured or direct deployment', () => {
+    delete process.env.TRUST_PROXY_HOPS;
+    expect(resolveTrustProxy()).toBe(false);
+    process.env.TRUST_PROXY_HOPS = '0';
+    expect(resolveTrustProxy()).toBe(false);
+  });
+
+  it('accepts an explicitly configured fixed proxy chain', () => {
+    process.env.TRUST_PROXY_HOPS = '1';
+    expect(resolveTrustProxy()).toBe(1);
+    process.env.TRUST_PROXY_HOPS = '8';
+    expect(resolveTrustProxy()).toBe(8);
+  });
+
+  it('rejects blanket trust and malformed or excessive proxy counts', () => {
+    for (const value of ['true', '*', '-1', '1.5', '9']) {
+      process.env.TRUST_PROXY_HOPS = value;
+      expect(() => resolveTrustProxy()).toThrow(/TRUST_PROXY_HOPS/);
+    }
+  });
 });
 
 /** Run the cors-style resolver and return whether an origin is allowed. */

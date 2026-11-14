@@ -28,7 +28,7 @@ import { roomManager } from '../rooms/roomManager';
 import { presenceManager } from './presenceManager';
 import { SOCIAL_CONFIG } from '../config/serverConfig';
 import type { Profile, PrivacySettings } from '../profiles/profileTypes';
-import { winRate } from '../profiles/profileTypes';
+import { publicProfile, winRate } from '../profiles/profileTypes';
 import {
   FriendSummary,
   GameInvite,
@@ -244,17 +244,18 @@ class SocialManager {
     const hideOutfit = !isFriend && privacy.showOutfit === false;
     const hideOnline = !isFriend && privacy.showOnlineStatus === false;
 
-    const recentMatches = hideHistory ? [] : subject.recentMatches;
+    const projected = publicProfile(subject, isSelf ? 'owner' : isFriend ? 'friend' : 'public');
+    const recentMatches = projected.recentMatches;
 
     return {
       profileId: subject.id,
       displayName: subject.displayName,
       tag: subject.tag,
       avatarUrl: subject.avatarUrl,
-      outfit: hideOutfit ? null : subject.outfit,
+      outfit: projected.outfit,
       createdAt: subject.createdAt,
-      lastSeenAt: subject.lastSeenAt,
-      totalPlayTimeMs: subject.totalPlayTimeMs,
+      lastSeenAt: projected.lastSeenAt,
+      totalPlayTimeMs: projected.totalPlayTimeMs,
       stats: subject.stats,
       winRate: winRate(subject.stats),
       friendCount: subject.social.friends.length,

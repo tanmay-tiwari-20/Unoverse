@@ -64,9 +64,12 @@ export async function authenticateCrazyGames(token: string): Promise<CreatedProf
   return res.json();
 }
 
-/** Fetch a profile's public view (stats, history, dates) for display. */
-export async function fetchProfile(id: string): Promise<PublicProfile> {
-  const res = await fetch(`${BACKEND_URL}/api/profiles/${encodeURIComponent(id)}`);
+/** Public reads respect privacy; an owner secret grants the complete profile. */
+export async function fetchProfile(id: string, secret?: string | null): Promise<PublicProfile> {
+  const res = await fetch(`${BACKEND_URL}/api/profiles/${encodeURIComponent(id)}`, {
+    headers: secret ? { Authorization: `Bearer ${secret}` } : undefined,
+    cache: 'no-store',
+  });
   if (!res.ok) return parseError(res, 'Failed to load profile');
   const data = await res.json();
   return data.profile;

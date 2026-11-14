@@ -22,6 +22,7 @@ import { DEFAULT_AVATAR_KEY } from '../lib/profile/avatars';
 import { DEFAULT_OUTFIT_KEY } from '../lib/cosmetics/outfits';
 import * as profileApi from '../lib/profile/profileApi';
 import { errorMessage } from '../utils/errors';
+import { createSafeJSONStorage } from '../lib/safeStorage';
 
 interface ProfileState {
   // ---- Persisted identity ---------------------------------------------------
@@ -73,6 +74,14 @@ function adopt(profile: PublicProfile) {
   };
 }
 
+const persistedProfile = (state: ProfileState) => ({
+  profileId: state.profileId,
+  profileSecret: state.profileSecret,
+  displayName: state.displayName,
+  avatar: state.avatar,
+  outfit: state.outfit,
+});
+
 export const useProfileStore = create<ProfileState>()(
   persist(
     (set, get) => ({
@@ -113,11 +122,11 @@ export const useProfileStore = create<ProfileState>()(
       },
 
       refreshProfile: async () => {
-        const { profileId } = get();
+        const { profileId, profileSecret } = get();
         if (!profileId) return null;
         set({ loading: true });
         try {
-          const profile = await profileApi.fetchProfile(profileId);
+          const profile = await profileApi.fetchProfile(profileId, profileSecret ?? undefined);
           set({ ...adopt(profile), loading: false });
           return profile;
         } catch (e: unknown) {
@@ -239,6 +248,7 @@ export const useProfileStore = create<ProfileState>()(
     }),
     {
       name: 'unoverse:profile',
+      storage: createSafeJSONStorage<ReturnType<typeof persistedProfile>>(),
       // DELIBERATELY NOT ROUTED THROUGH PLATFORM STORAGE, on either build.
       //
       // Two reasons. First, this blob contains `profileSecret`, a bearer
@@ -255,18 +265,13 @@ export const useProfileStore = create<ProfileState>()(
       //
       // Persist ONLY the durable identity + cached display fields — never the
       // runtime UI flags or the server-served stats snapshot (always re-fetched).
-      partialize: (state) => ({
-        profileId: state.profileId,
-        profileSecret: state.profileSecret,
-        displayName: state.displayName,
-        avatar: state.avatar,
-        outfit: state.outfit,
-      }),
+      partialize: persistedProfile,
       // Flip `hydrated` once localStorage has been read so the landing page can
       // distinguish "no profile yet" from "not loaded yet" and avoid flashing the
       // create-profile modal for returning players.
-      onRehydrateStorage: () => (state) => {
-        if (state) state.setHydrated();
+      onRehydrateStorage: (initialState) => (state) => {
+        // Hydration is settled even if a future storage backend reports failure.
+        (state ?? initialState).setHydrated();
       },
     },
   ),

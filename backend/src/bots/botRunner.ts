@@ -71,6 +71,7 @@ const turnSignature = (game: UnoGameState): string =>
 export class BotRunner {
   private timers = new Map<string, NodeJS.Timeout>();
   private signatures = new Map<string, string>();
+  private stopped = false;
 
   constructor(private deps: BotRunnerDeps) {}
 
@@ -80,6 +81,7 @@ export class BotRunner {
    * otherwise. Safe to call any number of times per turn.
    */
   public onStateChanged(code: string): void {
+    if (this.stopped) return;
     const room = this.deps.getRoom(code);
     if (!room || !room.game || room.game.status === 'ended') {
       this.clearRoom(code);
@@ -119,6 +121,14 @@ export class BotRunner {
     if (existing) clearTimeout(existing);
     this.timers.delete(code);
     this.signatures.delete(code);
+  }
+
+  /** Freeze game mutations before the final room/profile snapshots are drained. */
+  public shutdown(): void {
+    this.stopped = true;
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+    this.signatures.clear();
   }
 
   private actForBot(code: string, botId: string, signature: string): void {

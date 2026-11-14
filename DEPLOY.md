@@ -43,8 +43,9 @@ Unoverse has **two deployable pieces** that must be deployed differently:
 | `NODE_ENV` | prod | `production` | Enables quieter logging defaults. |
 | `LOG_LEVEL` | no | `info` | `debug\|info\|warn\|error\|silent`. |
 | `CORS_ORIGIN` | **prod** | `https://unoverse.example.com` | Comma-separate multiple. **Do not leave `*` in production.** |
+| `TRUST_PROXY_HOPS` | behind proxy | `1` | Fixed trusted proxy hops; default `0` ignores forwarded headers. Restrict direct access when enabled. |
 | `STORE` | **prod** | `redis` | `redis` for production; `file` (single machine) or `memory` (no persistence). |
-| `REDIS_URL` | if `STORE=redis` | `redis://user:pass@host:6379` | Also enables the Socket.IO Redis adapter for multi-instance. |
+| `REDIS_URL` | if `STORE=redis` | `redis://user:pass@host:6379` | Also enables the Socket.IO Redis messaging adapter. Run one backend instance. |
 | `DATA_DIR` | no | `./.data/rooms` | Only for `STORE=file`. |
 | `PROFILE_DIR` | no | `./.data/profiles` | Only for `STORE=file`. Where player profiles/stats are written. |
 | `RECENT_MATCHES_MAX` | no | `20` | Match-history entries kept per profile. |
@@ -206,17 +207,16 @@ connects.
 
 ## Part 5 — Scaling to multiple backend instances
 
-The code is ready for it, but horizontal scaling needs **all three**:
+Run a **single backend instance** with the current architecture. Rooms, profiles,
+presence and turn timers are authoritative in that process. Redis persists
+snapshots and the Socket.IO adapter distributes messages, but neither coordinates
+concurrent game mutations or refreshes another process's in-memory state.
 
-1. `STORE=redis` — shared game state (already covered).
-2. `REDIS_URL` set — auto-enables the Socket.IO Redis adapter for cross-instance
-   broadcasts (already covered).
-3. **Sticky sessions** at the load balancer — a Socket.IO client's HTTP polling
-   handshake must always return to the same instance. Enable "session affinity" /
-   sticky sessions on your LB (and set `app.set('trust proxy', 1)` if you add
-   proxy-aware logic). This is an infra setting, not code.
-
-Until sticky sessions are configured, run a **single** backend instance.
+Before adding replicas, implement room ownership and routing, ownership leases,
+versioned or transactional state writes, distributed presence, and failover tests.
+Socket.IO polling also requires sticky sessions, but stickiness alone cannot make
+the current application state safe across instances. Avoid overlapping backend
+instances during deployment; use stop-then-start replacement for this release.
 
 ---
 

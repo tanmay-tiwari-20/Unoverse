@@ -60,6 +60,21 @@ describe('Match scoring across rounds', () => {
     expect(boardOf(code)).toEqual({ Alice: 0, Bob: 0 });
   });
 
+  it.each(['playing', 'awaiting_color_selection', 'awaiting_swap_target'] as const)(
+    'rejects starting another round during %s before filling bot seats', (status) => {
+      const code = setupRoom();
+      const room = roomManager.startGame(code, 'a1');
+      const game = room.game!;
+      game.status = status;
+      const before = JSON.parse(JSON.stringify(room));
+
+      expect(() => roomManager.startGame(code, 'a1', true)).toThrow(/already in progress/i);
+
+      expect(room.game).toBe(game);
+      expect(room).toEqual(before);
+    }
+  );
+
   it('banks the winner the sum of opponents’ cards and advances rounds', () => {
     const code = setupRoom();
     roomManager.startGame(code, 'a1');

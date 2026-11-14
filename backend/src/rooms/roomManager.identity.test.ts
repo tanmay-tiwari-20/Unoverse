@@ -4,6 +4,7 @@ import { MemoryRoomStore, RoomStore } from './roomStore';
 import { profileManager } from '../profiles/profileManager';
 import { MemoryProfileStore } from '../profiles/profileStore';
 import { card } from '../test/helpers';
+import { swapTargetAction, challengeWildFourAction } from '../game/actions';
 
 /**
  * ============================================================================
@@ -241,6 +242,79 @@ describe('reconnection by identity', () => {
     // The namesake's hand is untouched by the other's reconnect.
     expect(game.hands[sb]).toBeDefined();
     expect(a.player!.uid).toBe(roomManager.getRoom(room.code)!.players[0].uid);
+  });
+
+  it('lets a reconnecting Seven Swap chooser complete the pending choice', () => {
+    const { one, room, sa, sb, sx, sa2 } = twoNamesakes();
+    roomManager.joinRoom(room.code, 'Chooser', sa, undefined, { profileId: one.id });
+    roomManager.joinRoom(room.code, 'Target', sb);
+    roomManager.joinRoom(room.code, 'Third', sx);
+    roomManager.startGame(room.code, sa);
+    const game = room.game!;
+    game.status = 'awaiting_swap_target';
+    game.currentPlayerId = sa;
+    game.swapChooserId = sa;
+    const targetHand = [...game.hands[sb]];
+
+    roomManager.joinRoom(room.code, 'Chooser', sa2, undefined, { profileId: one.id });
+
+    expect(game.swapChooserId).toBe(sa2);
+    expect(() => swapTargetAction(game, room.players, sa2, sb)).not.toThrow();
+    expect(game.hands[sa2]).toEqual(targetHand);
+    expect(game.hands[sa]).toBeUndefined();
+    expect(game.status).toBe('playing');
+  });
+
+  it('preserves a reconnecting player\'s right to challenge a Wild Draw Four', () => {
+    const { one, two, room, sa, sb, sb2 } = twoNamesakes();
+    roomManager.joinRoom(room.code, 'Accused', sa, undefined, { profileId: one.id });
+    roomManager.joinRoom(room.code, 'Challenger', sb, undefined, { profileId: two.id });
+    roomManager.startGame(room.code, sa);
+    const game = room.game!;
+    game.rules.challengeWildDrawFour = true;
+    game.status = 'playing';
+    game.currentPlayerId = sb;
+    game.pendingDrawType = 'wild_draw_four';
+    game.drawStack = 4;
+    game.wildFourPlayerId = sa;
+    game.wildFourWasBluff = true;
+    game.challengeableById = sb;
+    const accusedCards = game.hands[sa].length;
+
+    roomManager.joinRoom(room.code, 'Challenger', sb2, undefined, { profileId: two.id });
+
+    expect(game.challengeableById).toBe(sb2);
+    expect(() => challengeWildFourAction(game, room.players, sb2)).not.toThrow();
+    expect(game.hands[sa]).toHaveLength(accusedCards + 4);
+    expect(game.currentPlayerId).toBe(sb2);
+    expect(game.lastAction?.challengeSuccess).toBe(true);
+  });
+
+  it('moves a pending challenge accusation and action target onto the returning socket', () => {
+    const { one, room, sa, sb, sa2 } = twoNamesakes();
+    roomManager.joinRoom(room.code, 'Accused', sa, undefined, { profileId: one.id });
+    roomManager.joinRoom(room.code, 'Challenger', sb);
+    roomManager.startGame(room.code, sa);
+    const game = room.game!;
+    game.rules.challengeWildDrawFour = true;
+    game.status = 'playing';
+    game.currentPlayerId = sb;
+    game.pendingDrawType = 'wild_draw_four';
+    game.drawStack = 4;
+    game.wildFourPlayerId = sa;
+    game.wildFourWasBluff = true;
+    game.challengeableById = sb;
+    game.lastAction = { type: 'play', playerId: sa, targetId: sa };
+    const accusedCards = game.hands[sa].length;
+
+    roomManager.joinRoom(room.code, 'Accused', sa2, undefined, { profileId: one.id });
+
+    expect(game.wildFourPlayerId).toBe(sa2);
+    expect(game.lastAction).toMatchObject({ playerId: sa2, targetId: sa2 });
+    expect(() => challengeWildFourAction(game, room.players, sb)).not.toThrow();
+    expect(game.hands[sa2]).toHaveLength(accusedCards + 4);
+    expect(game.hands[sa]).toBeUndefined();
+    expect(game.lastAction?.targetId).toBe(sa2);
   });
 
   it('does not hand a seat to a different Player ID with the same name', () => {

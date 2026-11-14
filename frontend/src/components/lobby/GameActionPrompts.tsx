@@ -6,6 +6,7 @@ import { Gavel, Siren, Star } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
 import { useIsMyTurn } from '../../hooks/useIsMyTurn';
+import { drawStackPrompt } from '../../lib/cards/cardEngine';
 
 /**
  * The optional/limited-time actions that appear under the turn banner: draw
@@ -45,7 +46,7 @@ export const GameActionPrompts: React.FC = () => {
         >
           <Siren size={14} className="fill-white" />
           {isMyTurn
-            ? `Stack a ${pendingDrawType === 'wild_draw_four' ? '+4' : '+2 / +4'} or draw ${drawStack}!`
+            ? drawStackPrompt(pendingDrawType, drawStack, houseRules)
             : `Draw stack building: +${drawStack}`}
         </motion.div>
       )}
@@ -69,7 +70,8 @@ export const GameActionPrompts: React.FC = () => {
       {/* Declare UNO Button — shown while holding exactly 2 cards. Declaring
           now exempts you from the automatic +4 penalty that hits when a
           play would otherwise drop you to a single undeclared card. */}
-      {myHandCount === 2 && gameStatus === 'playing' && !isSpectator && !(player && unoCalled[player.id]) && (
+      {myHandCount === 2 && gameStatus === 'playing' && !isSpectator && houseRules.mustSayUno &&
+        houseRules.unoCallMode === 'manual' && !(player && unoCalled[player.id]) && (
         <motion.button
           disabled={isProcessing}
           whileTap={{ scale: 0.92, y: 4 }}

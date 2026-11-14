@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -42,6 +42,7 @@ describe('FileRoomStore', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await fs.rm(dir, { recursive: true, force: true });
   });
 
@@ -63,6 +64,49 @@ describe('FileRoomStore', () => {
     expect(loaded).toHaveLength(1);
     expect(loaded[0].status).toBe('lobby');
     expect(loaded[0].game).toBeUndefined();
+  });
+
+  it('uses separate temporary files for concurrent writes to the same room', async () => {
+    const versions = Array.from({ length: 12 }, (_, index) => ({
+      ...sampleRoom('ABC123'),
+      hostId: `host-${index}`,
+    }));
+    await Promise.all(versions.map((room) => store.save(room)));
+
+    const loaded = await store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]).toEqual(versions[versions.length - 1]);
+    expect(await fs.readdir(dir)).toEqual(['ABC123.json']);
+  });
+
+  it('captures a save before callers mutate the room while it is queued', async () => {
+    const room = sampleRoom('ABC123');
+    const pending = store.save(room);
+    room.hostId = 'changed-after-enqueue';
+    await pending;
+
+    expect((await store.loadAll())[0].hostId).toBe('sock1');
+  });
+
+  it('orders a removal after an in-flight save without resurrecting the room', async () => {
+    const save = store.save(sampleRoom('ABC123'));
+    const remove = store.remove('ABC123');
+    await Promise.all([save, remove]);
+
+    expect(await store.loadAll()).toEqual([]);
+    expect(await fs.readdir(dir)).toEqual([]);
+  });
+
+  it('continues with a newer save and cleans temporary files after a failed rename', async () => {
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('temporary rename failure'));
+    const first = store.save(sampleRoom('ABC123'));
+    const latestRoom = { ...sampleRoom('ABC123'), hostId: 'latest' };
+    const latest = store.save(latestRoom);
+    await expect(first).rejects.toThrow(/rename failure/);
+    await latest;
+
+    expect((await store.loadAll())[0]).toEqual(latestRoom);
+    expect(await fs.readdir(dir)).toEqual(['ABC123.json']);
   });
 
   it('removes a snapshot', async () => {

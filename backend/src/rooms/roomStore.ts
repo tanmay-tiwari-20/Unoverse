@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { Room } from './roomManager';
 import { logger } from '../utils/logger';
 import { getRedis, isRedisConfigured } from '../config/redis';
@@ -40,7 +41,18 @@ export class MemoryRoomStore implements RoomStore {
  * snapshot. Zero infrastructure — survives restart on a single machine.
  */
 export class FileRoomStore implements RoomStore {
+  private pendingWrites = new Map<string, Promise<void>>();
+
   constructor(private dir: string) {}
+
+  private enqueue(target: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.pendingWrites.get(target) ?? Promise.resolve();
+    const pending = previous.catch(() => {}).then(operation).finally(() => {
+      if (this.pendingWrites.get(target) === pending) this.pendingWrites.delete(target);
+    });
+    this.pendingWrites.set(target, pending);
+    return pending;
+  }
 
   private fileFor(code: string): string {
     // Room codes are [A-Z0-9]{6}; still guard against path traversal.
@@ -68,17 +80,27 @@ export class FileRoomStore implements RoomStore {
     return rooms;
   }
 
-  async save(room: Room): Promise<void> {
-    await this.ensureDir();
+  save(room: Room): Promise<void> {
     const target = this.fileFor(room.code);
-    const tmp = `${target}.${process.pid}.tmp`;
+    // Capture at enqueue time; callers can keep mutating their live room while
+    // an earlier write is finishing. Same-target renames are serialized on
+    // Windows as well as Unix, and a failed write cannot poison later saves.
     const data = JSON.stringify(room);
-    await fs.writeFile(tmp, data, 'utf8');
-    await fs.rename(tmp, target); // atomic replace
+    return this.enqueue(target, async () => {
+      await this.ensureDir();
+      const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await fs.writeFile(tmp, data, 'utf8');
+        await fs.rename(tmp, target); // atomic replace
+      } finally {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+      }
+    });
   }
 
-  async remove(code: string): Promise<void> {
-    await fs.rm(this.fileFor(code), { force: true });
+  remove(code: string): Promise<void> {
+    const target = this.fileFor(code);
+    return this.enqueue(target, () => fs.rm(target, { force: true }));
   }
 }
 

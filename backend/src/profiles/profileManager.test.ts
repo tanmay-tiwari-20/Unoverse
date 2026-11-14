@@ -94,6 +94,47 @@ describe('ProfileManager', () => {
     expect(() => profileManager.resetProfile(p.id, 'bad')).toThrow();
   });
 
+  it('applies privacy to anonymous reads and requires credentials for owner or friend views', () => {
+    const owner = profileManager.createProfile({ displayName: 'Private', outfit: 'neon' });
+    const friend = profileManager.createProfile({ displayName: 'Friend' });
+    owner.lastSeenAt = 123;
+    owner.updatedAt = 456;
+    owner.totalPlayTimeMs = 789;
+    owner.recentMatches.push({
+      date: 1, players: [{ name: 'Private', placement: 1 }], winnerName: 'Private',
+      placement: 1, durationMs: 1000, rounds: 1,
+      settings: { targetScore: 500, houseRulesSummary: 'Classic' },
+    });
+    profileManager.setPrivacy(owner.id, owner.secret, {
+      showMatchHistory: false, showOutfit: false, showOnlineStatus: false,
+    });
+
+    const publicView = profileManager.getPublicProfile(owner.id)!;
+    expect(publicView.outfit).toBeNull();
+    expect(publicView.recentMatches).toEqual([]);
+    expect(publicView.lastSeenAt).toBe(0);
+    expect(publicView.updatedAt).toBe(0);
+    expect(publicView.totalPlayTimeMs).toBe(0);
+    expect(profileManager.getPublicProfile(owner.id, { id: owner.id, secret: 'wrong' })).toEqual(publicView);
+
+    const own = profileManager.getPublicProfile(owner.id, { id: owner.id, secret: owner.secret })!;
+    expect(own.outfit).toBe('neon');
+    expect(own.recentMatches).toHaveLength(1);
+    expect(own.lastSeenAt).toBe(123);
+    expect(own.totalPlayTimeMs).toBe(789);
+    expect((own as any).secret).toBeUndefined();
+
+    // A target id alone does not establish friendship or owner access.
+    expect(profileManager.getPublicProfile(owner.id, { id: friend.id, secret: friend.secret })).toEqual(publicView);
+    owner.social.friends.push({ id: friend.id, since: 1 });
+    friend.social.friends.push({ id: owner.id, since: 1 });
+    expect(profileManager.getPublicProfile(owner.id, { id: friend.id, secret: friend.secret })!.outfit).toBe('neon');
+    expect(profileManager.getPublicProfile(owner.id, { id: friend.id, secret: 'wrong' })).toEqual(profileManager.getPublicProfile(owner.id));
+
+    // Authenticated edits must still return the owner's complete profile.
+    expect(profileManager.renameProfile(owner.id, owner.secret, 'Renamed').recentMatches).toHaveLength(1);
+  });
+
   it('applyRoundResult folds the delta, banks points and records placement', () => {
     const p = profileManager.createProfile({ displayName: 'Rounder' });
     const delta = { ...emptyRoundDelta(), cardsPlayed: 7, wildsPlayed: 1, unoCalls: 1, cardsDrawn: 3 };

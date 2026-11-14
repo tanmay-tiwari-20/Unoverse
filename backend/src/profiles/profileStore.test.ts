@@ -59,6 +59,17 @@ describe('FileProfileStore', () => {
     expect(loaded[0].stats.matchesWon).toBe(9);
   });
 
+  it('uses separate temporary files for concurrent saves of one profile', async () => {
+    await Promise.all(Array.from({ length: 12 }, (_, i) => store.save({
+      ...sampleProfile('44444444-4444-4444-4444-444444444444'),
+      displayName: `Revision ${i}`,
+    })));
+    const loaded = await store.loadAll();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].displayName).toMatch(/^Revision \d+$/);
+    expect((await fs.readdir(dir)).filter((file) => file.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('removes a snapshot', async () => {
     await store.save(sampleProfile('aaaaaaaa-0000-0000-0000-000000000001'));
     await store.save(sampleProfile('bbbbbbbb-0000-0000-0000-000000000002'));

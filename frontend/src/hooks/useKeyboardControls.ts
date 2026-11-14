@@ -3,7 +3,8 @@
 import { useEffect, useRef } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { useSocket } from './useSocket';
-import { isValidMove, CardItem } from '../lib/cards/cardEngine';
+import { canPlayCard, canJumpInWithCard, CardItem } from '../lib/cards/cardEngine';
+import { shouldIgnoreGameplayKey } from '../lib/keyboardGuards';
 
 /**
  * Global keyboard controls for Unoverse.
@@ -74,20 +75,8 @@ export function useKeyboardControls() {
   });
 
   useEffect(() => {
-    const isTyping = (target: EventTarget | null): boolean => {
-      if (!target || !(target instanceof HTMLElement)) return false;
-      if (target.isContentEditable) return true;
-      const tag = target.tagName.toUpperCase();
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-      return false;
-    };
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Never interfere with typing in inputs, textareas, search bars, etc.
-      if (isTyping(e.target)) return;
-
-      // Never interfere with browser / OS shortcuts
-      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (shouldIgnoreGameplayKey(e)) return;
 
       const {
         room: currentRoom,
@@ -123,8 +112,7 @@ export function useKeyboardControls() {
         currentRoom &&
         currentPlayer &&
         !currentIsSpectator &&
-        ['playing', 'awaiting_color_selection'].includes(currentRoom.status) &&
-        currentGameStatus !== 'ended'
+        currentRoom.status === 'playing' && currentGameStatus === 'playing'
       );
 
       if (!isGameActive || !currentPlayer) return;
@@ -178,10 +166,9 @@ export function useKeyboardControls() {
         const isMyTurn = currentTurnId === currentPlayer.id && !currentIsProcessing;
         const topCard = currentDiscard.length > 0 ? currentDiscard[currentDiscard.length - 1] : null;
 
-        const isPlayable = isMyTurn && !!topCard && isValidMove(card, topCard, currentWildColor, currentPendingDraw);
+        const isPlayable = isMyTurn && canPlayCard(card, topCard, currentWildColor, currentPendingDraw, currentHouseRules, hand.length);
 
         const jumpInEnabled =
-          !!currentHouseRules?.jumpIn &&
           currentGameStatus === 'playing' &&
           !currentPendingDraw &&
           !currentIsProcessing;
@@ -189,10 +176,7 @@ export function useKeyboardControls() {
         const canJumpIn =
           jumpInEnabled &&
           currentTurnId !== currentPlayer.id &&
-          !!topCard &&
-          topCard.color !== 'wild' &&
-          card.color === topCard.color &&
-          card.value === topCard.value;
+          canJumpInWithCard(card, topCard, currentPendingDraw, currentHouseRules, hand.length);
 
         if (isMyTurn && isPlayable) {
           playCard(card.id);

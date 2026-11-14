@@ -391,17 +391,14 @@ export interface Profile {
 
 /**
  * Public view of a profile: the private `secret`, the private `social` graph AND
- * the internal `legacyId` alias stripped. Everything else (stats, history, dates)
- * is display data and safe to broadcast/serve. `friendCount` is the one derived
- * social figure that is public.
+ * the internal `legacyId` alias stripped. Privacy-sensitive display fields are
+ * projected for the viewer; anonymous callers receive the public view.
+ * `friendCount` is the one derived social figure that is public.
  *
  * `id` here IS the short Player ID — the value the UI renders as `#4827315` and
  * the only identity a client ever needs to hold.
  *
- * NOTE: this is the OWNER-facing view (`GET /api/profiles/:id`, unchanged
- * behavior). Inspecting *another* player goes through the social layer's
- * viewer-aware projection, which additionally applies that player's privacy
- * settings — see `socialManager.inspect`.
+ * Owner and friend access must be established at an authenticated boundary.
  */
 export type PublicProfile = Omit<Profile, 'secret' | 'social' | 'legacyId' | 'externalIds'> & {
   winRate: number;
@@ -546,7 +543,18 @@ export function winRate(stats: ProfileStats): number {
 /** Strip the private secret AND the private friend graph before a profile
  *  crosses the wire; attach the derived win rate + public friend count. The
  *  profile analog of publicPlayer(). */
-export function publicProfile(p: Profile): PublicProfile {
+export function publicProfile(p: Profile, access: 'public' | 'owner' | 'friend' = 'public'): PublicProfile {
   const { secret, social, legacyId, externalIds, ...rest } = p;
-  return { ...rest, winRate: winRate(p.stats), friendCount: social.friends.length };
+  const privileged = access !== 'public';
+  const hideActivity = !privileged && p.privacy.showOnlineStatus === false;
+  return {
+    ...rest,
+    outfit: !privileged && p.privacy.showOutfit === false ? null : p.outfit,
+    recentMatches: !privileged && p.privacy.showMatchHistory === false ? [] : p.recentMatches,
+    lastSeenAt: hideActivity ? 0 : p.lastSeenAt,
+    updatedAt: hideActivity ? 0 : p.updatedAt,
+    totalPlayTimeMs: hideActivity ? 0 : p.totalPlayTimeMs,
+    winRate: winRate(p.stats),
+    friendCount: social.friends.length,
+  };
 }
