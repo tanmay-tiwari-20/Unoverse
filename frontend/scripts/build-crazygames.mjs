@@ -318,21 +318,6 @@ const textFiles = walk(PACKAGE_DIR).filter((f) => TEXT_EXT.has(path.extname(f)))
 const ROOT_ABSOLUTE_FETCH = /fetch\(\s*["'`]\//;
 const ROOT_ABSOLUTE_SRC = /(?:\.src\s*=\s*|new\s+(?:Audio|Image|Worker)\(\s*)["'`]\//;
 
-/**
- * Root-absolute requests that predate this build target and are inert.
- *
- * `/api/report-bug` has never existed — not on web either. `ReportBugModal`
- * posts to it, catches the 404, and reports success anyway. It is listed rather
- * than ignored so that a NEW root-absolute request still fails this build: in a
- * static package the package origin's root belongs to the portal, so anything
- * expecting our own server there is a bug.
- */
-const KNOWN_ROOT_FETCHES = ['/api/report-bug'];
-const KNOWN_ROOT_FETCH_RE = new RegExp(
-  `fetch\\(\\s*["'\`](?:${KNOWN_ROOT_FETCHES.join('|')})["'\`]`,
-  'g',
-);
-
 const offenders = { localhost: [], badJs: [], absoluteCss: [] };
 let backendSeen = false;
 
@@ -344,8 +329,7 @@ for (const file of textFiles) {
   if (/https?:\/\/localhost:3001|127\.0\.0\.1:3001/.test(content)) offenders.localhost.push(rel);
 
   if (path.extname(file) === '.js') {
-    const scrubbed = content.replace(KNOWN_ROOT_FETCH_RE, '');
-    if (ROOT_ABSOLUTE_FETCH.test(scrubbed) || ROOT_ABSOLUTE_SRC.test(scrubbed)) {
+    if (ROOT_ABSOLUTE_FETCH.test(content) || ROOT_ABSOLUTE_SRC.test(content)) {
       offenders.badJs.push(rel);
     }
   }

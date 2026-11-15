@@ -2,8 +2,8 @@
  * Tests for the Redis-backed stores and the shared client helpers.
  *
  * These run WITHOUT a live Redis: `FakeRedis` implements the exact subset of the
- * ioredis surface the stores use (smembers / mget / multi / srem / set / del),
- * including multi()'s chainable-then-exec shape. That keeps the suite hermetic
+ * ioredis surface the stores use (smembers / mget / ownership-guarded eval).
+ * That keeps the suite hermetic
  * and fast while still exercising the real logic — batching, dangling-index
  * pruning, and unparseable-value handling — which is where the bugs actually
  * live. A live-Redis integration check is `npm run redis:check`.
@@ -13,64 +13,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RedisRoomStore, createRoomStore, MemoryRoomStore } from './roomStore';
 import { Room } from './roomManager';
 import { redactRedisUrl, isRedisConfigured } from '../config/redis';
+import { RedisAuthorityLease } from '../config/redisAuthority';
+import { FakeAuthorityRedis as FakeRedis } from '../config/redisAuthority.testUtils';
 
 // ---------------------------------------------------------------------------
 // A minimal in-process stand-in for ioredis.
 // ---------------------------------------------------------------------------
 
-class FakeRedis {
-  strings = new Map<string, string>();
-  sets = new Map<string, Set<string>>();
-  /** Every command issued, so tests can assert on round-trip COUNT (batching). */
-  calls: string[] = [];
-
-  async smembers(key: string): Promise<string[]> {
-    this.calls.push('smembers');
-    return [...(this.sets.get(key) ?? [])];
-  }
-
-  async mget(keys: string[]): Promise<(string | null)[]> {
-    this.calls.push('mget');
-    return keys.map((k) => this.strings.get(k) ?? null);
-  }
-
-  async srem(key: string, ...members: string[]): Promise<number> {
-    this.calls.push('srem');
-    const set = this.sets.get(key);
-    if (!set) return 0;
-    let removed = 0;
-    for (const m of members) if (set.delete(m)) removed++;
-    return removed;
-  }
-
-  /** Chainable MULTI that applies every queued op on exec(). */
-  multi() {
-    const ops: Array<() => void> = [];
-    const chain = {
-      set: (k: string, v: string) => { ops.push(() => { this.strings.set(k, v); }); return chain; },
-      del: (k: string) => { ops.push(() => { this.strings.delete(k); }); return chain; },
-      sadd: (k: string, m: string) => {
-        ops.push(() => {
-          const set = this.sets.get(k) ?? new Set<string>();
-          set.add(m);
-          this.sets.set(k, set);
-        });
-        return chain;
-      },
-      srem: (k: string, m: string) => { ops.push(() => { this.sets.get(k)?.delete(m); }); return chain; },
-      exec: async () => {
-        this.calls.push('multi.exec');
-        ops.forEach((op) => op());
-        return [];
-      },
-    };
-    return chain;
-  }
-}
-
 /** Build a RedisRoomStore around a fake client (bypasses the private ctor). */
-function storeWith(fake: FakeRedis): RedisRoomStore {
-  return new (RedisRoomStore as any)(fake);
+function storeWith(fake: FakeRedis, lease: RedisAuthorityLease): RedisRoomStore {
+  return new (RedisRoomStore as any)(fake, lease);
 }
 
 function sampleRoom(code: string): Room {
@@ -87,11 +39,14 @@ function sampleRoom(code: string): Room {
 describe('RedisRoomStore', () => {
   let fake: FakeRedis;
   let store: RedisRoomStore;
+  let lease: RedisAuthorityLease;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     fake = new FakeRedis();
-    store = storeWith(fake);
+    lease = await RedisAuthorityLease.acquire(fake);
+    store = storeWith(fake, lease);
   });
+  afterEach(async () => { await lease.release(); });
 
   it('saves a room under uno:room:<CODE> and indexes it in uno:rooms', async () => {
     await store.save(sampleRoom('ABC123'));
@@ -124,7 +79,7 @@ describe('RedisRoomStore', () => {
     expect(await store.loadAll()).toEqual([]);
   });
 
-  it('prunes index entries whose snapshot is gone, in ONE srem', async () => {
+  it('prunes missing snapshots in one guarded cleanup round trip', async () => {
     await store.save(sampleRoom('GOOD01'));
     // Simulate two expired/evicted snapshots that the index still references.
     fake.sets.get('uno:rooms')!.add('GONE01');
@@ -134,8 +89,8 @@ describe('RedisRoomStore', () => {
 
     expect(loaded.map((r) => r.code)).toEqual(['GOOD01']);
     expect([...fake.sets.get('uno:rooms')!]).toEqual(['GOOD01']);
-    // Batched cleanup: exactly one srem, not one per orphan.
-    expect(fake.calls.filter((c) => c === 'srem')).toHaveLength(1);
+    // Batched cleanup: exactly one guarded script, not one call per orphan.
+    expect(fake.calls.filter((c) => c === 'prune')).toHaveLength(1);
   });
 
   it('skips unparseable JSON and prunes it instead of throwing', async () => {

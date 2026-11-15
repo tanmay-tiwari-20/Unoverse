@@ -44,5 +44,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run typecheck
+      - run: npm ci --prefix ../backend
+      - run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - run: npm run test:e2e
       - run: npm run build
       - run: npm run build:crazygames

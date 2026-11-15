@@ -5,6 +5,7 @@ import { useGameStore } from '../../store/useGameStore';
 import { useSocket } from '../../hooks/useSocket';
 import { useDialogA11y } from '../../hooks/useDialogA11y';
 import type { CardColor } from '../../lib/cards/cardEngine';
+import { COLOR_IDENTITIES } from '../../lib/cards/colorIdentity';
 
 /**
  * The four choices, in the exact grid order the table has always shown them.
@@ -54,6 +55,7 @@ export const ColorPickerDialog: React.FC = () => {
         <div className="grid grid-cols-2 gap-4 w-full short:grid-cols-4 short:gap-2">
           {COLOR_CHOICES.map(({ color, label, classes }) => (
             <button
+              type="button"
               key={color}
               disabled={isProcessing}
               onClick={() => {
@@ -62,6 +64,7 @@ export const ColorPickerDialog: React.FC = () => {
               }}
               className={`btn-arcade bg-gradient-to-b ${classes} py-5 text-base uppercase disabled:cursor-not-allowed short:py-3 short:text-sm cursor-pointer`}
             >
+              <span aria-hidden="true" className="mr-2">{COLOR_IDENTITIES[color].symbol}</span>
               {label}
             </button>
           ))}

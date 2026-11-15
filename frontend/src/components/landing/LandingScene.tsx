@@ -91,10 +91,8 @@ export const LandingScene: React.FC<LandingSceneProps> = ({ onReady }) => {
     // than the missing ambience.
     <ErrorBoundary
       section="Landing Scene"
-      fallback={() => {
-        onReady?.();
-        return null;
-      }}
+      fallback={null}
+      onError={onReady}
     >
       <RoomEnvironment
         numPlayers={2}

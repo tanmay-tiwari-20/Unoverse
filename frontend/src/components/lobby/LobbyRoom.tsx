@@ -14,11 +14,13 @@ import { usePlatformMatchEnd } from "../../hooks/usePlatformMatchEnd";
 import { usePlatformRouter } from "../../hooks/usePlatformRouter";
 import { useGameStore } from "../../store/useGameStore";
 import { HOME_HREF } from "../../lib/platform/routes";
+import { roomMembershipLifecycle } from "../../lib/roomMembership";
 import { ErrorBoundary } from "../providers/ErrorBoundary";
 import { ReactionsHandler } from "../social/ReactionsHandler";
 import { ChatPanel } from "../social/ChatPanel";
 import { SocialLayer } from "../social/SocialLayer";
 import { TurnGlowIndicator } from "../table/TurnGlowIndicator";
+import { PlayerHandHUD } from "../table/PlayerHandHUD";
 import { SettingsModal } from "../ui/SettingsModal";
 import { HouseRulesModal } from "../ui/HouseRulesModal";
 import { HelpModals } from "../ui/HelpModals";
@@ -43,10 +45,13 @@ const TableScene = dynamic(
   {
     ssr: false,
     loading: () => (
-      <PremiumLoader
-        message="ENTERING ARENA..."
-        submessage="Preparing 3D Card Table & World..."
-      />
+      <div className="absolute inset-0 pointer-events-none">
+        <PremiumLoader
+          fullScreen={false}
+          message="ENTERING ARENA..."
+          submessage="Preparing 3D Card Table & World..."
+        />
+      </div>
     ),
   },
 );
@@ -80,17 +85,16 @@ export interface LobbyRoomProps {
 export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
   const router = usePlatformRouter();
 
-  const { socket, joinRoom } = useSocket();
+  const { joinRoom, leaveRoom } = useSocket();
   // The voice mesh must be mounted exactly once, for the whole life of the
   // route — it is signalled over the game socket and rebuilds every peer
   // connection when it remounts. Hence: here, not inside the HUD button.
-  const { toggleMic } = useVoiceChat();
+  const { toggleMic, toggleVoice } = useVoiceChat();
 
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
   const error = useGameStore((state) => state.error);
   const setError = useGameStore((state) => state.setError);
-  const clearAllCards = useGameStore((state) => state.clearAllCards);
   const isSpectator = useGameStore((state) => state.isSpectator);
   const gameStatus = useGameStore((state) => state.gameStatus);
   const isChatOpen = useGameStore((state) => state.isChatOpen);
@@ -99,17 +103,6 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
   const chatEnabled = useChatEnabled();
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const [isArenaReady, setIsArenaReady] = useState(false);
-
-  // Reset arena readiness when room or arena changes (render-phase derived
-  // state — avoids the cascading re-render a useEffect would cause).
-  const arenaKey = `${room?.code ?? ''}-${room?.arena ?? ''}`;
-  const [prevArenaKey, setPrevArenaKey] = useState(arenaKey);
-  if (prevArenaKey !== arenaKey) {
-    setPrevArenaKey(arenaKey);
-    setIsArenaReady(false);
-  }
-
   // Redirect back if name query parameter is missing
   useEffect(() => {
     if (!name) {
@@ -138,13 +131,15 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
   useEffect(() => {
     if (!roomId || !name) return;
 
-    joinRoom(roomId, name);
-
-    return () => {
-      clearAllCards();
-    };
+    return roomMembershipLifecycle.acquire(
+      `${roomId.trim().toUpperCase()}:${name.trim()}`,
+      () => joinRoom(roomId, name),
+      leaveRoom,
+    );
+    // Joining waits for the singleton socket itself; a transport update must
+    // not tear down the route's seat. The commands read the live store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, name, socket]);
+  }, [roomId, name]);
 
   // Warm the selected arena as soon as the room tells us which one it is —
   // before <TableScene>'s Canvas mounts. Two independent best-effort warm-ups:
@@ -199,14 +194,16 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
       <div className="w-full h-full relative">
         {/* Full-screen Table Scene: mounts the 3D canvas and dedicated arena loader */}
         <div className="w-full h-full absolute inset-0 z-0">
-          <TableScene onReady={() => setIsArenaReady(true)} />
+          <TableScene />
         </div>
 
         {/* =================================================================== */}
-        {/* IN-GAME HUD & OVERLAYS — ONLY MOUNTED ONCE ARENA IS FULLY READY    */}
+        {/* Controls stay live while the decorative scene loads or recovers. */}
         {/* =================================================================== */}
-        {isArenaReady && (
-          <>
+        <>
+            <ErrorBoundary section="Your Hand">
+              <PlayerHandHUD />
+            </ErrorBoundary>
             {/* Reactions Layer Overlay */}
             <ErrorBoundary section="Reactions" fallback={null}>
               <ReactionsHandler />
@@ -250,6 +247,7 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
               <LobbyHeader
                 onOpenInvite={() => setIsInviteModalOpen(true)}
                 onToggleMic={toggleMic}
+                onToggleVoice={toggleVoice}
               />
             </ErrorBoundary>
 
@@ -282,8 +280,7 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
             <ErrorBoundary section="Friends" fallback={null}>
               <SocialLayer />
             </ErrorBoundary>
-          </>
-        )}
+        </>
       </div>
     </div>
   );

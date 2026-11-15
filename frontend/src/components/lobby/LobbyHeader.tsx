@@ -9,6 +9,7 @@ import { HudControls } from './HudControls';
 export interface LobbyHeaderProps {
   onOpenInvite: () => void;
   onToggleMic: () => void;
+  onToggleVoice: () => void;
 }
 
 /**
@@ -23,7 +24,7 @@ export interface LobbyHeaderProps {
  * control buttons each had their own arcade shell, so the top of the table read
  * as eight separate objects; now it reads as two clusters.
  */
-export const LobbyHeader: React.FC<LobbyHeaderProps> = ({ onOpenInvite, onToggleMic }) => {
+export const LobbyHeader: React.FC<LobbyHeaderProps> = ({ onOpenInvite, onToggleMic, onToggleVoice }) => {
   const room = useGameStore((s) => s.room);
   const isSpectator = useGameStore((s) => s.isSpectator);
 
@@ -71,7 +72,7 @@ export const LobbyHeader: React.FC<LobbyHeaderProps> = ({ onOpenInvite, onToggle
       )}
 
       {/* Top Right: essential actions */}
-      <HudControls onToggleMic={onToggleMic} />
+      <HudControls onToggleMic={onToggleMic} onToggleVoice={onToggleVoice} />
     </header>
   );
 };

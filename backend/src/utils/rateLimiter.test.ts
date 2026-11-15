@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SocketRateLimiter } from './rateLimiter';
+import { SocketRateLimiter, IP_LIMIT_CONFIG } from './rateLimiter';
 
 /**
  * Token-bucket limiter: a burst up to `capacity` is allowed, further requests in
@@ -74,5 +74,62 @@ describe('SocketRateLimiter', () => {
     rl.removeSocket('sock');
     // Fresh bucket after cleanup.
     expect(rl.consume('sock', 'send-chat').allowed).toBe(true);
+  });
+});
+
+describe('reconnect-resistant IP limits', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('preserves event buckets across socket disconnects and new identities', () => {
+    const rl = new SocketRateLimiter({ ...IP_LIMIT_CONFIG, eventMultiplier: 1 });
+    expect(rl.registerSocket('first', '192.0.2.1')).toBe(true);
+    for (let i = 0; i < 6; i++) expect(rl.consume('first', 'send-chat').allowed).toBe(true);
+    rl.removeSocket('first');
+    expect(rl.registerSocket('new', '192.0.2.1')).toBe(true);
+    expect(rl.consume('new', 'send-chat').allowed).toBe(false);
+    expect(rl.registerSocket('other', '192.0.2.2')).toBe(true);
+    expect(rl.consume('other', 'send-chat').allowed).toBe(true);
+    vi.advanceTimersByTime(2000);
+    expect(rl.consume('new', 'send-chat').allowed).toBe(true);
+  });
+
+  it('caps active connections and frees concurrent slots on disconnect', () => {
+    const rl = new SocketRateLimiter({ ...IP_LIMIT_CONFIG, maxConnections: 2 });
+    expect(rl.registerSocket('a', 'ip')).toBe(true);
+    expect(rl.registerSocket('b', 'ip')).toBe(true);
+    expect(rl.registerSocket('c', 'ip')).toBe(false);
+    rl.removeSocket('a');
+    expect(rl.registerSocket('c', 'ip')).toBe(true);
+    rl.removeSocket('a'); // Idempotent; cannot manufacture another free slot.
+    expect(rl.registerSocket('d', 'ip')).toBe(false);
+  });
+
+  it('preserves connection burst limits across disconnects', () => {
+    const rl = new SocketRateLimiter({ ...IP_LIMIT_CONFIG, connectionCapacity: 2 });
+    expect(rl.registerSocket('a', 'ip')).toBe(true);
+    rl.removeSocket('a');
+    expect(rl.registerSocket('b', 'ip')).toBe(true);
+    rl.removeSocket('b');
+    expect(rl.registerSocket('c', 'ip')).toBe(false);
+    vi.advanceTimersByTime(1000);
+    expect(rl.registerSocket('c', 'ip')).toBe(true);
+  });
+
+  it('caps aggregate events even when a flood alternates event names', () => {
+    const rl = new SocketRateLimiter({ ...IP_LIMIT_CONFIG, totalCapacity: 2 });
+    rl.registerSocket('a', 'ip');
+    expect(rl.consume('a', 'send-chat').allowed).toBe(true);
+    expect(rl.consume('a', 'send-reaction').allowed).toBe(true);
+    expect(rl.consume('a', 'play-card').allowed).toBe(false);
+  });
+
+  it('bounds retained IP entries and prunes expired inactive ones', () => {
+    const rl = new SocketRateLimiter({ ...IP_LIMIT_CONFIG, maxTrackedIps: 1, retentionMs: 1000 });
+    rl.registerSocket('a', 'ip');
+    rl.removeSocket('a');
+    expect(rl.registerSocket('b', 'other-ip')).toBe(false);
+    vi.advanceTimersByTime(1001);
+    expect(rl.registerSocket('b', 'other-ip')).toBe(true);
   });
 });

@@ -51,6 +51,12 @@ Unoverse has **two deployable pieces** that must be deployed differently:
 | `RECENT_MATCHES_MAX` | no | `20` | Match-history entries kept per profile. |
 | `PROFILE_MIN_HUMANS` | no | `1` | Min humans at the table for a round to count toward stats. `2` = ignore solo-vs-bots. |
 | `TURN_TIMEOUT_MS` | no | `45000` | Turn auto-resolve deadline. |
+| `VOICE_MAX_PARTICIPANTS` | no | `4` | Explicit voice cap; 2–6 seated humans. Spectators and bots cannot join. |
+| `TURN_URLS` | with relay | `turn:turn.example.com:3478` | Comma-separated `turn:` / `turns:` URLs. |
+| `TURN_SHARED_SECRET` | with relay | host secret | Server-only coturn REST authentication secret. |
+| `TURN_CREDENTIAL_TTL_SECONDS` | no | `900` | Relay credential expiry; 60–3600 seconds. |
+| `REPORT_DIR` | file store | `./.data/reports` | Private bug-report JSON records. |
+| `REPORT_RETENTION_DAYS` | no | `30` | 1–90 days. Redis reports expire; file cleanup runs on submission. |
 
 > **Stats persistence:** profiles use the same `STORE` selector as rooms. With
 > `STORE=memory` every player's stats are lost on restart, and on hosts with an
@@ -62,9 +68,6 @@ Unoverse has **two deployable pieces** that must be deployed differently:
 | Var | Required | Example |
 |-----|----------|---------|
 | `NEXT_PUBLIC_BACKEND_URL` | **yes** | `https://api.unoverse.example.com` |
-| `NEXT_PUBLIC_TURN_URL` | recommended | `turn:turn.example.com:3478` |
-| `NEXT_PUBLIC_TURN_USERNAME` | with TURN | `myuser` |
-| `NEXT_PUBLIC_TURN_CREDENTIAL` | with TURN | `mypass` |
 
 > `NEXT_PUBLIC_*` vars are baked in at **build time** — after changing them you must
 > redeploy/rebuild the frontend.
@@ -101,7 +104,7 @@ Unoverse has **two deployable pieces** that must be deployed differently:
 cd backend
 docker build -t unoverse-backend .
 docker run -d --name unoverse \
-  -p 3001:3001 \
+  -p 3001:8080 \
   -e NODE_ENV=production \
   -e STORE=redis \
   -e REDIS_URL=redis://<host>:6379 \
@@ -131,7 +134,7 @@ The server handles `SIGTERM`/`SIGINT` gracefully (flushes persistence, closes so
 2. Framework preset: **Next.js** (auto-detected). Build `npm run build`, output handled by Vercel.
 3. Set env vars:
    - `NEXT_PUBLIC_BACKEND_URL` = your backend HTTPS URL from Part 1.
-   - `NEXT_PUBLIC_TURN_URL` / `NEXT_PUBLIC_TURN_USERNAME` / `NEXT_PUBLIC_TURN_CREDENTIAL` (see Part 4).
+   - Configure TURN on the backend as described in Part 4.
 4. Deploy. Open the site and confirm it connects (no "Unable to connect to game server" error).
 5. **Go back to the backend** and set `CORS_ORIGIN` to this frontend's exact URL, then redeploy the backend.
 
@@ -143,10 +146,9 @@ The server handles `SIGTERM`/`SIGINT` gracefully (flushes persistence, closes so
 - Set `STORE=redis` and `REDIS_URL` on the backend.
 - This gives you three things at once:
   1. **Durability** — in-progress games survive a backend restart/redeploy.
-  2. **Multi-instance broadcasts** — the Socket.IO Redis adapter auto-enables when
-     `REDIS_URL` is present.
-  3. **Shared profiles/friends** — profiles, friends, and presence are visible from
-     every instance instead of being trapped on one box.
+  2. **Messaging** — the Socket.IO Redis adapter enables when `REDIS_URL` is present.
+  3. **Single-writer protection** — a renewable lease permits one authoritative backend
+     per Redis database and atomically guards room, profile, and report writes.
 
 ### Connection URL format
 
@@ -170,8 +172,8 @@ npm run redis:check     # pings Redis, does a round-trip write/read, then cleans
 - **`NODE_ENV=production`** — the server **refuses to start**. This is deliberate: a
   silent fallback to per-instance memory would split your players across boxes and
   quietly lose games.
-- **Development** — falls back to the file store with a loud warning so you can keep
-  working without Redis running.
+- **Configured Redis** — ownership or hydration failures stop startup in every environment.
+  After startup, losing the lease stops the backend instead of continuing with stale state.
 
 `GET /health` reports live storage state, so point your platform's health check at it
 to catch a degraded instance:
@@ -185,9 +187,8 @@ to catch a degraded instance:
 ```
 
 `redis.status` is `ready` (PING ok) / `disabled` (no `REDIS_URL`) / `degraded`
-(connected but PING failing) / `error` (no client at all). The endpoint still returns
-`200` during a Redis outage — alert on `storage.redis.status`, don't pull the
-instance out of the load balancer for it.
+(connected but PING failing) / `error` (no client at all). Alert on `storage.redis.status`.
+Lost ownership stops the backend; process and HTTP health checks should restart it.
 
 ---
 
@@ -197,11 +198,16 @@ Voice is peer-to-peer WebRTC. STUN (built in) is enough for many players, but th
 behind symmetric NATs / strict firewalls need a **TURN relay** or their audio never
 connects.
 
-1. Get TURN credentials from a hosted provider (**Metered**, **Twilio**, **Cloudflare
-   Calls**) or self-host **coturn**.
-2. Set on the frontend: `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`,
-   `NEXT_PUBLIC_TURN_CREDENTIAL`, then redeploy the frontend.
-3. Without TURN, ship with the known caveat "voice may not work on some networks."
+1. Configure coturn (or a provider supporting TURN REST authentication) with
+   `use-auth-secret` and a private `static-auth-secret`.
+2. Set matching backend `TURN_SHARED_SECRET` and `TURN_URLS`. Optional
+   `TURN_CREDENTIAL_TTL_SECONDS` defaults to 900 seconds. Restart the backend.
+3. Players click **Join voice**, then enable their microphone. The default group
+   cap is four seated humans. Leaving voice or the room and disconnecting revoke
+   membership and release microphone tracks and peer connections.
+4. Active voice members fetch short-lived credentials at `/api/voice/ice`. Remove
+   legacy `NEXT_PUBLIC_TURN_*` secrets from frontend hosting settings. STUN-only
+   direct connections work without a relay but may fail on strict networks.
 
 ---
 
@@ -212,11 +218,17 @@ presence and turn timers are authoritative in that process. Redis persists
 snapshots and the Socket.IO adapter distributes messages, but neither coordinates
 concurrent game mutations or refreshes another process's in-memory state.
 
-Before adding replicas, implement room ownership and routing, ownership leases,
-versioned or transactional state writes, distributed presence, and failover tests.
+The backend acquires `uno:authority:lease` before loading Redis snapshots. A second
+backend using that database refuses to start. The lease has a 30-second expiry
+and renews every 10 seconds. After a crash, a replacement can acquire it when it
+expires. Clean shutdown drains writes before release. Lost ownership stops traffic;
+atomic guards reject stale room, profile, and report writes. Redis must allow EVAL.
+
+Before adding active replicas, implement room routing, transactional shared state,
+distributed presence, and real multi-process/load tests.
 Socket.IO polling also requires sticky sessions, but stickiness alone cannot make
-the current application state safe across instances. Avoid overlapping backend
-instances during deployment; use stop-then-start replacement for this release.
+the current application state safe across instances. Use stop-then-start replacement
+for this release; an overlapping replacement may fail until the old lease releases.
 
 ---
 

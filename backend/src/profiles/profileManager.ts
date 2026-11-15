@@ -87,6 +87,8 @@ class ProfileManager {
   private store: ProfileStore = new MemoryProfileStore();
   private dirty: Set<string> = new Set();
   private removed: Set<string> = new Set();
+  /** Old migration keys can be deleted only after their replacement is durable. */
+  private migrationRemovals = new Map<string, string>();
   private flushScheduled = false;
   private flushPromise: Promise<void> | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
@@ -105,6 +107,7 @@ class ProfileManager {
     this.draining = false;
     this.dirty.clear();
     this.removed.clear();
+    this.migrationRemovals.clear();
     this.revisions.clear();
     this.store = store;
   }
@@ -150,6 +153,14 @@ class ProfileManager {
   public async hydrate(): Promise<void> {
     const loaded = await this.store.loadAll();
     let backfilled = 0;
+    // A crash after saving the new key but before deleting the old one leaves
+    // both snapshots. Adopt the durable migrated identity, not a second remint.
+    const knownMigrations = new Map<string, string>();
+    for (const raw of loaded) {
+      if (raw && isPlayerId(raw.id) && typeof raw.legacyId === 'string'
+        && raw.legacyId && !isPlayerId(raw.legacyId)) knownMigrations.set(raw.legacyId, raw.id);
+    }
+    const redundantLegacy = new Set<string>();
 
     // ---- Pass 1: adopt profiles that already hold a valid Player ID ----------
     // `snapshot` is the exact on-disk JSON and `storedKey` the key it was filed
@@ -158,6 +169,10 @@ class ProfileManager {
     const pending: { raw: Partial<Profile>; snapshot: string; storedKey: string }[] = [];
     for (const raw of loaded) {
       if (!raw || typeof raw.id !== 'string' || !raw.id) continue;
+      if (!isPlayerId(raw.id) && knownMigrations.has(raw.id)) {
+        redundantLegacy.add(raw.id);
+        continue;
+      }
       const entry = { snapshot: JSON.stringify(raw), storedKey: raw.id };
       if (isPlayerId(raw.id) && this.ids.reserve(raw.id)) {
         pending.push({ ...entry, raw });
@@ -169,12 +184,19 @@ class ProfileManager {
     }
 
     // ---- Pass 2: mint ids for everything still unresolved --------------------
-    const remap = new Map<string, string>(); // old id -> new Player ID
-    for (const { raw } of pending) {
+    const remap = new Map<string, string>(knownMigrations); // old id -> new Player ID
+    const newMigrations = new Map<string, string>();
+    for (const { raw, storedKey } of pending) {
       if (raw.id) continue;
-      const oldId = String(raw.legacyId);
       raw.id = this.ids.allocate();
-      remap.set(oldId, raw.id);
+      if (!isPlayerId(storedKey)) {
+        remap.set(storedKey, raw.id);
+        newMigrations.set(storedKey, raw.id);
+      } else {
+        // A duplicate valid ID is ambiguous; preserve the first canonical key
+        // and never delete or alias it to the reminted second profile.
+        raw.legacyId = null;
+      }
     }
 
     // ---- Commit: normalize, rewrite graph edges, index ----------------------
@@ -199,12 +221,13 @@ class ProfileManager {
       }
     }
 
-    // The migrated profile is written under its NEW key; the snapshot filed
-    // under the old UUID would otherwise be re-loaded as a duplicate identity on
-    // the next boot, so it is removed once its replacement is queued.
-    for (const oldId of remap.keys()) {
+    // Register each dependency before the queued flush runs. Failed replacement
+    // saves leave the old copy intact; successful saves unlock its removal.
+    for (const [oldId, newId] of newMigrations) {
+      this.migrationRemovals.set(oldId, newId);
       this.markRemoved(oldId);
     }
+    for (const oldId of redundantLegacy) this.markRemoved(oldId);
 
     if (loaded.length) {
       const migrated = remap.size ? ` (${remap.size} migrated to short Player IDs)` : '';
@@ -258,33 +281,49 @@ class ProfileManager {
     let failed = false;
     this.flushPromise = (async () => {
       while (generation === this.storeGeneration && (this.dirty.size || this.removed.size)) {
+        // During a partial migration, snapshots keep references to legacy IDs
+        // until every referenced replacement has actually been saved. Those
+        // IDs resolve through the old copy or the new copy's legacyId on reboot.
+        const pendingReferences = new Map([...this.migrationRemovals].map(([oldId, newId]) => [newId, oldId]));
         const saves = [...this.dirty].flatMap((id) => {
           const profile = this.profiles.get(id);
-          return profile ? [{ id, revision: this.revisions.get(id), snapshot: JSON.parse(JSON.stringify(profile)) as Profile }] : [];
+          if (!profile) return [];
+          const snapshot = JSON.parse(JSON.stringify(profile)) as Profile;
+          const socialBefore = JSON.stringify(snapshot.social);
+          if (pendingReferences.size) this.remapSocialGraph(snapshot, pendingReferences);
+          return [{ id, revision: this.revisions.get(id), snapshot, finalizeGraph: socialBefore !== JSON.stringify(snapshot.social) }];
         });
-        const removals = [...this.removed].map((id) => ({ id, revision: this.revisions.get(id) }));
         this.dirty.clear();
-        this.removed.clear();
-        await Promise.all([
-          ...saves.map(async ({ id, revision, snapshot }) => {
+        await Promise.all(saves.map(async ({ id, revision, snapshot, finalizeGraph }) => {
             try {
               await store.save(snapshot);
+              if (generation === this.storeGeneration) {
+                for (const [oldId, newId] of this.migrationRemovals) {
+                  if (newId === id) this.migrationRemovals.delete(oldId);
+                }
+                if (finalizeGraph) this.markDirty(id);
+              }
             } catch (err: any) {
               failed = true;
               if (generation === this.storeGeneration && this.revisions.get(id) === revision) this.dirty.add(id);
               logger.error(`[PROFILE_STORE] Failed to persist profile ${id} (will retry):`, err?.message);
             }
-          }),
-          ...removals.map(async ({ id, revision }) => {
+          }));
+        if (generation !== this.storeGeneration) break;
+        const removals = [...this.removed]
+          .filter((id) => !this.migrationRemovals.has(id))
+          .map((id) => ({ id, revision: this.revisions.get(id) }));
+        for (const { id } of removals) this.removed.delete(id);
+        await Promise.all(removals.map(async ({ id, revision }) => {
             try {
               await store.remove(id);
+              if (generation === this.storeGeneration && this.revisions.get(id) === revision) this.revisions.delete(id);
             } catch (err: any) {
               failed = true;
               if (generation === this.storeGeneration && this.revisions.get(id) === revision) this.removed.add(id);
               logger.error(`[PROFILE_STORE] Failed to remove profile ${id} (will retry):`, err?.message);
             }
-          }),
-        ]);
+          }));
         if (failed) break;
       }
     })().finally(() => {

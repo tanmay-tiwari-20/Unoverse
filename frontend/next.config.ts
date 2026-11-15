@@ -130,6 +130,9 @@ const nextConfig: NextConfig = {
     : {}),
 
   turbopack: {
+    // Keep module resolution stable when launched from the repository or a
+    // browser-test child process. Backend dependencies live in a separate root.
+    root: __dirname,
     resolveAlias: {
       /**
        * The platform implementation seam. `lib/platform/index.ts` dynamically

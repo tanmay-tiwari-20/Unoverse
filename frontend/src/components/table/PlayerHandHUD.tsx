@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useId, useRef } from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HtmlCard } from '../cards/HtmlCard';
@@ -8,6 +8,8 @@ import { canPlayCard, canJumpInWithCard, CardItem } from '../../lib/cards/cardEn
 import { useViewport } from '../../hooks/useViewport';
 import { useSocket } from '../../hooks/useSocket';
 import { useKeyboardControls } from '../../hooks/useKeyboardControls';
+import { describeCard } from '../../lib/cards/colorIdentity';
+import { createHandGestureGuard, getCardRevealScroll, getHandLayout } from '../../lib/cards/handLayout';
 
 export const PlayerHandHUD: React.FC = () => {
   useKeyboardControls();
@@ -26,6 +28,35 @@ export const PlayerHandHUD: React.FC = () => {
   const setSelectedCardId = useGameStore((state) => state.setSelectedCardId);
   const { playCard, jumpIn } = useSocket();
   const { width, isMobile, isTablet, isTouch, isLandscape } = useViewport();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef(new Map<string, HTMLButtonElement>());
+  const gesture = useRef(createHandGestureGuard());
+  const instructionsId = useId();
+  const hand = player ? playerCards[player.seatNumber] || [] : [];
+  const cardCount = hand.length;
+  const layout = getHandLayout({ cardCount, viewportWidth: width, isMobile, isTablet, isTouch });
+  const { cardWidth: cardW, cardHeight: cardH, step, handWidth: fanWidth, scrollable } = layout;
+
+  const revealCard = useCallback((button: HTMLButtonElement | undefined) => {
+    const strip = scrollRef.current;
+    if (!strip || !button) return;
+    const cardBounds = button.getBoundingClientRect();
+    const stripBounds = strip.getBoundingClientRect();
+    const left = getCardRevealScroll({
+      scrollLeft: strip.scrollLeft,
+      viewportWidth: strip.clientWidth,
+      scrollWidth: strip.scrollWidth,
+      cardLeft: cardBounds.left - stripBounds.left + strip.scrollLeft,
+      cardWidth: cardBounds.width,
+    });
+    // Immediate movement keeps rapid keyboard navigation and reduced-motion
+    // users in sync; it does not interrupt a touch swipe unless selection changes.
+    strip.scrollLeft = left;
+  }, []);
+
+  useEffect(() => {
+    if (scrollable && selectedCardId) revealCard(cardRefs.current.get(selectedCardId));
+  }, [scrollable, selectedCardId, cardCount, width, revealCard]);
 
   // Hide hand when game is not active or has ended
   if (!room || !player || !['playing', 'awaiting_color_selection'].includes(room.status)) {
@@ -35,8 +66,6 @@ export const PlayerHandHUD: React.FC = () => {
     return null;
   }
 
-  const hand = playerCards[player.seatNumber] || [];
-  const cardCount = hand.length;
   const isMyTurn = gameStatus === 'playing' && currentPlayerId === player.id && !isProcessing;
   const topCard = discardPile.length > 0 ? discardPile[discardPile.length - 1] : null;
 
@@ -48,71 +77,17 @@ export const PlayerHandHUD: React.FC = () => {
     currentPlayerId !== player.id &&
     canJumpInWithCard(card, topCard, pendingDrawType, houseRules, hand.length);
 
-  // ---------------------------------------------------------------------------
-  // Responsive sizing. Rather than fixed Tailwind sizes (which made cards tiny
-  // on phones and could overflow with a big hand), we size the fan to the live
-  // viewport: pick the largest card width that lets the whole hand fit across
-  // the available width, allowing cards to overlap as the hand grows.
-  // ---------------------------------------------------------------------------
-
-  // Base (max) card width per device bucket — mobile HUD is intentionally large
-  // so a phone player can read and tap cards comfortably.
-  const baseCardW = isMobile ? 68 : isTablet ? 78 : 84;
-  const cardAspect = 1.5; // height / width, classic UNO ratio
-
-  // Horizontal budget the fan may occupy (leaves side gutters for safe areas).
-  const sideGutter = isMobile ? 16 : 32;
-  const available = Math.max(240, (width || 360) - sideGutter * 2);
-
-  // How much each successive card is inset over the previous one. Positive =
-  // overlap. We start with a comfortable spread and only overlap once the hand
-  // would otherwise run past the available width.
-  const idealSpread = baseCardW * (isTouch ? 0.72 : 0.66); // visible slice per card
-  const naturalWidth = baseCardW + (cardCount - 1) * idealSpread;
-
-  let cardW = baseCardW;
-  let step = idealSpread;
-  if (naturalWidth > available && cardCount > 1) {
-    // Compress: shrink the per-card step (more overlap) and, if that is not
-    // enough, scale the whole card down so even a 15+ card hand stays on-screen.
-    step = (available - baseCardW) / (cardCount - 1);
-    const minStep = baseCardW * 0.22; // never fully hide a card's face
-    if (step < minStep) {
-      const scale = (available - minStep) / (baseCardW + (cardCount - 1) * minStep - minStep);
-      cardW = Math.max(isMobile ? 40 : 52, baseCardW * scale);
-      step = Math.max(cardW * 0.22, (available - cardW) / (cardCount - 1));
-    }
-  }
-  const cardH = cardW * cardAspect;
-  const fanWidth = cardW + (cardCount - 1) * step;
-
   // Vertical lift amounts scale with card size so the arch/hover reads well on
   // both a tiny phone and a large monitor.
-  const liftPlayable = cardH * 0.22;
-  const liftHover = cardH * 0.28;
-  const archMax = cardH * 0.14;
-
-  // Human-readable card name for screen readers (e.g. "Red 7", "Wild Draw Four").
-  const describeCard = (card: CardItem): string => {
-    const color = card.color === 'wild' ? 'Wild' : card.color.charAt(0).toUpperCase() + card.color.slice(1);
-    const valueLabels: Record<string, string> = {
-      draw_two: 'Draw Two',
-      wild_draw_four: 'Wild Draw Four',
-      skip: 'Skip',
-      reverse: 'Reverse',
-      wild: 'Wild',
-    };
-    const value = valueLabels[card.value] ?? card.value;
-    // Avoid "Wild Wild" for plain wild cards.
-    if (card.color === 'wild') return value;
-    return `${color} ${value}`;
-  };
+  const liftPlayable = scrollable ? 4 : cardH * 0.22;
+  const liftHover = scrollable ? 8 : cardH * 0.28;
+  const archMax = scrollable ? 0 : cardH * 0.14;
 
   // Render a CSS replica of an UNO card
   const renderCard = (card: CardItem, idx: number) => {
     // Max fan angle based on hand size (gentler on small screens so tall cards
     // don't rotate off the bottom edge).
-    const maxAngle = Math.min(isMobile ? 20 : 30, cardCount * 2.5);
+    const maxAngle = scrollable ? 0 : Math.min(isMobile ? 20 : 30, cardCount * 2.5);
     const angle = cardCount > 1
       ? -maxAngle + (idx * (maxAngle * 2 / (cardCount - 1)))
       : 0;
@@ -143,7 +118,7 @@ export const PlayerHandHUD: React.FC = () => {
         : `${prefix}${name}`;
 
     const targetY = isSelected
-      ? yArchOffset - liftHover - 8
+      ? yArchOffset - liftHover - (scrollable ? 0 : 8)
       : (isPlayable || isJumpIn)
         ? yArchOffset - liftPlayable
         : yArchOffset;
@@ -164,23 +139,28 @@ export const PlayerHandHUD: React.FC = () => {
     return (
       <motion.button
         key={card.id}
+        ref={(button) => {
+          if (button) cardRefs.current.set(card.id, button);
+          else cardRefs.current.delete(card.id);
+        }}
         type="button"
+        data-card-id={card.id}
         aria-label={ariaLabel}
         aria-disabled={!canPlay}
-        tabIndex={canPlay ? 0 : -1}
-        initial={{ y: 100, opacity: 0 }}
+        tabIndex={scrollable ? (isSelected || (!selectedCardId && idx === 0) ? 0 : -1) : canPlay ? 0 : -1}
+        initial={{ y: scrollable ? 0 : 100, opacity: 0 }}
         animate={{
           y: targetY,
           rotate: isSelected ? 0 : angle,
-          scale: isSelected ? 1.14 : 1,
+          scale: isSelected && !scrollable ? 1.14 : 1,
           opacity: 1
         }}
         whileHover={{
           y: yArchOffset - liftHover,
-          scale: 1.12,
+          scale: scrollable ? 1 : 1.12,
           zIndex: 70
         }}
-        whileTap={{ scale: 1.08 }}
+        whileTap={{ scale: scrollable ? 1 : 1.08 }}
         transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
         style={{
           width: cardW,
@@ -189,7 +169,24 @@ export const PlayerHandHUD: React.FC = () => {
           transformOrigin: 'bottom center',
           zIndex: isSelected ? 60 : (isPlayable || isJumpIn) ? 40 : idx,
         }}
-        onClick={() => {
+        onFocus={(event) => {
+          setSelectedCardId(card.id);
+          if (scrollable) revealCard(event.currentTarget);
+        }}
+        onKeyDown={(event) => {
+          if (event.altKey || event.ctrlKey || event.metaKey) return;
+          const nextIndex = event.key === 'ArrowLeft' ? Math.max(0, idx - 1)
+            : event.key === 'ArrowRight' ? Math.min(cardCount - 1, idx + 1)
+              : event.key === 'Home' ? 0 : event.key === 'End' ? cardCount - 1 : null;
+          if (nextIndex === null) return;
+          event.preventDefault();
+          cardRefs.current.get(hand[nextIndex].id)?.focus({ preventScroll: true });
+        }}
+        onClick={(event) => {
+          if (scrollable && gesture.current.suppressClick(event.detail)) {
+            event.preventDefault();
+            return;
+          }
           setSelectedCardId(card.id);
           if (canPlay) activate();
         }}
@@ -209,12 +206,43 @@ export const PlayerHandHUD: React.FC = () => {
   const bottomOffset = isMobile && isLandscape ? 'bottom-0' : 'bottom-2 sm:bottom-5';
 
   return (
-    <div className={`fixed left-1/2 -translate-x-1/2 pointer-events-none flex flex-col justify-end z-[100] w-full px-2 safe-bottom ${bottomOffset}`}>
-      <AnimatePresence>
-        <div className="flex justify-center items-end" style={{ width: fanWidth, margin: '0 auto' }}>
-          {hand.map((card, idx) => renderCard(card, idx))}
+    <div
+      role="region"
+      aria-label="Your hand"
+      aria-describedby={scrollable ? instructionsId : undefined}
+      data-hand-layout={scrollable ? 'scroll' : 'fan'}
+      className={`fixed left-1/2 -translate-x-1/2 pointer-events-none flex flex-col justify-end z-[100] w-full safe-bottom ${bottomOffset}`}
+      style={{ paddingLeft: 'max(8px, env(safe-area-inset-left))', paddingRight: 'max(8px, env(safe-area-inset-right))' }}
+    >
+      {scrollable && (
+        <p id={instructionsId} className="mx-auto mb-1 rounded-full bg-slate-950/90 px-3 py-1 text-center text-xs font-semibold text-white">
+          {cardCount} cards · {isTouch ? 'Swipe' : 'Scroll'} to browse
+          <span className="sr-only">. Use arrow keys, Home or End to browse cards, and Enter to play.</span>
+        </p>
+      )}
+      <div
+        ref={scrollable ? scrollRef : undefined}
+        data-hand-scroll={scrollable ? 'true' : undefined}
+        className={scrollable ? 'pointer-events-auto mx-auto max-w-full overflow-x-auto overflow-y-hidden rounded-xl bg-slate-950/45' : ''}
+        style={scrollable ? { width: layout.availableWidth, touchAction: 'pan-x', overscrollBehaviorX: 'contain', scrollbarWidth: 'thin', scrollbarColor: '#94a3b8 transparent' } : undefined}
+        onPointerDownCapture={scrollable ? (event) => gesture.current.start(event) : undefined}
+        onPointerMoveCapture={scrollable ? (event) => gesture.current.move(event) : undefined}
+        onPointerUpCapture={scrollable ? (event) => gesture.current.end(event) : undefined}
+        onPointerCancelCapture={scrollable ? () => gesture.current.cancel() : undefined}
+        onScroll={scrollable ? () => gesture.current.scroll() : undefined}
+      >
+        <div
+          className="relative flex items-end"
+          style={{
+            width: fanWidth + layout.edgePadding * 2,
+            margin: scrollable ? 0 : '0 auto',
+            padding: scrollable ? `16px ${layout.edgePadding}px 8px` : undefined,
+            boxSizing: 'border-box',
+          }}
+        >
+          <AnimatePresence>{hand.map((card, idx) => renderCard(card, idx))}</AnimatePresence>
         </div>
-      </AnimatePresence>
+      </div>
     </div>
   );
 };

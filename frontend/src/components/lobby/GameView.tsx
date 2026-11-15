@@ -1,17 +1,20 @@
 'use client';
 
 import React from 'react';
-import { ArrowLeftRight, Star } from 'lucide-react';
+import { ArrowLeftRight, Layers, Star } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 import { useIsMyTurn } from '../../hooks/useIsMyTurn';
 import { TurnTimer } from '../table/TurnTimer';
+import { useSocket } from '../../hooks/useSocket';
+import { COLOR_IDENTITIES, describeCard } from '../../lib/cards/colorIdentity';
+import { canPlayCard } from '../../lib/cards/cardEngine';
 
 /**
  * In-round status pill: whose turn it is, or which forced choice the table is
  * waiting on. Purely a mirror of the authoritative `gameStatus` — it never
  * decides anything, it only reports what the server already said.
  */
-export const GameView: React.FC = () => {
+const TurnStatus: React.FC = () => {
   const room = useGameStore((s) => s.room);
   const player = useGameStore((s) => s.player);
   const gameStatus = useGameStore((s) => s.gameStatus);
@@ -75,6 +78,74 @@ export const GameView: React.FC = () => {
   }
 
   return null;
+};
+
+/** The round stays playable while WebGL loads, fails, or loses its context. */
+export const GameView: React.FC = () => {
+  const gameStatus = useGameStore((s) => s.gameStatus);
+  const topCard = useGameStore((s) => s.discardPile.at(-1));
+  const wildColor = useGameStore((s) => s.wildColor);
+  const isProcessing = useGameStore((s) => s.isProcessing);
+  const isSpectator = useGameStore((s) => s.isSpectator);
+  const drawnCardId = useGameStore((s) => s.drawnCardId);
+  const drawStack = useGameStore((s) => s.drawStack);
+  const pendingDrawType = useGameStore((s) => s.pendingDrawType);
+  const houseRules = useGameStore((s) => s.houseRules);
+  const hand = useGameStore((s) => s.player ? s.playerCards[s.player.seatNumber] : undefined);
+  const connectionStatus = useGameStore((s) => s.connectionStatus);
+  const isMyTurn = useIsMyTurn();
+  const { drawCard } = useSocket();
+
+  const active = ['playing', 'awaiting_color_selection', 'awaiting_swap_target'].includes(gameStatus);
+  const hasPendingDraw = !!pendingDrawType && drawStack > 0;
+  const mustPlay = !hasPendingDraw && houseRules.mustPlayIfPlayable &&
+    (hand ?? []).some((card) => canPlayCard(card, topCard ?? null, wildColor, null, houseRules, hand?.length ?? 0));
+  const canDraw = isMyTurn && !isSpectator && !isProcessing && !drawnCardId &&
+    !mustPlay && connectionStatus === 'connected';
+  const drawPenalty = houseRules.stackToEat ? drawStack : pendingDrawType === 'wild_draw_four' ? 4 : 2;
+  const activeColor = topCard?.color === 'wild' ? wildColor : topCard?.color;
+  const identity = activeColor ? COLOR_IDENTITIES[activeColor] : null;
+
+  return (
+    <>
+      <TurnStatus />
+      {active && (
+        <div className="ui-hud-glass rounded-xl flex flex-wrap items-center justify-center gap-2 px-2.5 py-1.5 font-rounded text-[11px] font-bold max-w-[90vw]">
+          {topCard && (
+            <span className="text-slate-100">
+              Top: {describeCard(topCard)}
+              {identity && (
+                <span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 whitespace-nowrap">
+                  Color: <span aria-hidden="true">{identity.symbol} </span>{identity.name}
+                </span>
+              )}
+            </span>
+          )}
+          {!isSpectator && (
+            <button
+              type="button"
+              disabled={!canDraw}
+              title={mustPlay ? 'You must play a legal card from your hand' : undefined}
+              onClick={() => {
+                const state = useGameStore.getState();
+                if (state.gameStatus !== 'playing' || !state.player || state.currentPlayerId !== state.player.id ||
+                    state.isProcessing || state.isSpectator || state.drawnCardId || state.connectionStatus !== 'connected') return;
+                const liveHand = state.playerCards[state.player.seatNumber] ?? [];
+                const livePendingDraw = !!state.pendingDrawType && state.drawStack > 0;
+                if (!livePendingDraw && state.houseRules.mustPlayIfPlayable && liveHand.some((card) =>
+                  canPlayCard(card, state.discardPile.at(-1) ?? null, state.wildColor, null, state.houseRules, liveHand.length))) return;
+                drawCard();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/50 bg-amber-300 px-3 py-2 text-slate-950 transition hover:bg-amber-200 disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            >
+              <Layers size={13} aria-hidden="true" />
+              {hasPendingDraw ? `Draw ${drawPenalty}` : 'Draw Card'}
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
 };
 
 export default GameView;

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useGameStore } from '../store/useGameStore';
-import { useVoiceStore } from '../store/useVoiceStore';
+import { useVoiceStore, type VoiceParticipant } from '../store/useVoiceStore';
 import { useSettingsStore } from '../store/useSettingsStore';
-import { getIceServers } from '../lib/voice/iceServers';
+import { getIceServers, STUN_SERVERS } from '../lib/voice/iceServers';
+import { voicePeerIds } from '../lib/voice/membership';
 import { logger } from '../utils/logger';
 import {
   isPlatformAudioMuted,
@@ -29,10 +30,9 @@ import {
  *    front with a track-less sendrecv transceiver. Enabling/disabling the mic
  *    is replaceTrack() only, which never requires a new offer/answer.
  *
- * 4. ROSTER-DRIVEN LIFECYCLE — the room roster (players + spectators) is the
- *    single source of truth. Ids that appear get a connection; ids that vanish
- *    get cleaned up. A periodic health check plus a 'request-offer' nudge from
- *    the answerer side makes the mesh self-healing even if a signal is lost.
+ * 4. EXPLICIT PARTICIPATION — only seated humans who joined the server's bounded
+ *    voice roster create peers. Leaving or disconnecting releases the mic and
+ *    mesh. Muting changes the outgoing track while membership stays active.
  */
 
 const DISCONNECT_RECOVERY_MS = 10_000; // 'disconnected' often self-heals; wait before rebuilding
@@ -96,6 +96,14 @@ export const useVoiceChat = () => {
   // the current closure without re-running the whole signaling setup.
   const rosterSyncRef = useRef<(() => void) | null>(null);
   const teardownAllRef = useRef<(() => void) | null>(null);
+  const iceServersRef = useRef<RTCIceServer[]>(STUN_SERVERS);
+  const voiceTokenRef = useRef<string | null>(null);
+  const sessionRoomRef = useRef<string | null>(null);
+  const iceAbortRef = useRef<AbortController | null>(null);
+  const iceRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const micRequestEpochRef = useRef(0);
+  const micRequestPendingRef = useRef(false);
 
   const getAudioContext = () => {
     if (!audioContextRef.current) {
@@ -127,6 +135,8 @@ export const useVoiceChat = () => {
 
   // Release the microphone hardware and stop feeding peers. Safe to call twice.
   const disableMic = useCallback(() => {
+    micRequestEpochRef.current++;
+    micRequestPendingRef.current = false;
     Object.values(peersRef.current).forEach((entry) => {
       entry.sender?.replaceTrack(null).catch((err) => logger.debug('[VOICE] replaceTrack(null) failed', err));
     });
@@ -141,8 +151,47 @@ export const useVoiceChat = () => {
     useVoiceStore.getState().setMicEnabled(false);
   }, []);
 
+  const clearVoiceSession = useCallback(() => {
+    voiceTokenRef.current = null;
+    sessionRoomRef.current = null;
+    iceAbortRef.current?.abort();
+    iceAbortRef.current = null;
+    if (iceRefreshRef.current) clearTimeout(iceRefreshRef.current);
+    if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+    iceRefreshRef.current = null;
+    joinTimeoutRef.current = null;
+    iceServersRef.current = STUN_SERVERS;
+    useVoiceStore.getState().setParticipation('off');
+    teardownAllRef.current?.();
+    disableMic();
+  }, [disableMic]);
+
+  const toggleVoice = useCallback(() => {
+    const state = useGameStore.getState();
+    const voice = useVoiceStore.getState();
+    if (voice.participation !== 'off') {
+      state.socket?.emit('voice-leave');
+      clearVoiceSession();
+      return;
+    }
+    if (!state.socket?.connected || !state.room?.players.some((p) => p.id === state.socket?.id && !p.isBot)) {
+      state.addToast('Voice is available to connected seated players.', 'info');
+      return;
+    }
+    sessionRoomRef.current = state.room.code;
+    voice.setParticipation('joining');
+    state.socket.emit('voice-join');
+    joinTimeoutRef.current = setTimeout(() => {
+      useGameStore.getState().socket?.emit('voice-leave');
+      clearVoiceSession();
+      useGameStore.getState().addToast('Voice join timed out. Please try again.', 'error');
+    }, 10_000);
+  }, [clearVoiceSession]);
+
   const toggleMic = useCallback(async () => {
     const sock = useGameStore.getState().socket;
+
+    if (!sock?.connected || useVoiceStore.getState().participation !== 'joined' || micRequestPendingRef.current) return;
 
     if (useVoiceStore.getState().isMicEnabled) {
       disableMic();
@@ -156,14 +205,24 @@ export const useVoiceChat = () => {
       return;
     }
 
+    const requestEpoch = ++micRequestEpochRef.current;
+    micRequestPendingRef.current = true;
+    let raw: MediaStream | null = null;
     try {
-      const raw = await navigator.mediaDevices.getUserMedia({
+      raw = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         },
       });
+
+      // Permission may resolve after leave, unmount, reconnect, or another request.
+      if (requestEpoch !== micRequestEpochRef.current || !sock.connected ||
+        sock !== useGameStore.getState().socket || useVoiceStore.getState().participation !== 'joined') {
+        raw.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
       // Route the mic through a gain node so mic volume is adjustable live.
       const ctx = getAudioContext();
@@ -187,8 +246,12 @@ export const useVoiceChat = () => {
 
       sock?.emit('voice-status', { isMuted: false });
     } catch (err) {
+      raw?.getTracks().forEach((track) => track.stop());
+      if (requestEpoch !== micRequestEpochRef.current) return;
       logger.error('[VOICE] Failed to get microphone', err);
       useGameStore.getState().addToast('Microphone access denied', 'error');
+    } finally {
+      if (requestEpoch === micRequestEpochRef.current) micRequestPendingRef.current = false;
     }
   }, [disableMic]);
 
@@ -204,18 +267,11 @@ export const useVoiceChat = () => {
     const amOfferer = (peerId: string) => myId() !== '' && myId() < peerId;
 
     const rosterIds = (): Set<string> => {
-      const ids = new Set<string>();
-      const r = useGameStore.getState().room;
-      const me = myId();
-      if (!r || !me) return ids;
-      // Bots have no socket and never join voice — building a peer connection
-      // toward one would signal into the void forever.
-      r.players.forEach((p) => { if (p.id !== me && !p.isBot) ids.add(p.id); });
-      r.spectators?.forEach((s) => { if (s.id !== me) ids.add(s.id); });
-      return ids;
+      return voicePeerIds(useGameStore.getState().room, useVoiceStore.getState(), myId());
     };
 
     const emitSignal = (targetId: string, signalData: SignalData) => {
+      if (!socket.connected || !rosterIds().has(targetId)) return;
       socket.emit('webrtc-signal', { targetId, signalData });
     };
 
@@ -241,7 +297,7 @@ export const useVoiceChat = () => {
         entry.audioEl.srcObject = null;
         entry.audioEl = null;
       }
-      useVoiceStore.getState().removePeerStatus(peerId);
+      if (useVoiceStore.getState().peerStatuses[peerId]) useVoiceStore.getState().updatePeerStatus(peerId, { isSpeaking: false });
     };
 
     const teardownAll = () => {
@@ -306,7 +362,7 @@ export const useVoiceChat = () => {
     const createPeer = (peerId: string, offerer: boolean): PeerEntry => {
       cleanupPeer(peerId);
 
-      const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+      const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
       const entry: PeerEntry = {
         pc,
         sender: null,
@@ -442,7 +498,7 @@ export const useVoiceChat = () => {
             await entry.pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
           } else {
             // Candidates that outrun the SDP must be queued, not dropped.
-            entry.pending.push(signalData.candidate);
+            if (entry.pending.length < 128) entry.pending.push(signalData.candidate);
           }
         } else if (signalData.type === 'request-offer') {
           // The answerer lost its side; rebuild ours and re-offer — unless the
@@ -460,15 +516,11 @@ export const useVoiceChat = () => {
 
     const rosterSync = () => {
       const me = myId();
-      if (!me || !socket.connected) return;
       const ids = rosterIds();
 
       // Prune connections and statuses for peers no longer in the room.
       Object.keys(peersRef.current).forEach((id) => {
         if (!ids.has(id)) cleanupPeer(id);
-      });
-      Object.keys(useVoiceStore.getState().peerStatuses).forEach((id) => {
-        if (!ids.has(id)) useVoiceStore.getState().removePeerStatus(id);
       });
 
       // Prune personal mutes for participants who left the room entirely (seat
@@ -488,6 +540,7 @@ export const useVoiceChat = () => {
 
       // Build missing connections (offerer) or nudge the offerer (answerer —
       // covers a lost offer; debounced so normal setup isn't disturbed).
+      if (!me || !socket.connected) return;
       ids.forEach((id) => {
         if (!useVoiceStore.getState().peerStatuses[id]) {
           useVoiceStore.getState().updatePeerStatus(id, { isMuted: true, isSpeaking: false });
@@ -506,20 +559,57 @@ export const useVoiceChat = () => {
     };
 
     const onSignal = (payload: SignalPayload) => { void handleSignal(payload); };
-    const onVoiceStatus = ({ playerId, isMuted }: { playerId: string; isMuted: boolean }) => {
-      useVoiceStore.getState().updatePeerStatus(playerId, { isMuted });
+    const refreshIce = async (token: string) => {
+      const controller = new AbortController();
+      iceAbortRef.current?.abort();
+      iceAbortRef.current = controller;
+      try {
+        const config = await getIceServers(token, controller.signal);
+        if (voiceTokenRef.current !== token || !socket.connected) return;
+        if (!useVoiceStore.getState().participants.some((p) => p.playerId === myId())) return;
+        iceServersRef.current = config.iceServers;
+        const isRenewal = useVoiceStore.getState().participation === 'joined';
+        useVoiceStore.getState().setParticipation('joined');
+        if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
+        joinTimeoutRef.current = null;
+        // STUN-only refreshes need no rebuild. Changed TURN usernames do, because
+        // renewed allocations must authenticate before the previous TTL ends.
+        if (isRenewal && config.relayConfigured) teardownAll();
+        rosterSync();
+        iceRefreshRef.current = setTimeout(() => { void refreshIce(token); }, Math.max(30_000, config.expiresAt - Date.now() - 60_000));
+      } catch (err) {
+        if (controller.signal.aborted || voiceTokenRef.current !== token) return;
+        socket.emit('voice-leave');
+        clearVoiceSession();
+        useGameStore.getState().addToast(err instanceof Error ? err.message : 'Voice configuration failed.', 'error');
+      }
     };
-    // Peer connections are bound to our socket identity: after a reconnect our
-    // socket id changes and every peer rebuilds toward the new id, so tear the
-    // old mesh down immediately instead of waiting for ICE timeouts. The mic
-    // stays live so it re-attaches to the rebuilt connections.
-    const onDisconnect = () => teardownAll();
-    const onConnect = () => rosterSync();
+    const onVoiceJoined = ({ roomCode, token }: { roomCode: string; token: string }) => {
+      if (roomCode !== sessionRoomRef.current || useVoiceStore.getState().participation !== 'joining') {
+        socket.emit('voice-leave');
+        return;
+      }
+      voiceTokenRef.current = token;
+      void refreshIce(token);
+    };
+    const onVoiceRoster = (payload: { roomCode: string; maxParticipants: number; participants: VoiceParticipant[] }) => {
+      if (payload.roomCode !== useGameStore.getState().room?.code) return;
+      useVoiceStore.getState().setRoster(payload.roomCode, payload.maxParticipants, payload.participants);
+      if (voiceTokenRef.current && !payload.participants.some((p) => p.playerId === myId())) clearVoiceSession();
+      rosterSync();
+    };
+    const onVoiceError = ({ message }: { message: string }) => {
+      clearVoiceSession();
+      useGameStore.getState().addToast(message, 'error');
+    };
+    // Socket identity changes require another explicit join; stop hardware now.
+    const onDisconnect = () => { clearVoiceSession(); useVoiceStore.getState().resetVoiceState(); };
 
     socket.on('webrtc-signal', onSignal);
-    socket.on('voice-status-changed', onVoiceStatus);
+    socket.on('voice-roster', onVoiceRoster);
+    socket.on('voice-joined', onVoiceJoined);
+    socket.on('voice-error', onVoiceError);
     socket.on('disconnect', onDisconnect);
-    socket.on('connect', onConnect);
 
     rosterSyncRef.current = rosterSync;
     teardownAllRef.current = teardownAll;
@@ -529,25 +619,31 @@ export const useVoiceChat = () => {
     return () => {
       clearInterval(healthCheck);
       socket.off('webrtc-signal', onSignal);
-      socket.off('voice-status-changed', onVoiceStatus);
+      socket.off('voice-roster', onVoiceRoster);
+      socket.off('voice-joined', onVoiceJoined);
+      socket.off('voice-error', onVoiceError);
       socket.off('disconnect', onDisconnect);
-      socket.off('connect', onConnect);
       rosterSyncRef.current = null;
       teardownAllRef.current = null;
       teardownAll();
+      clearVoiceSession();
     };
-  }, [socket, applyAudioOutput]);
+  }, [socket, applyAudioOutput, clearVoiceSession]);
 
   // Re-sync the mesh whenever the roster changes (joins, leaves, reconnects,
   // spectators). Leaving the room entirely releases the microphone too.
   useEffect(() => {
+    if (sessionRoomRef.current && room?.code !== sessionRoomRef.current) {
+      socket?.emit('voice-leave');
+      clearVoiceSession();
+    }
     if (room) {
       rosterSyncRef.current?.();
     } else {
       teardownAllRef.current?.();
-      if (useVoiceStore.getState().isMicEnabled) disableMic();
+      clearVoiceSession();
     }
-  }, [room, disableMic]);
+  }, [room, socket, clearVoiceSession]);
 
   // Autoplay/AudioContext unlock: browsers may block playback until the user
   // interacts with the page. Retry everything on any gesture.
@@ -604,12 +700,13 @@ export const useVoiceChat = () => {
   useEffect(() => {
     return () => {
       teardownAllRef.current?.();
-      disableMic();
+      useGameStore.getState().socket?.emit('voice-leave');
+      clearVoiceSession();
       audioContextRef.current?.close().catch(() => {});
       audioContextRef.current = null;
       useVoiceStore.getState().resetVoiceState();
     };
-  }, [disableMic]);
+  }, [clearVoiceSession]);
 
-  return { toggleMic };
+  return { toggleMic, toggleVoice };
 };

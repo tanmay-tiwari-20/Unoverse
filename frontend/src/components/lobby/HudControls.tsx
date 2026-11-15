@@ -10,6 +10,8 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  Phone,
+  PhoneOff,
   Settings,
   Users,
 } from 'lucide-react';
@@ -33,10 +35,9 @@ import { CAPABILITIES } from '../../lib/platform/capabilities';
  * floating panels" problem, at its worst on a 390px-wide phone where they ate
  * most of the top edge.
  *
- * Now they share one piece of chrome: a single glass tray (`.ui-hud-tray`) with
- * flat icon buttons inside it. What changed is ONLY the presentation — every
- * button, handler, store subscription and aria contract is the same, and the
- * order is unchanged so muscle memory survives.
+ * They share a single glass tray (`.ui-hud-tray`) with flat icon buttons.
+ * Voice has an explicit join/leave control; microphone and speaker toggles
+ * appear only after joining, so muted microphones never imply participation.
  *
  * Two rules the tray keeps:
  *   • State is never colour alone. Mic muted swaps to `MicOff`, speaker muted to
@@ -52,11 +53,10 @@ import { CAPABILITIES } from '../../lib/platform/capabilities';
 
 export interface HudControlsProps {
   /**
-   * Mic toggle from `useVoiceChat`. The WebRTC mesh must be mounted exactly
-   * once and for the whole lifetime of the room, so the hook stays in the route
-   * component and only its toggle is handed down here.
+   * Voice handlers come from one `useVoiceChat` hook mounted in the room route.
    */
   onToggleMic: () => void;
+  onToggleVoice: () => void;
 }
 
 /** Small count badge shared by the chat and friends buttons. */
@@ -71,12 +71,13 @@ const HudBadge: React.FC<{ count: number; tone: 'rose' | 'amber' }> = ({ count, 
   </span>
 );
 
-export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
+export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic, onToggleVoice }) => {
   const addToast = useGameStore((s) => s.addToast);
   const isChatOpen = useGameStore((s) => s.isChatOpen);
   const setChatOpen = useGameStore((s) => s.setChatOpen);
   const unreadChatCount = useGameStore((s) => s.unreadChatCount);
-  const { isMicEnabled, isSpeakerEnabled, setSpeakerEnabled } = useVoiceStore();
+  const { participation, participants, maxParticipants, isMicEnabled, isSpeakerEnabled, setSpeakerEnabled } = useVoiceStore();
+  const isSpectator = useGameStore((s) => s.isSpectator);
   const { setIsSettingsOpen } = useSettingsStore();
   const panelOpen = useSocialStore((s) => s.panelOpen);
   const setPanelOpen = useSocialStore((s) => s.setPanelOpen);
@@ -88,6 +89,17 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
 
   return (
     <div className="ui-hud-glass ui-hud-tray pointer-events-auto">
+      {!isSpectator && <button
+        onClick={onToggleVoice}
+        className={`ui-hud-btn ${participation === 'joined' ? 'ui-hud-btn-live' : ''}`}
+        title={participation === 'off' ? `Join Voice (${participants.length}/${maxParticipants})` : participation === 'joining' ? 'Cancel Voice Join' : 'Leave Voice'}
+        aria-label={participation === 'off' ? `Join voice chat, ${participants.length} of ${maxParticipants} seats used` : participation === 'joining' ? 'Cancel joining voice chat' : 'Leave voice chat'}
+        aria-pressed={participation === 'joined'}
+      >
+        {participation === 'off' ? <Phone size={16} /> : <PhoneOff size={16} />}
+      </button>}
+
+      {participation === 'joined' && <>
       <button
         onClick={onToggleMic}
         className={`ui-hud-btn ${isMicEnabled ? 'ui-hud-btn-live' : 'ui-hud-btn-off'}`}
@@ -101,7 +113,7 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
       <button
         onClick={() => {
           setSpeakerEnabled(!isSpeakerEnabled);
-          addToast(!isSpeakerEnabled ? 'Voice Chat Enabled' : 'Voice Chat Muted', 'info');
+          addToast(!isSpeakerEnabled ? 'Voice Audio Enabled' : 'Voice Audio Muted', 'info');
         }}
         className={`ui-hud-btn ${isSpeakerEnabled ? 'ui-hud-btn-on' : 'ui-hud-btn-off'}`}
         title={isSpeakerEnabled ? 'Mute Voice Chat' : 'Enable Voice Chat'}
@@ -110,6 +122,7 @@ export const HudControls: React.FC<HudControlsProps> = ({ onToggleMic }) => {
       >
         {isSpeakerEnabled ? <Headphones size={16} /> : <HeadphoneOff size={16} />}
       </button>
+      </>}
 
       {/* Chat toggle — hidden entirely when the host disables Table Chat.
           Reactions and voice remain available. */}

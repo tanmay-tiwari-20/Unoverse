@@ -16,6 +16,8 @@ function pendingRoom() {
   manager.startGame(room.code, actor.id);
   const game = room.game!;
   game.status = 'playing';
+  // An opening Reverse is random; this fixture's seat-order assertions are not.
+  game.direction = 'clockwise';
   game.currentPlayerId = 'next';
   game.colorChooserId = null;
   game.swapChooserId = null;

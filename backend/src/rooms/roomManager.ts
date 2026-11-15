@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { UnoGameState } from '../game/gameState';
 import { startGameState } from '../game/actions';
 import { getNextActivePlayerId } from '../game/turnManager';
+import { shouldEndRound } from '../game/roundCompletion';
 import { calculateRoundPoints, handPoints, DEFAULT_TARGET_SCORE } from '../game/scoring';
 import { HouseRules, DEFAULT_HOUSE_RULES, normalizeHouseRules } from '../game/houseRules';
 import { ArenaId, resolveSelection, resolveArena } from './arenas';
@@ -9,7 +10,7 @@ import { logger } from '../utils/logger';
 import { RoomStore, MemoryRoomStore } from './roomStore';
 import { pickBotName } from '../bots/botNames';
 import { profileManager } from '../profiles/profileManager';
-import { MatchRecord, MatchPlayerRecord, emptyRoundDelta, sanitizeDisplayName } from '../profiles/profileTypes';
+import { MatchRecord, MatchPlayerRecord, RoundStatDelta, emptyRoundDelta, sanitizeDisplayName } from '../profiles/profileTypes';
 import { PROFILE_CONFIG } from '../config/serverConfig';
 
 export interface Player {
@@ -44,6 +45,8 @@ export interface Player {
   // Cosmetic outfit (skin) key — purely visual, broadcast to all clients so
   // everyone sees the same look. Carried on the profile identity like `avatar`.
   outfit?: string | null;
+  /** Crash/disconnect recovery marker; cleared when this seat reconnects. */
+  disconnectedAt?: number;
 }
 
 /** Room discoverability. Public rooms are matched by Quick Play; private rooms
@@ -58,6 +61,33 @@ export interface Spectator {
   secret: string; // Private per-session token. Never broadcast to other clients.
   /** Verified persistent-profile identity, when one was presented on join. */
   profileId?: string;
+  disconnectedAt?: number;
+  /** Joined during a round; takes the next available seat before the next deal. */
+  waitingForNextRound?: boolean;
+}
+
+/** Private round ledger. No session/profile secrets or card identities are retained. */
+export interface RoundParticipant {
+  id: string;
+  uid: string;
+  name: string;
+  profileId?: string;
+  isBot?: boolean;
+  /** Frozen on departure, before the live hand is removed. */
+  departed?: { handPoints: number; stats: RoundStatDelta };
+}
+
+export interface JoinDisposition {
+  isSpectator: boolean;
+  reconnecting: boolean;
+  waitingForNextRound: boolean;
+}
+
+export interface RoomLeaveResult {
+  room: Room | null;
+  leftPlayer: Player | null;
+  leftSpectator: Spectator | null;
+  gameStopped: boolean;
 }
 
 /** One completed round's result, kept for the end-of-round summary UI. */
@@ -109,6 +139,8 @@ export interface Room {
   spectators?: Spectator[];
   status: 'lobby' | 'playing';
   game?: UnoGameState;
+  /** Server-only participants for the current round; excluded by publicRoom. */
+  roundParticipants?: RoundParticipant[];
   match?: MatchState;
   // Host-configured house rules for this lobby. Editable only while status is
   // 'lobby'; snapshotted into the game state (locked) when a round starts.
@@ -150,6 +182,7 @@ export class RoomManager {
   private draining = false;
   private static readonly RETRY_DELAY_MS = 250;
   private static readonly SHUTDOWN_RETRIES = 3;
+  private static readonly DISCONNECT_GRACE_MS = 60_000;
 
   /** Inject the durable store (called once at startup). */
   public setStore(store: RoomStore): void {
@@ -169,11 +202,12 @@ export class RoomManager {
   /**
    * Rehydrate all persisted rooms into memory on startup. Any game that was in
    * progress when the server stopped is restored; players reconnect with their
-   * profile / secret and resume. Timers are NOT restored (they re-arm naturally
-   * on the next broadcast / grace period).
+   * profile / secret and resume. Every restored human socket is disconnected;
+   * startup calls reconcileRestoredConnections to arm their bounded grace.
    */
   public async hydrate(): Promise<void> {
     const rooms = await this.store.loadAll();
+    const now = Date.now();
     for (const room of rooms) {
       // Backward compatibility: rooms persisted before House Rules existed (or with
       // a partial rule set) are normalized against current defaults on load.
@@ -197,10 +231,43 @@ export class RoomManager {
       // scoreboard is re-keyed onto them, so an in-progress match survives the
       // upgrade with every running total intact.
       this.backfillSeatIdentity(room);
+      if (room.game) this.ensureRoundParticipants(room);
+      room.createdAt = Number.isFinite(room.createdAt) ? room.createdAt : now;
+      for (const member of [...room.players.filter((p) => !p.isBot), ...(room.spectators ?? [])]) {
+        // Preserve an already-running disconnect deadline across repeated
+        // crashes; a crash must never grant indefinitely renewed grace.
+        if (!Number.isFinite(member.disconnectedAt) || member.disconnectedAt! > now) {
+          member.disconnectedAt = now;
+        }
+      }
       this.rooms.set(room.code.toUpperCase(), room);
+      this.markDirty(room.code);
     }
     if (rooms.length) {
       logger.info(`[STORE] Rehydrated ${rooms.length} room(s) from persistence.`);
+    }
+  }
+
+  /** Restore expiry timers before accepting traffic, with normal leave cleanup. */
+  public reconcileRestoredConnections(onExpired: (code: string, result: RoomLeaveResult) => void): void {
+    for (const room of [...this.rooms.values()]) {
+      const members = [...room.players.filter((p) => !p.isBot), ...(room.spectators ?? [])];
+      if (!members.length && room.players.length) {
+        this.rooms.delete(room.code.toUpperCase());
+        this.markRemoved(room.code);
+        onExpired(room.code, { room: null, leftPlayer: null, leftSpectator: null, gameStopped: true });
+        continue;
+      }
+      for (const member of members) {
+        if (member.disconnectedAt === undefined) continue;
+        const remaining = RoomManager.DISCONNECT_GRACE_MS - (Date.now() - member.disconnectedAt);
+        if (room.houseRules.allowRejoin === false || remaining <= 0) {
+          const result = this.leaveRoom(member.id);
+          if (result) onExpired(room.code, result);
+        } else {
+          this.startDisconnectGracePeriod(member.id, room.code, (result) => onExpired(room.code, result), remaining);
+        }
+      }
     }
   }
 
@@ -475,7 +542,7 @@ export class RoomManager {
    * clients ONLY via broadcastGameState, which masks per recipient.
    */
   public publicRoom(room: Room): Room {
-    const { game, ...rest } = room;
+    const { game, roundParticipants, ...rest } = room;
     return {
       ...rest,
       players: room.players.map((p) => this.publicPlayer(p) as Player),
@@ -597,7 +664,7 @@ export class RoomManager {
       if (room.visibility !== 'public') continue;
       if (room.status !== 'lobby') continue;
 
-      const humans = this.humanPlayers(room);
+      const humans = this.humanPlayers(room).filter((p) => p.disconnectedAt === undefined);
       // Spectator-only / abandoned shells are never matchmaking targets.
       if (humans.length === 0) continue;
 
@@ -622,7 +689,10 @@ export class RoomManager {
   /** A room has no live human presence when it holds neither a human player nor
    *  a spectator. (Bots never count as presence — a bots-only shell is dead.) */
   private hasNoMembers(room: Room): boolean {
-    return this.humanPlayers(room).length === 0 && (room.spectators?.length ?? 0) === 0;
+    const withinGraceOrConnected = (member: Player | Spectator) => member.disconnectedAt === undefined
+      || Date.now() - member.disconnectedAt < RoomManager.DISCONNECT_GRACE_MS;
+    return !this.humanPlayers(room).some(withinGraceOrConnected)
+      && !(room.spectators ?? []).some(withinGraceOrConnected);
   }
 
   /** True once this room's match has been won (finished). */
@@ -729,7 +799,8 @@ export class RoomManager {
   public startDisconnectGracePeriod(
     socketId: string,
     roomCode: string,
-    onExpired: (result: { room: Room | null; leftPlayer: Player | null; leftSpectator: Spectator | null; gameStopped: boolean }) => void
+    onExpired: (result: RoomLeaveResult) => void,
+    graceMs: number = RoomManager.DISCONNECT_GRACE_MS
   ): { playerName: string; uid: string; isPlayer: boolean } | null {
     const upperCode = roomCode.toUpperCase();
     const room = this.rooms.get(upperCode);
@@ -752,6 +823,8 @@ export class RoomManager {
     if (room.houseRules && room.houseRules.allowRejoin === false) {
       return null;
     }
+    member.disconnectedAt ??= Date.now();
+    this.markDirty(upperCode);
 
     // Cancel existing timer if any (defensive check)
     if (this.disconnectTimers.has(key)) {
@@ -770,7 +843,8 @@ export class RoomManager {
       } else {
         onExpired({ room: null, leftPlayer: null, leftSpectator: null, gameStopped: false });
       }
-    }, 60000);
+    }, graceMs);
+    timer.unref();
 
     this.disconnectTimers.set(key, timer);
 
@@ -871,6 +945,7 @@ export class RoomManager {
 
       // Update player socket ID
       existingPlayer.id = playerSocketId;
+      delete existingPlayer.disconnectedAt;
 
       // The name is display data, so it simply follows the player: someone who
       // renamed between sessions shows up under the new name, in the same seat,
@@ -976,6 +1051,7 @@ export class RoomManager {
       this.cancelDisconnectTimer(upperCode, existingSpectator.uid);
       const oldSocketId = existingSpectator.id;
       existingSpectator.id = playerSocketId;
+      delete existingSpectator.disconnectedAt;
       existingSpectator.name = displayName;
       if (profile) existingSpectator.profileId = profile.profileId;
       logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator slot ${existingSpectator.uid} ("${displayName}") from socket ${oldSocketId} to ${playerSocketId}`);
@@ -1084,7 +1160,7 @@ export class RoomManager {
   }
 
   // Remove player/spectator from whatever room they are in
-  public leaveRoom(playerSocketId: string): { room: Room | null; leftPlayer: Player | null; leftSpectator: Spectator | null; gameStopped: boolean } | null {
+  public leaveRoom(playerSocketId: string): RoomLeaveResult | null {
     for (const [code, room] of this.rooms.entries()) {
       // Check players list
       const playerIndex = room.players.findIndex((p) => p.id === playerSocketId);

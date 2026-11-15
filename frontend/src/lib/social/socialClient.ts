@@ -38,33 +38,6 @@ import type {
   SocialSnapshot,
 } from '../../types/social';
 
-/**
- * Read back the per-session seat secret the gameplay layer stores on first join.
- * Mirrors `loadSecret` in `useSocket.ts` EXACTLY — same key shape, same silent
- * failure on unavailable storage. Duplicated (rather than exported from the
- * hook) so the social layer never imports the gameplay hook module and cannot
- * introduce a cycle; the key format is the contract between them.
- */
-function loadSeatSecret(code: string, name: string): string | undefined {
-  if (typeof window === 'undefined') return undefined;
-  try {
-    return (
-      sessionStorage.getItem(
-        `unoverse:secret:${code.toUpperCase()}:${name.trim().toLowerCase()}`
-      ) || undefined
-    );
-  } catch {
-    return undefined;
-  }
-}
-
-/** The durable profile identity attached to every join, mirroring
- *  `profileCreds` in `useSocket.ts`. `{}` when no profile exists yet. */
-function profileCreds(): { profileId?: string; profileSecret?: string } {
-  const { profileId, profileSecret } = useProfileStore.getState();
-  return profileId && profileSecret ? { profileId, profileSecret } : {};
-}
-
 /** Whether the listeners have already been wired to the shared socket. Called
  *  once from `setupSocketListeners` in `useSocket.ts`. */
 let attached = false;
@@ -162,10 +135,9 @@ export function attachSocialListeners(socket: Socket): void {
    * destination; the client now runs the ORDINARY join flow so the game's
    * join gate stays the one and only authority.
    *
-   * `join-room` is emitted directly on the socket we already hold — the same
-   * payload `useSocket.joinRoom` builds — rather than reaching into the hook,
-   * which cannot be called outside a component. The route change is left to
-   * `SocialLayer`, which watches `pendingJoin` and calls the router.
+   * `SocialLayer` watches `pendingJoin` and routes to the destination. The
+   * destination route releases the previous seat before its ordinary join,
+   * including the profile credentials and per-tab reconnect secret.
    */
   socket.on('social:join-target', ({ roomCode, asSpectator, via }: JoinTarget) => {
     logger.debug('[SOCIAL] Join target resolved:', roomCode, asSpectator ? '(spectator)' : '', 'via', via);
@@ -180,12 +152,6 @@ export function attachSocialListeners(socket: Socket): void {
       useSocialStore.getState().setPanelOpen(false);
       return;
     }
-    socket.emit('join-room', {
-      code: roomCode,
-      name,
-      secret: loadSeatSecret(roomCode, name),
-      ...profileCreds(),
-    });
     // The route must change too, but routing is React's job. Park the target;
     // `SocialLayer` owns the `router.push`.
     useSocialStore.getState().setPendingJoin({ roomCode, asSpectator, via });

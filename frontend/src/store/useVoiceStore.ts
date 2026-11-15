@@ -5,6 +5,12 @@ interface PeerStatus {
   isSpeaking: boolean;
 }
 
+export interface VoiceParticipant {
+  playerId: string;
+  seatUid: string;
+  isMuted: boolean;
+}
+
 /**
  * Local mutes are PERSONAL: they only silence a peer's incoming audio on this
  * client and are never sent to the server or other players. They are keyed by
@@ -15,6 +21,10 @@ interface PeerStatus {
  * share a name, and muting one of them must never silence the other.
  */
 interface VoiceState {
+  participation: 'off' | 'joining' | 'joined';
+  voiceRoomCode: string | null;
+  participants: VoiceParticipant[];
+  maxParticipants: number;
   isMicEnabled: boolean;
   isSpeakerEnabled: boolean;
   peerStatuses: Record<string, PeerStatus>;
@@ -22,6 +32,8 @@ interface VoiceState {
   locallyMutedPeers: Record<string, true>;
 
   setMicEnabled: (enabled: boolean) => void;
+  setParticipation: (participation: VoiceState['participation']) => void;
+  setRoster: (roomCode: string, maxParticipants: number, participants: VoiceParticipant[]) => void;
   setSpeakerEnabled: (enabled: boolean) => void;
   updatePeerStatus: (playerId: string, statusUpdate: Partial<PeerStatus>) => void;
   removePeerStatus: (playerId: string) => void;
@@ -30,12 +42,24 @@ interface VoiceState {
 }
 
 export const useVoiceStore = create<VoiceState>((set) => ({
+  participation: 'off',
+  voiceRoomCode: null,
+  participants: [],
+  maxParticipants: 4,
   isMicEnabled: false,
   isSpeakerEnabled: true,
   peerStatuses: {},
   locallyMutedPeers: {},
 
   setMicEnabled: (isMicEnabled) => set({ isMicEnabled }),
+  setParticipation: (participation) => set({ participation }),
+  setRoster: (voiceRoomCode, maxParticipants, participants) => set((state) => ({
+    voiceRoomCode, maxParticipants, participants,
+    peerStatuses: Object.fromEntries(participants.map((p) => [p.playerId, {
+      isMuted: p.isMuted,
+      isSpeaking: state.peerStatuses[p.playerId]?.isSpeaking ?? false,
+    }])),
+  })),
 
   setSpeakerEnabled: (isSpeakerEnabled) => set({ isSpeakerEnabled }),
 
@@ -63,6 +87,10 @@ export const useVoiceStore = create<VoiceState>((set) => ({
   }),
 
   resetVoiceState: () => set({
+    participation: 'off',
+    voiceRoomCode: null,
+    participants: [],
+    maxParticipants: 4,
     isMicEnabled: false,
     isSpeakerEnabled: true,
     peerStatuses: {},

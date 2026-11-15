@@ -16,6 +16,7 @@ import {
   ListChecks,
 } from "lucide-react";
 import { useGameStore } from "../../store/useGameStore";
+import { submitBugReport } from "../../lib/reports";
 import {
   Badge,
   Button,
@@ -87,22 +88,16 @@ export const ReportBugModal = () => {
   const [sending, setSending] = useState(false);
 
   const handleSubmit = async () => {
-    if (!report.trim()) return;
+    if (sending || report.trim().length < 10) return;
     setSending(true);
 
     try {
-      // Send message to backend endpoint (Simulating endpoint since it's just a POST, or emit socket)
-      await fetch("/api/report-bug", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: report }),
-      }).catch(() => console.error("No real endpoint yet, but simulated success"));
-
-      addToast("Bug report sent successfully!", "success");
+      const id = await submitBugReport(report, useGameStore.getState().room?.code);
+      addToast(`Report received. Reference: ${id.slice(0, 8)}`, "success");
       setReport("");
       setIsReportBugOpen(false);
-    } catch {
-      addToast("Failed to send bug report", "error");
+    } catch (error) {
+      addToast(error instanceof Error && error.name !== 'AbortError' ? error.message : "Unable to send report. Please try again.", "error");
     } finally {
       setSending(false);
     }
@@ -121,7 +116,7 @@ export const ReportBugModal = () => {
           <Button
             tone="primary"
             onClick={handleSubmit}
-            disabled={sending || !report.trim()}
+            disabled={sending || report.trim().length < 10}
             icon={<Send size={14} aria-hidden="true" />}
           >
             {sending ? "Sending…" : "Submit"}
@@ -139,6 +134,9 @@ export const ReportBugModal = () => {
       <textarea
         id="bug-report-text"
         value={report}
+        minLength={10}
+        maxLength={4000}
+        disabled={sending}
         onChange={(e) => setReport(e.target.value)}
         placeholder="Describe the issue you encountered..."
         className="ui-input h-32 resize-none p-3 text-[12px] leading-snug"

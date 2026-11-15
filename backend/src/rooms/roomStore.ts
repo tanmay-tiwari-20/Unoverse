@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { Room } from './roomManager';
 import { logger } from '../utils/logger';
 import { getRedis, isRedisConfigured } from '../config/redis';
+import { RedisAuthorityLease } from '../config/redisAuthority';
 
 /**
  * Durable storage for rooms. The RoomManager keeps an in-memory Map as the fast,
@@ -107,7 +108,8 @@ export class FileRoomStore implements RoomStore {
 /**
  * Redis-backed store. Each room is a JSON string under key `uno:room:<CODE>`, all
  * tracked in a set `uno:rooms` for loadAll(). This is the production path and the
- * only one that also enables horizontal scaling (shared state across instances).
+ * durable restart path. A renewable authority lease enforces one active writer;
+ * Socket.IO fan-out does not coordinate the process-local room maps.
  *
  * Connection handling lives in config/redis.ts — this store borrows the shared
  * command client rather than opening its own, so rooms + profiles cost ONE
@@ -121,15 +123,16 @@ export class RedisRoomStore implements RoomStore {
    *  peak heap when a deployment has thousands of live rooms. */
   private static readonly BATCH = 200;
 
-  private constructor(client: any) {
+  private constructor(client: any, private authority: RedisAuthorityLease) {
     this.client = client;
   }
 
   /** Borrow the process-wide shared client (connects on first use). */
-  static async create(): Promise<RedisRoomStore> {
+  static async create(authority: RedisAuthorityLease): Promise<RedisRoomStore> {
+    authority.assertOwned();
     const client = await getRedis();
     logger.info('[STORE] Using Redis room store (uno:room:*).');
-    return new RedisRoomStore(client);
+    return new RedisRoomStore(client, authority);
   }
 
   private key(code: string): string {
@@ -137,6 +140,7 @@ export class RedisRoomStore implements RoomStore {
   }
 
   async loadAll(): Promise<Room[]> {
+    this.authority.assertOwned();
     const codes: string[] = await this.client.smembers(this.indexKey);
     if (!codes.length) return [];
 
@@ -168,25 +172,22 @@ export class RedisRoomStore implements RoomStore {
     // Clean up every dangling index entry in ONE round trip rather than issuing
     // an SREM per orphan inside the read loop.
     if (dangling.length) {
-      await this.client.srem(this.indexKey, ...dangling).catch(() => {});
+      await this.authority.pruneIndex(this.client, this.indexKey, dangling);
       logger.debug(`[STORE] Pruned ${dangling.length} dangling room index entr(ies).`);
     }
 
+    this.authority.assertOwned();
     return rooms;
   }
 
   async save(room: Room): Promise<void> {
     const code = room.code.toUpperCase();
-    await this.client
-      .multi()
-      .set(this.key(code), JSON.stringify(room))
-      .sadd(this.indexKey, code)
-      .exec();
+    await this.authority.saveIndexedSnapshot(this.client, this.key(code), this.indexKey, code, JSON.stringify(room));
   }
 
   async remove(code: string): Promise<void> {
     const upper = code.toUpperCase();
-    await this.client.multi().del(this.key(upper)).srem(this.indexKey, upper).exec();
+    await this.authority.removeIndexedSnapshot(this.client, this.key(upper), this.indexKey, upper);
   }
 
   // No close(): the shared client's lifecycle is owned by config/redis.ts and
@@ -196,7 +197,7 @@ export class RedisRoomStore implements RoomStore {
 
 /**
  * Build the configured store from env:
- *   STORE=redis  + REDIS_URL   -> RedisRoomStore  (production, scalable)
+ *   STORE=redis  + REDIS_URL   -> RedisRoomStore  (one authoritative writer)
  *   STORE=memory               -> MemoryRoomStore (no persistence)
  *   STORE=file (default)       -> FileRoomStore   (DATA_DIR or ./.data/rooms)
  *
@@ -208,12 +209,16 @@ export class RedisRoomStore implements RoomStore {
  *   restart — and in a multi-instance deploy it would serve state that diverges
  *   from its peers. Failing loudly lets the platform retry / hold the rollout.
  *
- *   Development: fall back to in-memory with a loud warning so a missing local
- *   Redis never blocks you from working on gameplay.
+ *   Development without REDIS_URL: the store helper may use memory. Once a
+ *   Redis authority is configured, ownership/hydration failures fail startup;
+ *   use STORE=memory explicitly for development without durable Redis.
  */
-export async function createRoomStore(): Promise<RoomStore> {
+export async function createRoomStore(authority?: RedisAuthorityLease): Promise<RoomStore> {
   const kind = (process.env.STORE || 'file').toLowerCase();
   const isProd = process.env.NODE_ENV === 'production';
+  if (kind === 'redis' && isRedisConfigured() && !authority) {
+    throw new Error('Redis room store requires the active authority lease');
+  }
 
   try {
     if (kind === 'memory') {
@@ -224,13 +229,14 @@ export async function createRoomStore(): Promise<RoomStore> {
       if (!isRedisConfigured()) {
         throw new Error('STORE=redis requires REDIS_URL to be set');
       }
-      return await RedisRoomStore.create();
+      return await RedisRoomStore.create(authority!);
     }
     // Default: file
     const dir = process.env.DATA_DIR || path.join(process.cwd(), '.data', 'rooms');
     logger.info(`[STORE] Using file store at ${dir}`);
     return new FileRoomStore(dir);
   } catch (err: any) {
+    if (authority) throw err;
     if (kind === 'redis' && isProd) {
       // Re-throw: index.ts turns this into a clear message + non-zero exit.
       throw new Error(`Failed to initialize the Redis room store: ${err?.message}`);

@@ -26,12 +26,11 @@
  * ------------
  * - `getRedis()` is memoized: every caller gets the SAME client, and concurrent
  *   callers during startup share one in-flight connect (no thundering herd).
- * - `retryStrategy` reconnects with capped exponential backoff FOREVER. A Redis
- *   blip must degrade the server, never kill it — see `maxRetriesPerRequest`.
- * - `maxRetriesPerRequest: null` + `enableOfflineQueue: true` means commands
- *   issued while the link is down are queued and replayed on reconnect rather
- *   than throwing. Combined with the write-through design in RoomManager (which
- *   already swallows persistence errors), a short outage is invisible to players.
+ * - `retryStrategy` reconnects with capped exponential backoff. Durable state
+ *   writers stop if their lease cannot be renewed safely; pub/sub can recover.
+ * - Shared durable commands fail promptly during an outage. Ownership is lost
+ *   on failed renewal, and every write also checks the lease atomically in Redis.
+ *   Pub/sub connections may reconnect independently for broadcast delivery.
  * - `rediss://` URLs enable TLS automatically in ioredis. Managed providers
  *   (Upstash, Redis Cloud, Railway, Render) all hand out `rediss://`, so no
  *   extra config is needed — but we set `tls` explicitly for that scheme so a
@@ -75,20 +74,22 @@ export function requireRedisUrl(): string {
  */
 function baseOptions(url: string, role: string) {
   const useTls = url.startsWith('rediss://');
+  const commands = role === 'shared';
   return {
     connectionName: `unoverse:${role}`,
-    // Never give up on a request because the link is briefly down — queue it.
-    // A capped-backoff reconnect (below) will drain the queue shortly.
-    maxRetriesPerRequest: null as null,
-    enableOfflineQueue: true,
+    // Never replay unbounded durable traffic from a stale backend authority.
+    maxRetriesPerRequest: commands ? 1 : null,
+    enableOfflineQueue: !commands,
+    ...(commands ? { commandTimeout: 3_000 } : {}),
+    connectTimeout: 5_000,
     // Don't dial until we explicitly connect(), so startup can fail loudly and
     // in a controlled order rather than mid-import.
     lazyConnect: true,
     /**
      * Reconnect forever with exponential backoff capped at 5s. Returning a
      * number = "retry after N ms"; returning null would stop retrying, which is
-     * exactly what we must avoid — a 30-second Redis restart should not require
-     * a backend restart.
+     * useful for pub/sub and diagnostics. Authority renewal separately decides
+     * whether the backend may continue serving authoritative state.
      */
     retryStrategy(times: number): number {
       const delay = Math.min(times * 200, 5_000);
@@ -130,7 +131,12 @@ export async function createRedisClient(role: string, url = requireRedisUrl()): 
   client.on('reconnecting', () => logger.debug(`[REDIS:${role}] Reconnecting...`));
   client.on('ready', () => logger.info(`[REDIS:${role}] Ready.`));
 
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (error) {
+    client.disconnect();
+    throw error;
+  }
   return client;
 }
 

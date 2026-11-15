@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 import { attachSocialListeners, sayHello } from '../lib/social/socialClient';
 import { BACKEND_URL } from '../lib/config';
 import { getPlatform } from '../lib/platform';
+import { roomMembershipLifecycle } from '../lib/roomMembership';
 
 // --- Persistent profile identity -------------------------------------------
 // The durable player identity (profileId + private secret) lives in
@@ -94,6 +95,9 @@ const getOrCreateSocket = (): Socket => {
 // Global singleton socket instance to prevent duplicate socket connections
 let sharedSocket: Socket | null = null;
 let listenersAttached = false;
+// Leaving invalidates in-flight room replies as well as queued joins. Otherwise
+// an acknowledgement received after browser Back could restore a ghost seat.
+let acceptsRoomUpdates = false;
 
 // --- Deferred join (race-condition guard) ------------------------------------
 // When `joinRoom` is called before the socket has completed its connection
@@ -206,6 +210,7 @@ function setupSocketListeners(socketInstance: Socket) {
   });
 
   socketInstance.on('joined-successfully', ({ room, player, isSpectator, spectator }) => {
+    if (!acceptsRoomUpdates) return;
     logger.debug('[Socket] Joined room successfully:', room?.code, player, 'isSpectator:', isSpectator);
     if (room && player?.secret) {
       saveSecret(room.code, player.name, player.secret);
@@ -228,6 +233,7 @@ function setupSocketListeners(socketInstance: Socket) {
   });
 
   socketInstance.on('lobby-updated', (updatedRoom) => {
+    if (!acceptsRoomUpdates) return;
     logger.debug('[Socket] Lobby updated:', updatedRoom);
     useGameStore.getState().setRoom(updatedRoom);
     if (updatedRoom?.houseRules) useGameStore.getState().setHouseRules(updatedRoom.houseRules);
@@ -250,6 +256,7 @@ function setupSocketListeners(socketInstance: Socket) {
   });
 
   socketInstance.on('game-started', (room) => {
+    if (!acceptsRoomUpdates) return;
     logger.debug('[Socket] Game started:', room.code);
     soundManager.play('shuffle');
     useGameStore.getState().addToast('Game has started! Good luck!', 'success');
@@ -257,6 +264,7 @@ function setupSocketListeners(socketInstance: Socket) {
   });
 
   socketInstance.on('game-updated', (payload) => {
+    if (!acceptsRoomUpdates) return;
     logger.debug('[Socket] Game updated:', payload);
     handleGameUpdateAnimation(payload);
     useGameStore.getState().setIsProcessing(false);
@@ -396,11 +404,14 @@ export const useSocket = () => {
   }, [socket, setSocket, setConnectionStatus]);
 
   const createRoom = (name: string) => {
+    acceptsRoomUpdates = true;
+    clearPendingJoin();
     const currentSocket = useGameStore.getState().socket || getOrCreateSocket();
     currentSocket.emit('create-room', { name, ...profileCreds() });
   };
 
   const joinRoom = (code: string, name: string) => {
+    acceptsRoomUpdates = true;
     const currentSocket = useGameStore.getState().socket || getOrCreateSocket();
 
     const normCode = code.trim().toUpperCase();
@@ -446,15 +457,18 @@ export const useSocket = () => {
   };
 
   const leaveRoom = () => {
+    roomMembershipLifecycle.reset();
+    acceptsRoomUpdates = false;
+    clearPendingJoin();
     const currentSocket = useGameStore.getState().socket;
-    if (currentSocket) {
-      currentSocket.emit('leave-room');
-      useGameStore.getState().setRoom(null);
-      useGameStore.getState().setPlayer(null);
-      useGameStore.getState().setSpectator(null);
-      useGameStore.getState().setIsSpectator(false);
-      useGameStore.getState().setError(null);
-    }
+    currentSocket?.emit('leave-room');
+    const state = useGameStore.getState();
+    state.setRoom(null);
+    state.setPlayer(null);
+    state.setSpectator(null);
+    state.setIsSpectator(false);
+    state.setError(null);
+    state.clearAllCards();
   };
 
   const startGame = (options?: { fillWithBots?: boolean }) => {

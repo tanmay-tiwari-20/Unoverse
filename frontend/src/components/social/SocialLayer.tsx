@@ -10,9 +10,8 @@
  * behaviour that cannot live in a plain socket callback: ROUTING.
  *
  * WHY ROUTING IS HERE. `social:join-target` arrives in `socialClient`, which has
- * no router — it is a module, not a component. So it emits the ordinary
- * `join-room` (keeping the game's join gate authoritative) and parks the
- * destination in `pendingJoin`. This component watches that field and performs
+ * no router — it is a module, not a component. It parks the destination in
+ * `pendingJoin`. This component watches that field and performs
  * the `router.push`, which is exactly the same navigation the landing page does
  * when you create or join a room by code. No new join path is introduced.
  *
@@ -41,9 +40,8 @@ export const SocialLayer: React.FC = () => {
   const setPanelOpen = useSocialStore((s) => s.setPanelOpen);
   const openProfile = useSocialStore((s) => s.openProfile);
 
-  // Navigate to a destination the server resolved. `join-room` has already been
-  // emitted by `socialClient`; this only moves the browser to the route that
-  // renders it, using the same URL shape the landing page builds.
+  // Navigate to a destination the server resolved. The destination route owns
+  // the ordinary leave/join flow and uses the landing page's URL shape.
   useEffect(() => {
     if (!pendingJoin) return;
     const name = useProfileStore.getState().displayName?.trim();

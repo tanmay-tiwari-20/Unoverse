@@ -11,6 +11,12 @@
   --card-border: rgba(255, 255, 255, 0.08);
   --action-bar-gap: 1.25rem;
 
+  /* Display and rounded faces use installed system fonts. Lilita One and
+     Fredoka were fetched at build time; the local stacks keep offline builds
+     reproducible while retaining chunky headings and rounded controls. */
+  --font-display-system: "Arial Rounded MT Bold", "Arial Black", Impact, var(--font-geist-sans), sans-serif;
+  --font-rounded-system: "Arial Rounded MT Bold", "Trebuchet MS", var(--font-geist-sans), sans-serif;
+
   /* Inner padding of a modal body / panel. */
   --ui-pad: clamp(0.75rem, 0.45rem + 1.4vw, 1.5rem);
   /* Gap between stacked sections inside a modal. */
@@ -57,8 +63,8 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
-  --font-arcade: var(--font-arcade), "Lilita One", ui-sans-serif, system-ui, sans-serif;
-  --font-rounded: var(--font-rounded), "Fredoka", ui-sans-serif, system-ui, sans-serif;
+  --font-arcade: var(--font-display-system);
+  --font-rounded: var(--font-rounded-system);
 }
 
 body {
@@ -228,11 +234,12 @@ input {
 
 /* Chunky arcade display font helper */
 .font-arcade {
-  font-family: var(--font-arcade), "Lilita One", system-ui, sans-serif;
+  font-family: var(--font-display-system);
+  font-weight: 900;
   letter-spacing: 0.02em;
 }
 .font-rounded {
-  font-family: var(--font-rounded), "Fredoka", system-ui, sans-serif;
+  font-family: var(--font-rounded-system);
 }
 
 /* Thick cartoon text outline + drop shadow for big headings */
@@ -266,7 +273,8 @@ input {
 /* Chunky 3D arcade button — apply on top of color bg utilities.
    The thick bottom border gives the "pressable plastic" look. */
 .btn-arcade {
-  font-family: var(--font-arcade), "Lilita One", system-ui, sans-serif;
+  font-family: var(--font-display-system);
+  font-weight: 900;
   letter-spacing: 0.03em;
   border-radius: 9999px;
   border: 3px solid rgba(255, 255, 255, 0.9);
@@ -580,7 +588,8 @@ select:focus-visible {
 }
 
 .ui-section-label {
-  font-family: var(--font-arcade), "Lilita One", system-ui, sans-serif;
+  font-family: var(--font-display-system);
+  font-weight: 900;
   font-size: 0.66rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -609,7 +618,7 @@ select:focus-visible {
   min-width: 0;
   border-radius: 999px;
   padding: 0.3rem 0.4rem;
-  font-family: var(--font-rounded), "Fredoka", system-ui, sans-serif;
+  font-family: var(--font-rounded-system);
   font-weight: 700;
   font-size: 0.62rem;
   letter-spacing: 0.06em;
@@ -697,7 +706,7 @@ select:focus-visible {
   border: 2px solid rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.07);
   color: #ffffff;
-  font-family: var(--font-rounded), "Fredoka", system-ui, sans-serif;
+  font-family: var(--font-rounded-system);
   font-weight: 700;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }

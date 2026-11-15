@@ -1,6 +1,8 @@
 import React, { useRef, useMemo, useLayoutEffect, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { COLOR_IDENTITIES } from '../../lib/cards/colorIdentity';
+import type { CardColor } from '../../lib/cards/cardEngine';
 
 export interface PhysicalCardProps {
   color: 'red' | 'blue' | 'green' | 'yellow' | 'wild';
@@ -191,7 +193,7 @@ const getSharedCardGeometry = (): THREE.BufferGeometry => {
 };
 
 // Helper to generate and cache canvases (prevents DOM canvas limit crash)
-const getCardCanvases = (color: string, value: string) => {
+const getCardCanvases = (color: CardColor, value: string) => {
   const cacheKey = `${color}-${value}`;
   if (canvasCache[cacheKey]) {
     return canvasCache[cacheKey];
@@ -207,6 +209,13 @@ const getCardCanvases = (color: string, value: string) => {
     green: '#22c55e',  // Tailwind green-500
     yellow: '#eab308', // Tailwind yellow-500
     wild: '#171717',   // Tailwind neutral-900
+  };
+  const inkMap: Record<CardColor, string> = {
+    red: '#b91c1c',
+    blue: '#1d4ed8',
+    green: '#15803d',
+    yellow: '#a16207',
+    wild: '#171717',
   };
 
   // Convert an internal value to its UNO glyph.
@@ -288,11 +297,16 @@ const getCardCanvases = (color: string, value: string) => {
     ctx.shadowColor = 'rgba(0,0,0,0.35)';
     ctx.shadowBlur = 6;
     ctx.fillText(glyph, 38, 32);
+    ctx.font = '900 38px Arial, sans-serif';
+    ctx.fillText(COLOR_IDENTITIES[color].symbol, 38, 110);
 
     ctx.save();
     ctx.translate(W - 38, H - 32);
     ctx.rotate(Math.PI);
+    ctx.font = `900 ${glyph.length > 1 ? 64 : 78}px "Arial Black", sans-serif`;
     ctx.fillText(glyph, 0, 0);
+    ctx.font = '900 38px Arial, sans-serif';
+    ctx.fillText(COLOR_IDENTITIES[color].symbol, 0, 78);
     ctx.restore();
     ctx.shadowBlur = 0;
   };
@@ -322,8 +336,19 @@ const getCardCanvases = (color: string, value: string) => {
     roundRect(fctx, 22, 22, W - 44, H - 44, 42);
     fctx.stroke();
 
-    drawCenterOval(fctx, body, glyph, isWild);
+    drawCenterOval(fctx, inkMap[color], glyph, isWild);
     drawCornerIndices(fctx, glyph);
+
+    // Text and shape remain legible when the colored body cannot be distinguished.
+    const identity = COLOR_IDENTITIES[color];
+    fctx.fillStyle = '#ffffff';
+    roundRect(fctx, 126, H - 142, W - 252, 54, 18);
+    fctx.fill();
+    fctx.fillStyle = '#171717';
+    fctx.font = '900 30px Arial, sans-serif';
+    fctx.textAlign = 'center';
+    fctx.textBaseline = 'middle';
+    fctx.fillText(`${identity.symbol} ${identity.name.toUpperCase()}`, W / 2, H - 114);
   }
 
   // ── Back canvas (Playful Bright Unoverse Original Design) ──

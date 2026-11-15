@@ -65,6 +65,8 @@ export const RATE_LIMITS: Record<string, RateLimitRule> = {
     refillPerSec: num(process.env.RL_SIGNAL_REFILL_PER_SEC, 60),
   },
   'voice-status': { capacity: 15, refillPerSec: 5 },
+  'voice-join': { capacity: 4, refillPerSec: 0.5, notify: true },
+  'voice-leave': { capacity: 10, refillPerSec: 3 },
   'update-house-rules': { capacity: 15, refillPerSec: 8 },
   'create-room': { capacity: 5, refillPerSec: 1 },
   'join-room': { capacity: 10, refillPerSec: 2 },

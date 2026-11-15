@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Lilita_One, Fredoka } from "next/font/google";
+import { geistSans, geistMono } from "./fonts";
 import { MotionProvider } from "../components/providers/MotionProvider";
 import { PlatformProvider } from "../components/providers/PlatformProvider";
 import { PWARegistration } from "../components/providers/PWARegistration";
@@ -7,28 +7,6 @@ import { CAPABILITIES } from "../lib/platform/capabilities";
 import { PlatformHead } from "@platform-head";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const lilitaOne = Lilita_One({
-  variable: "--font-arcade",
-  weight: "400",
-  subsets: ["latin"],
-});
-
-const fredoka = Fredoka({
-  variable: "--font-rounded",
-  weight: ["400", "500", "600", "700"],
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Unoverse — 3D Multiplayer Card Game",
@@ -96,8 +74,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: "cover",
   themeColor: "#030712",
 };
@@ -110,7 +86,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${lilitaOne.variable} ${fredoka.variable} h-full antialiased dark`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
       suppressHydrationWarning
     >
       <body

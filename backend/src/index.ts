@@ -8,15 +8,23 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import compression from 'compression';
+import { randomUUID } from 'node:crypto';
+import { createReportStore, type ReportStore } from './reports/reportStore';
+import {
+  httpCreateRoomSchema, quickPlaySchema, httpJoinRoomSchema, createProfileSchema,
+  editProfileSchema, resetProfileSchema, crazyGamesTokenSchema, bugReportSchema,
+} from './validation/httpSchemas';
 import { roomManager, Room } from './rooms/roomManager';
-import { createRoomStore } from './rooms/roomStore';
+import { createRoomStore, MemoryRoomStore } from './rooms/roomStore';
 import { profileManager } from './profiles/profileManager';
-import { createProfileStore } from './profiles/profileStore';
+import { createProfileStore, MemoryProfileStore } from './profiles/profileStore';
+import { RedisAuthorityLease } from './config/redisAuthority';
 import {
   createRedisClient,
   isRedisConfigured,
   redisHealth,
   closeRedis,
+  getRedis,
 } from './config/redis';
 import {
   drawCardAction,
@@ -35,6 +43,8 @@ import { recoverActivePlayerId } from './game/turnManager';
 import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
 import { socketRateLimiter } from './utils/rateLimiter';
+import { socketClientAddress } from './utils/clientAddress';
+import { VoiceManager, resolveVoiceConfig, issueIceCredentials } from './voice/voiceManager';
 import { moderateChat, clearSenderHistory } from './utils/chatModeration';
 import {
   resolveCorsOrigin,
@@ -410,7 +420,33 @@ app.use(cors({
   origin: corsOrigin,
 }));
 app.use(compression());
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
+app.use((_req, res, next) => {
+  if (shuttingDown || (authorityLease && !authorityLease.isOwned)) {
+    res.status(503).json({ error: 'The backend is restarting. Please reconnect shortly.' });
+    return;
+  }
+  next();
+});
+app.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (error?.type === 'entity.too.large') {
+    res.status(413).json({ error: 'Request body is too large' });
+  } else if (error?.type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'Invalid JSON request body' });
+  } else next(error);
+});
+
+function validateHttpBody(schema: ZodType) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: `Invalid request: ${result.error.issues[0]?.message || 'request body'}` });
+      return;
+    }
+    req.body = result.data;
+    next();
+  };
+}
 
 // --- Simple in-memory rate limiter -------------------------------------------
 // Room creation is unauthenticated, so cap it per client IP to prevent a script
@@ -423,9 +459,18 @@ function rateLimit(opts: { windowMs: number; max: number }) {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     const entry = hits.get(ip);
-    if (!entry || now > entry.resetAt) {
+    if (!entry && hits.size >= 5000) {
+      for (const [key, value] of hits) if (now >= value.resetAt) hits.delete(key);
+      if (hits.size >= 5000) {
+        res.set('Retry-After', String(Math.ceil(opts.windowMs / 1000)));
+        res.status(429).json({ error: 'Too many requests. Please try again shortly.' });
+        return;
+      }
+    }
+    if (!entry || now >= entry.resetAt) {
       hits.set(ip, { count: 1, resetAt: now + opts.windowMs });
     } else if (entry.count >= opts.max) {
+      res.set('Retry-After', String(Math.max(1, Math.ceil((entry.resetAt - now) / 1000))));
       res.status(429).json({ error: 'Too many requests. Please slow down.' });
       return;
     } else {
@@ -445,6 +490,9 @@ const createRoomLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 // Profile creation is cheap but should not be a spam vector (each creates a
 // durable file). Reads/edits are looser; a single limiter keeps it simple.
 const profileWriteLimiter = rateLimit({ windowMs: 60_000, max: 30 });
+const reportLimiter = rateLimit({ windowMs: 3_600_000, max: 8 });
+const publicReadLimiter = rateLimit({ windowMs: 60_000, max: 120 });
+let reportStore: ReportStore | undefined;
 
 // --- REST APIs ---
 
@@ -483,7 +531,7 @@ app.get('/health', async (_req, res) => {
 });
 
 // Create Room API
-app.post('/api/rooms', createRoomLimiter, (req, res) => {
+app.post('/api/rooms', createRoomLimiter, validateHttpBody(httpCreateRoomSchema), (req, res) => {
   try {
     // Optional visibility: 'public' rooms are discoverable by Quick Play.
     // Anything else (including absence — every existing client) stays private.
@@ -503,7 +551,7 @@ app.post('/api/rooms', createRoomLimiter, (req, res) => {
 // Quick Play matchmaking: find the best public room waiting for players, or
 // create a fresh public room when none qualifies. The client then joins the
 // returned room through the normal lobby flow — matchmaking only selects.
-app.post('/api/rooms/quickplay', createRoomLimiter, (req, res) => {
+app.post('/api/rooms/quickplay', createRoomLimiter, validateHttpBody(quickPlaySchema), (req, res) => {
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     // The name is only ever echoed into the log line below — matchmaking picks a
@@ -528,7 +576,7 @@ app.post('/api/rooms/quickplay', createRoomLimiter, (req, res) => {
 // A PREDICTION, not a decision: it tells the client what will most likely happen
 // so the UI can warn early. The authoritative gate is roomManager.joinRoom, and
 // this reads its numbers from the same helper so the two cannot drift.
-app.post('/api/rooms/join', (req, res) => {
+app.post('/api/rooms/join', publicReadLimiter, validateHttpBody(httpJoinRoomSchema), (req, res) => {
   const { code, name, secret, profileId, profileSecret } = req.body;
 
   if (!code || !name) {
@@ -616,9 +664,13 @@ app.post('/api/rooms/join', (req, res) => {
 // dropped — it is never persisted, and the client re-calls getUserToken() next
 // time it needs to authenticate.
 if (CRAZYGAMES_CONFIG.enabled) {
-  app.post('/api/auth/crazygames', profileWriteLimiter, async (req, res) => {
+  app.post('/api/auth/crazygames', profileWriteLimiter, validateHttpBody(crazyGamesTokenSchema), async (req, res) => {
     try {
       const result = await verifyCrazyGamesToken(req.body?.token);
+      if (shuttingDown || (authorityLease && !authorityLease.isOwned)) {
+        res.status(503).json({ error: 'The backend is restarting. Please retry sign-in shortly.' });
+        return;
+      }
       if (!result.ok) {
         // 503 for "we could not reach the key server", 401 for "this token is not
         // valid" — the client retries the former and falls back to guest on the
@@ -655,7 +707,7 @@ if (CRAZYGAMES_CONFIG.enabled) {
 // Create a brand-new guest profile. Returns the FULL profile INCLUDING its private
 // secret — the only time the secret is disclosed. The client stores it locally and
 // presents it to authenticate future edits.
-app.post('/api/profiles', profileWriteLimiter, (req, res) => {
+app.post('/api/profiles', profileWriteLimiter, validateHttpBody(createProfileSchema), (req, res) => {
   try {
     const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName : '';
     const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar : null;
@@ -677,7 +729,7 @@ app.post('/api/profiles', profileWriteLimiter, (req, res) => {
 });
 
 // Public reads enforce privacy; the owner can authenticate to view hidden fields.
-app.get('/api/profiles/:id', (req, res) => {
+app.get('/api/profiles/:id', publicReadLimiter, (req, res) => {
   const authorization = req.get('authorization');
   const secret = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
   const profile = profileManager.getPublicProfile(
@@ -692,7 +744,7 @@ app.get('/api/profiles/:id', (req, res) => {
 });
 
 // Edit a profile's display name, avatar and/or cosmetic outfit. Secret-authenticated.
-app.patch('/api/profiles/:id', profileWriteLimiter, (req, res) => {
+app.patch('/api/profiles/:id', profileWriteLimiter, validateHttpBody(editProfileSchema), (req, res) => {
   try {
     const secret = typeof req.body?.secret === 'string' ? req.body.secret : '';
     if (!profileManager.verify(req.params.id, secret)) {
@@ -719,7 +771,7 @@ app.patch('/api/profiles/:id', profileWriteLimiter, (req, res) => {
 });
 
 // Reset all lifetime stats / history. Keeps the same Player ID and tag. Secret-authenticated.
-app.post('/api/profiles/:id/reset', profileWriteLimiter, (req, res) => {
+app.post('/api/profiles/:id/reset', profileWriteLimiter, validateHttpBody(resetProfileSchema), (req, res) => {
   try {
     const secret = typeof req.body?.secret === 'string' ? req.body.secret : '';
     if (!profileManager.verify(req.params.id, secret)) {
@@ -731,6 +783,23 @@ app.post('/api/profiles/:id/reset', profileWriteLimiter, (req, res) => {
   } catch (error: any) {
     logger.error('[REST] Error resetting profile:', error);
     res.status(400).json({ error: error.message || 'Failed to reset profile' });
+  }
+});
+
+// The acknowledgement is sent only after storage accepts the report. No public
+// report reads are exposed; operators inspect REPORT_DIR or uno:report:*.
+app.post('/api/report-bug', reportLimiter, validateHttpBody(bugReportSchema), async (req, res) => {
+  if (!reportStore) {
+    res.status(503).json({ error: 'Reporting is temporarily unavailable. Please try again.' });
+    return;
+  }
+  const report = { id: randomUUID(), createdAt: Date.now(), ...req.body };
+  try {
+    await reportStore.save(report);
+    res.status(201).json({ id: report.id });
+  } catch (error: any) {
+    logger.error('[REPORT] Failed to save report:', error?.message);
+    res.status(503).json({ error: 'Your report could not be saved. Please try again.' });
   }
 });
 
@@ -753,6 +822,40 @@ const io = new Server(server, {
   },
 });
 
+const voiceManager = new VoiceManager(resolveVoiceConfig());
+const socketTrustedProxyHops = resolveTrustProxy();
+io.use((socket, next) => {
+  if (shuttingDown || (authorityLease && !authorityLease.isOwned)) {
+    next(new Error('The backend is restarting. Please reconnect shortly.'));
+    return;
+  }
+  const ip = socketClientAddress(socket.request, socketTrustedProxyHops);
+  if (!socketRateLimiter.registerSocket(socket.id, ip)) {
+    next(new Error('Too many connections. Please wait before reconnecting.'));
+    return;
+  }
+  next();
+});
+
+// Active membership is required even in STUN-only mode, preventing anonymous
+// clients from acquiring relay allocations. A leave/disconnect revokes renewal.
+app.get('/api/voice/ice', rateLimit({ windowMs: 60_000, max: 60 }), (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const token = /^Bearer ([a-f0-9]{64})$/i.exec(req.get('authorization') || '')?.[1];
+  const member = token && voiceManager.authorizeToken(token, (code) => roomManager.getRoom(code));
+  if (!member || !io.sockets.sockets.get(member.playerId)?.connected) {
+    res.status(401).json({ error: 'Join voice chat before requesting credentials.' });
+    return;
+  }
+  res.json(issueIceCredentials(voiceManager.config, member.playerId));
+});
+
+function broadcastVoiceRoster(code: string) {
+  const room = roomManager.getRoom(code);
+  if (room) voiceManager.prune(room);
+  io.to(code).emit('voice-roster', voiceManager.roster(code));
+}
+
 /**
  * Attach the Socket.IO Redis adapter so multiple backend instances share
  * broadcasts (io.to(room).emit reaches sockets connected to any instance). Only
@@ -766,10 +869,9 @@ const io = new Server(server, {
  * a Redis restart must not permanently sever cross-instance broadcasts.
  *
  * NOTE: the adapter shares broadcasts across instances, but room *state*
- * (RoomManager's in-memory Map) still lives per-process. True horizontal scaling
- * also requires sticky sessions at the load balancer (so a given socket always
- * hits the same instance) plus STORE=redis for shared state. This wiring is the
- * messaging half of that story.
+ * (RoomManager's in-memory Map) still lives per-process. The Redis authority
+ * lease permits one active writer. Active replicas require room routing,
+ * coordinated state transactions and distributed presence as well as messaging.
  *
  * Returns true when the adapter was enabled.
  */
@@ -863,6 +965,7 @@ io.on('connection', (socket) => {
    */
   function on(event: string, listener: (payload: unknown) => void): void {
     socket.on(event, (payload: unknown) => {
+      if (shuttingDown || (authorityLease && !authorityLease.isOwned)) return;
       const { allowed, notify } = socketRateLimiter.consume(socket.id, event);
       if (!allowed) {
         if (notify) socket.emit('error', { message: 'You are doing that too quickly — please slow down.' });
@@ -880,6 +983,10 @@ io.on('connection', (socket) => {
 
   // Create room event (alternative pathway)
   on('create-room', guard(createRoomSchema, ({ name, arena, profileId, profileSecret }) => {
+    if (currentRoomCode) {
+      socket.emit('error', { message: 'Leave your current room before creating another room.' });
+      return;
+    }
     try {
       const identity = resolveProfileIdentity(profileId, profileSecret);
       const room = roomManager.createRoom('private', arena);
@@ -927,6 +1034,7 @@ io.on('connection', (socket) => {
       // Notify the joining socket. Their own player/spectator object keeps its
       // secret so they can prove identity on reconnect; the room view is sanitized.
       socket.emit('joined-successfully', { room: roomManager.publicRoom(room), player, isSpectator, spectator });
+      broadcastVoiceRoster(upperCode);
 
       if (isSpectator) {
         // Notify others that a spectator joined (under the SERVER's sanitized name).
@@ -1010,16 +1118,31 @@ io.on('connection', (socket) => {
     io.to(currentRoomCode).emit('chat-message', message);
   }));
 
-  // WebRTC Signaling. Signals are only relayed between members (players or
-  // spectators) of the SAME room — an arbitrary socket must not be able to
-  // push SDP/ICE at players elsewhere on the server.
+  // Voice is an explicit opt-in by seated humans, with a bounded peer mesh.
+  on('voice-join', () => {
+    const room = currentRoomCode && roomManager.getRoom(currentRoomCode);
+    if (!room) { socket.emit('voice-error', { message: 'Join a table before joining voice.' }); return; }
+    try {
+      const { token } = voiceManager.join(room, socket.id);
+      socket.emit('voice-joined', { roomCode: room.code, token });
+      broadcastVoiceRoster(room.code);
+    } catch (err: any) {
+      socket.emit('voice-error', { message: err?.message || 'Unable to join voice chat.' });
+    }
+  });
+
+  on('voice-leave', () => {
+    if (!currentRoomCode) return;
+    voiceManager.leave(currentRoomCode, socket.id);
+    broadcastVoiceRoster(currentRoomCode);
+  });
+
+  // Both endpoints must have current seated-human voice membership.
   on('webrtc-signal', guard(webrtcSignalSchema, ({ targetId, signalData }) => {
     if (!currentRoomCode) return;
     const room = roomManager.getRoom(currentRoomCode);
     if (!room) return;
-    const isMember = (id: string) =>
-      room.players.some(p => p.id === id) || !!room.spectators?.some(s => s.id === id);
-    if (!isMember(socket.id) || !isMember(targetId)) return;
+    if (!voiceManager.canSignal(room, socket.id, targetId)) return;
     // Relay the signal to the specific target socket
     io.to(targetId).emit('webrtc-signal', { sourceId: socket.id, signalData });
   }));
@@ -1027,8 +1150,9 @@ io.on('connection', (socket) => {
   // Voice Status Updates (e.g. mic muted)
   on('voice-status', guard(voiceStatusSchema, ({ isMuted }) => {
     if (!currentRoomCode) return;
-    // Broadcast to everyone else in the room
-    socket.to(currentRoomCode).emit('voice-status-changed', { playerId: socket.id, isMuted });
+    const room = roomManager.getRoom(currentRoomCode);
+    if (!room || !voiceManager.setMuted(room, socket.id, isMuted)) return;
+    broadcastVoiceRoster(currentRoomCode);
   }));
 
 
@@ -1352,6 +1476,11 @@ io.on('connection', (socket) => {
     // would leave that profile permanently "online" to its friends.
     socialDisconnect(socket.id);
 
+    if (currentRoomCode) {
+      voiceManager.leave(currentRoomCode, socket.id);
+      broadcastVoiceRoster(currentRoomCode);
+    }
+
     if (!currentRoomCode) return;
 
     const room = roomManager.getRoom(currentRoomCode);
@@ -1404,6 +1533,9 @@ io.on('connection', (socket) => {
     if (!currentRoomCode) return;
     const leftCode = currentRoomCode;
 
+    voiceManager.leave(leftCode, socket.id);
+    broadcastVoiceRoster(leftCode);
+
     const result = roomManager.leaveRoom(socket.id);
     if (result) {
       const { room: updatedRoom, leftPlayer, leftSpectator, gameStopped } = result;
@@ -1450,15 +1582,48 @@ io.on('connection', (socket) => {
 /** Disposer for the social layer's background timers (set by start()). */
 let stopSocialServices: (() => void) | null = null;
 let roomSweepTimer: NodeJS.Timeout | null = null;
+let authorityLease: RedisAuthorityLease | undefined;
+let authorityLost = false;
+
+function restoredMemberExpired(code: string, result: import('./rooms/roomManager').RoomLeaveResult): void {
+  const { room, leftPlayer, leftSpectator, gameStopped } = result;
+  if (leftPlayer) io.to(code).emit('player-left', roomManager.publicPlayer(leftPlayer));
+  if (leftSpectator) io.to(code).emit('spectator-left', { id: leftSpectator.id, name: leftSpectator.name });
+  if (!room || gameStopped) {
+    clearTurnTimer(code);
+    botRunner.clearRoom(code);
+  }
+  if (room) {
+    if (gameStopped) io.to(code).emit('game-stopped', { room: roomManager.publicRoom(room) });
+    io.to(code).emit('lobby-updated', roomManager.publicRoom(room));
+    if (room.status === 'playing') broadcastGameState(code);
+    socialRefreshRoom(code);
+  }
+}
 
 // Start Server — build the durable store, rehydrate any in-progress rooms, then
 // begin accepting connections so reconnecting players find their game intact.
 async function start() {
+  if ((process.env.STORE || 'file').toLowerCase() === 'redis' && isRedisConfigured()) {
+    authorityLease = await RedisAuthorityLease.acquire(await getRedis(), {
+      onLost: (error) => {
+        authorityLost = true;
+        logger.error('[AUTHORITY] Redis ownership lost; stopping backend:', error.message);
+        // Detach durable queues immediately. Existing Redis commands retain
+        // their captured token and cannot mutate after ownership expires.
+        roomManager.setStore(new MemoryRoomStore());
+        profileManager.setStore(new MemoryProfileStore());
+        void shutdown('Redis authority lost');
+      },
+    });
+    logger.info('[AUTHORITY] Acquired Redis writer lease (30s TTL, renewed every 10s).');
+  }
+  reportStore = await createReportStore(authorityLease);
   // In production with STORE=redis, createRoomStore/createProfileStore THROW if
   // Redis is unreachable rather than silently degrading to in-memory. That
   // rejection propagates out of start() and is handled below, where we log the
   // cause and exit non-zero so the platform can retry or halt the rollout.
-  const store = await createRoomStore();
+  const store = await createRoomStore(authorityLease);
   roomManager.setStore(store);
   try {
     await roomManager.hydrate();
@@ -1466,19 +1631,27 @@ async function start() {
       unoPenaltyNotifier.remember(roomManager.getRoom(code)?.game);
     }
   } catch (err: any) {
+    if (authorityLease) throw err;
     logger.error('[STORE] Hydration failed (starting with no restored rooms):', err?.message);
   }
 
   // Build the durable profile store and rehydrate persistent player profiles +
   // lifetime stats. Shares the same Redis connection as the room store when
   // STORE=redis; independent directory when STORE=file.
-  const profileStore = await createProfileStore();
+  const profileStore = await createProfileStore(authorityLease);
   profileManager.setStore(profileStore);
   try {
     await profileManager.hydrate();
   } catch (err: any) {
+    if (authorityLease) throw err;
     logger.error('[PROFILE_STORE] Hydration failed (starting with no restored profiles):', err?.message);
   }
+
+  roomManager.reconcileRestoredConnections(restoredMemberExpired);
+  roomManager.sweepIdleRooms({
+    emptyTtlMs: ROOM_SWEEP_CONFIG.emptyRoomTtlMs,
+    finishedTtlMs: ROOM_SWEEP_CONFIG.finishedRoomTtlMs,
+  });
 
   // Re-arm turn timers for any game that was in progress when the server stopped.
   // Rehydration restores room STATE but not the live setTimeout handles, so an
@@ -1489,6 +1662,8 @@ async function start() {
 
   // Enable cross-instance broadcasts if Redis is configured (no-op otherwise).
   redisAdapterEnabled = await attachRedisAdapter();
+  authorityLease?.assertOwned();
+  if (shuttingDown) throw new Error('Backend authority was lost during startup');
 
   // Idle-room garbage collection. A lifecycle-aware background sweeper periodically
   // reclaims rooms with NO live members — empty/never-joined rooms, expired invite
@@ -1530,7 +1705,7 @@ async function start() {
     logger.info(`  Health:    GET /health`);
     logger.info(`  Log level: ${logger.level}`);
     logger.info(`  Storage:   ${(process.env.STORE || 'file').toLowerCase()}`);
-    logger.info(`  Socket.IO: ${redisAdapterEnabled ? 'Redis adapter (multi-instance)' : 'in-memory adapter (single instance)'}`);
+    logger.info(`  Socket.IO: ${redisAdapterEnabled ? 'Redis broadcast adapter (one active state writer)' : 'in-memory adapter (single instance)'}`);
     logger.info(`  Rooms persisted: ${roomManager.getRoomCount()} restored`);
     logger.info(`===============================================`);
   });
@@ -1571,6 +1746,8 @@ async function shutdown(signal: string) {
     await new Promise<void>((resolve) => server.close(() => resolve())); // stop HTTP
     await roomManager.shutdown();     // flush pending room writes + close store
     await profileManager.shutdown();  // flush pending profile writes + close store
+    // Keep the lease renewable until HTTP and all durable snapshots drain.
+    await authorityLease?.release();
     // Close the SHARED Redis connection last: both stores above write through it
     // during their flush, and quit() drains in-flight commands (disconnect()
     // would drop them). Without this the process can also linger until the
@@ -1578,7 +1755,7 @@ async function shutdown(signal: string) {
     await closeRedis();
     logger.info('[SHUTDOWN] Clean shutdown complete.');
     clearTimeout(forceExit);
-    process.exit(0);
+    process.exit(authorityLost ? 1 : 0);
   } catch (err: any) {
     logger.error('[SHUTDOWN] Error during shutdown:', err?.message);
     process.exit(1);

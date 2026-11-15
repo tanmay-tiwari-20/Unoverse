@@ -9,6 +9,7 @@ build/
 out/
 .next/
 *.tsbuildinfo
+frontend/test-results/
 
 # Environment (commit only *.example)
 .env

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Unoverse Multiplayer Backend",
   "main": "dist/index.js",
+  "engines": { "node": ">=24" },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",

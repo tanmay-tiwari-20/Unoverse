@@ -1,7 +1,7 @@
 'use client'; // Error boundaries must be Client Components
 
 import { useEffect } from 'react';
-import { Lilita_One } from 'next/font/google';
+import { geistSans, geistMono } from './fonts';
 
 import { ErrorScreen } from '../components/ui/ErrorScreen';
 import { logger } from '../utils/logger';
@@ -9,13 +9,8 @@ import './globals.css';
 
 // `global-error` REPLACES the root layout when it renders, so nothing that
 // layout provides is available here — stylesheet and fonts have to be declared
-// again or the recovery screen renders unstyled. Only the display font is
-// re-declared; it is the only one `ErrorScreen` depends on.
-const lilitaOne = Lilita_One({
-  variable: '--font-arcade',
-  weight: '400',
-  subsets: ['latin'],
-});
+// again or the recovery screen renders unstyled. The shared local fonts also
+// keep recovery independent of an external font service.
 
 /**
  * Last-resort error boundary.
@@ -41,7 +36,7 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <html lang="en" className={`${lilitaOne.variable} h-full antialiased dark`} suppressHydrationWarning>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`} suppressHydrationWarning>
       <body className="min-h-full bg-slate-950 text-slate-50 antialiased" suppressHydrationWarning>
         <title>Unoverse — Something went wrong</title>
         <ErrorScreen

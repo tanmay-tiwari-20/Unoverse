@@ -19,6 +19,7 @@ class FakeRedis {
   options: any;
   connectCalls = 0;
   quitCalls = 0;
+  disconnectCalls = 0;
   listeners = new Map<string, Function[]>();
   /** Set to an Error to make connect() reject. */
   connectError: Error | null = null;
@@ -51,6 +52,7 @@ class FakeRedis {
   async quit() {
     this.quitCalls++;
   }
+  disconnect() { this.disconnectCalls++; }
 }
 
 vi.mock('ioredis', () => ({ default: FakeRedis }));
@@ -132,13 +134,13 @@ describe('getRedis', () => {
     expect(instances[0].listeners.get('error')?.length).toBeGreaterThan(0);
   });
 
-  it('never gives up on a request or on reconnecting', async () => {
+  it('bounds shared commands and disables offline replay while reconnecting the client', async () => {
     await getRedis();
     const opts = instances[0].options;
 
-    // null = queue the command and retry across reconnects, rather than failing.
-    expect(opts.maxRetriesPerRequest).toBeNull();
-    expect(opts.enableOfflineQueue).toBe(true);
+    expect(opts.maxRetriesPerRequest).toBe(1);
+    expect(opts.enableOfflineQueue).toBe(false);
+    expect(opts.commandTimeout).toBe(3000);
     // retryStrategy must always return a delay (never null = stop retrying).
     expect(typeof opts.retryStrategy(1)).toBe('number');
     expect(opts.retryStrategy(9999)).toBe(5000); // capped backoff
@@ -174,6 +176,11 @@ describe('createRedisClient', () => {
   it('names each connection so it is identifiable in CLIENT LIST', async () => {
     await createRedisClient('socketio-pub');
     expect(instances[0].options.connectionName).toBe('unoverse:socketio-pub');
+  });
+  it('allows pub/sub connections to reconnect independently of authority commands', async () => {
+    await createRedisClient('socketio-sub');
+    expect(instances[0].options.enableOfflineQueue).toBe(true);
+    expect(instances[0].options.maxRetriesPerRequest).toBeNull();
   });
 });
 

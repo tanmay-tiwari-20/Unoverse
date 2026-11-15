@@ -11,7 +11,7 @@
 [![Three.js](https://img.shields.io/badge/Three.js-R184-000000?style=for-the-badge&logo=three.js)](https://threejs.org/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-4-010101?style=for-the-badge&logo=socket.io)](https://socket.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24_LTS-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 
 **Create a room. Share the code. Play UNO with anyone, anywhere.**
 
@@ -47,7 +47,7 @@
 * **Live Lobby Roster**: Track players vs spectators in the room roster with live seat counts (e.g. `4/6`).
 * **Interactive Text Chat**: Real-time room chat with user avatars, grouped messages, and automatic scrolling.
 * **Table-Wide Emoji Reactions**: Send animated emoji bubbles from a radial picker, visible to the entire table in real-time.
-* **WebRTC Voice Chat**: Talk hands-free via peer-to-peer audio. Powered by built-in fallback TURN servers for traversing corporate firewalls and strict NATs.
+* **WebRTC Voice Chat**: Seated human players explicitly join a small voice group (4 participants by default). The server enforces membership, excludes spectators and bots, and issues short-lived TURN credentials when a relay is configured.
 * **Graceful Reconnection**: Players and spectators get a 60-second grace window to reconnect via session secrets without losing their seats or hand state.
 
 ### 🎨 Immersive 3D Experience
@@ -79,6 +79,8 @@
 * **Landing Page Optimization**: Connection pre-warming on land and submission throttling/debounce to prevent double room creations.
 * **Zod Schemas**: Strict schema validation on every Socket.IO payload.
 * **Layered Error Resilience**: Section-level React error boundaries isolate every HUD region and the entire 3D layer, so a crash in one area never takes down the game. Explicit WebGL context-loss recovery keeps the canvas alive through GPU resets, and a connection overlay covers automatic Socket.IO reconnection — you can always keep playing via the 2D hand even if 3D fails.
+* **Offline Font Builds and Accessible Cards**: Bundled Geist fonts remove build-time font downloads. Cards and color choices include names and distinct symbols, and browser zoom is enabled.
+* **Acknowledged Bug Reports**: Reports go to the backend and show success only after storage accepts them. Operators can inspect private report records in file storage or Redis.
 * **Dockerized Setup**: Multi-container Docker Compose setup configured with Redis persistence out-of-the-box.
 
 ---
@@ -247,9 +249,9 @@ with the friend graph persisted on your profile.
 | :--- | :--- |
 | **Frontend** | Next.js 16 (App Router), React 19, React Three Fiber, drei, @react-three/postprocessing (bloom), Tailwind CSS v4, Zustand, Framer Motion, Lucide Icons, PWA + Vercel Analytics |
 | **3D / Perf** | Procedural code-split arenas • FPS-driven adaptive quality (high/medium/low) • selective bloom • `prefers-reduced-motion` aware |
-| **Backend** | Node.js 20+, Express 4, Socket.IO 4, TypeScript 5, Zod 4, compression, jsonwebtoken (platform auth) |
-| **Realtime** | Socket.IO (game state · chat · friends/presence) • WebRTC (peer-to-peer voice, fallback TURN) |
-| **Data** | Redis 7 (rooms + profiles + Socket.IO adapter) • File store (default) • In-memory (dev fallback) |
+| **Backend** | Node.js 24 LTS, Express 4, Socket.IO 4, TypeScript 5, Zod 4, compression, jsonwebtoken (platform auth) |
+| **Realtime** | Socket.IO (game state · chat · friends/presence) • WebRTC (capped voice groups, expiring TURN credentials) |
+| **Data** | Redis 7 (rooms + profiles + reports + Socket.IO adapter) • File store (default) • In-memory (explicit temporary mode) |
 | **Platform** | One codebase → web **and** CrazyGames SDK v3 portal build, selected at build time via `NEXT_PUBLIC_PLATFORM` |
 | **DevOps** | Docker Compose • Vercel (web frontend) • Railway / Render / Fly.io (backend) • CrazyGames (portal) |
 
@@ -259,7 +261,7 @@ with the friend graph persisted on your profile.
 
 ### Prerequisites
 
-* **Node.js 20+** (uses native `process.loadEnvFile`)
+* **Node.js 24 LTS** (see `.nvmrc`; uses native `process.loadEnvFile`)
 * **npm** (comes bundled with Node)
 * **Redis** *(optional for local development; recommended for production state persistence. Run one backend instance.)*
 
@@ -546,11 +548,15 @@ Only needed on the backend that serves the CrazyGames build — leave unset for 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `NEXT_PUBLIC_BACKEND_URL` | `http://localhost:3001` | Express + Socket.IO server base URL. |
-| `NEXT_PUBLIC_TURN_URL` | — | WebRTC TURN relay server URLs (comma-separated, optional fallback). |
-| `NEXT_PUBLIC_TURN_USERNAME` | — | WebRTC TURN server username credential (optional). |
-| `NEXT_PUBLIC_TURN_CREDENTIAL` | — | WebRTC TURN server password credential (optional). |
 | `NEXT_PUBLIC_PLATFORM` | `web` | Build target selector. Only the exact value `crazygames` produces the portal build; anything else (unset/typo) builds for web. |
 | `NEXT_PUBLIC_SOURCE_MAPS` | — | Set empty by `build:crazygames` to drop source maps from the uploaded package. |
+
+Voice relay credentials are configured on the **backend** with `TURN_URLS` and
+`TURN_SHARED_SECRET`. `VOICE_MAX_PARTICIPANTS` defaults to 4 (2–6 supported), and
+`TURN_CREDENTIAL_TTL_SECONDS` defaults to 900. The browser receives expiring
+credentials after joining voice; permanent `NEXT_PUBLIC_TURN_*` secrets are unused.
+Bug reports follow `STORE`, with file records in `REPORT_DIR` and retention
+controlled by `REPORT_RETENTION_DAYS` (default 30). See [DEPLOY.md](DEPLOY.md).
 
 > [!NOTE]
 > `NEXT_PUBLIC_*` values are inlined at **build time**, so a change requires a rebuild — they cannot be flipped at runtime.
@@ -569,7 +575,19 @@ npm run test:watch
 
 # Run a standalone CLI game simulation (exercises full rules engine)
 npm run sim
+
+# Frontend regressions and real-browser gameplay (install Chromium once)
+cd ../frontend
+npm test
+node node_modules/playwright-core/cli.js install chromium
+npm run test:e2e
 ```
+
+The browser suite uses isolated backend fixtures and two browser contexts. It covers
+turn guidance, late UNO penalties, Wild-choice reconnects, blocked storage, browser
+Back cleanup, WebGL failure, and acknowledged reporting. On Windows with Edge
+already installed, set `PLAYWRIGHT_CHANNEL=msedge` instead of downloading Chromium.
+CI runs these checks plus both the web build and the CrazyGames package verifier.
 
 ---
 
@@ -602,6 +620,9 @@ npm run sim
 | `npm run build` | Production Next.js (web) build |
 | `npm start` | Serves local production build |
 | `npm run lint` | Runs ESLint verification check |
+| `npm run typecheck` | Checks TypeScript without generating output |
+| `npm test` | Runs frontend logic and voice regressions |
+| `npm run test:e2e` | Runs isolated Playwright browser gameplay tests |
 | `npm run build:crazygames` | Builds the static CrazyGames portal package |
 | `npm run serve:crazygames` | Serves the portal package for local testing |
 

@@ -12,8 +12,6 @@ import { UnoverseLoader } from '../ui/UnoverseLoader';
 import { ARENAS } from '../../lib/arenas/registry';
 import { ArenaId } from '../../lib/arenas/types';
 
-import { PlayerHandHUD } from './PlayerHandHUD';
-
 // Dynamic imports of the Three.js components — SSR disabled for WebGL
 const RoomEnvironment = dynamic(
   () => import('./RoomEnvironment').then(mod => ({ default: mod.RoomEnvironment })),
@@ -38,6 +36,11 @@ const ActionEffects3D = dynamic(
 
 export interface TableSceneProps {
   onReady?: () => void;
+}
+
+function ReadySceneFallback({ onReady, onRetry }: { onReady: () => void; onRetry: () => void }) {
+  React.useEffect(onReady, [onReady]);
+  return <SceneCrashFallback onRetry={onRetry} />;
 }
 
 export const TableScene: React.FC<TableSceneProps> = ({ onReady }) => {
@@ -85,12 +88,7 @@ export const TableScene: React.FC<TableSceneProps> = ({ onReady }) => {
       <ErrorBoundary
         section="3D Table"
         resetKeys={[room?.code]}
-        fallback={(_error, retry) => {
-          if (!sceneReady) {
-            handleSceneReady();
-          }
-          return <SceneCrashFallback onRetry={retry} />;
-        }}
+        fallback={(_error, retry) => <ReadySceneFallback onReady={handleSceneReady} onRetry={retry} />}
       >
         <RoomEnvironment
           numPlayers={numPlayers}
@@ -134,14 +132,6 @@ export const TableScene: React.FC<TableSceneProps> = ({ onReady }) => {
 
       {/* Shown only while the GPU context is lost; covers the canvas, not the HUD. */}
       <WebGLRecoveryOverlay />
-
-      {/* HUD LAYER — the hand is how the game is actually played, so it gets its
-          own boundary and is only mounted once the arena is fully loaded and ready. */}
-      {sceneReady && (
-        <ErrorBoundary section="Your Hand">
-          <PlayerHandHUD />
-        </ErrorBoundary>
-      )}
 
     </div>
   );

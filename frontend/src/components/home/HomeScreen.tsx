@@ -29,6 +29,7 @@ import { HomeHero } from "./HomeHero";
 import { PlayConsole, type PlayMode } from "./PlayConsole";
 import { Button } from "../ui/kit";
 import { UnoverseLoader } from "../ui/UnoverseLoader";
+import { ErrorBoundary } from "../providers/ErrorBoundary";
 import { ArenaSelection } from "../../lib/arenas/types";
 import { errorMessage } from "../../utils/errors";
 import { subscribeToNothing } from "../../utils/clientSnapshot";
@@ -111,12 +112,11 @@ export default function HomeScreen() {
 
   const connectionStatus = useGameStore((s) => s.connectionStatus);
   const isOnline = connectionStatus === "connected";
-  const [landingReady, setLandingReady] = useState(false);
-
-  // The loader remains visible until the real ready state is reached:
-  // profile hydrated + socket connection established (or error state) + landing scene rendered.
+  // Only the profile and connection gate initial controls. The optional 3D
+  // background may fail or never render on this device, so it cannot hold the
+  // join/create form behind a loader.
   const isAppReady =
-    profileHydrated && (isOnline || connectionStatus === "error") && landingReady;
+    profileHydrated && (isOnline || connectionStatus === "error");
   const showInitialLoader = !isAppReady;
 
 
@@ -321,7 +321,9 @@ export default function HomeScreen() {
     <main className="w-full h-screen-dvh relative bg-[#120c2e] overflow-hidden select-none">
       {/* 3D Background Scene */}
       <div className="absolute inset-0 z-0">
-        <LandingScene onReady={() => setLandingReady(true)} />
+        <ErrorBoundary section="Home Background" fallback={null}>
+          <LandingScene />
+        </ErrorBoundary>
       </div>
 
       {/* Playful color wash + dots over the 3D scene */}
@@ -507,9 +509,7 @@ export default function HomeScreen() {
                   ? "Connecting to game server..."
                   : !profileHydrated
                     ? "Initializing player profile..."
-                    : !landingReady
-                      ? "Preparing 3D Arcade..."
-                      : "Loading Unoverse..."
+                    : "Loading Unoverse..."
               }
             />
           </motion.div>

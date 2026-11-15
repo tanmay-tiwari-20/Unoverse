@@ -25,8 +25,9 @@ export const PeerMuteButton: React.FC<{
 }> = ({ uid, name, isLocal, className = '' }) => {
   const isMutedByMe = useVoiceStore((s) => !!s.locallyMutedPeers[uid]);
   const setPeerLocalMute = useVoiceStore((s) => s.setPeerLocalMute);
+  const isVoiceParticipant = useVoiceStore((s) => s.participation === 'joined' && s.participants.some((p) => p.seatUid === uid));
 
-  if (isLocal) return null;
+  if (isLocal || !isVoiceParticipant) return null;
 
   return (
     <button

@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { Profile } from './profileTypes';
 import { logger } from '../utils/logger';
 import { getRedis, isRedisConfigured } from '../config/redis';
+import { RedisAuthorityLease } from '../config/redisAuthority';
 
 /**
  * Durable storage for player profiles. Mirrors the RoomStore pattern exactly:
@@ -107,7 +108,7 @@ export class FileProfileStore implements ProfileStore {
 /**
  * Redis-backed store. Each profile is a JSON string under `uno:profile:<id>`,
  * all tracked in a set `uno:profiles` for loadAll(). The production path and the
- * one that enables cross-instance shared profiles / leaderboards.
+ * one used for durable profiles / leaderboards under a single writer lease.
  *
  * Borrows the shared command client from config/redis.ts (same connection the
  * room store uses), so persistence costs one connection, not two.
@@ -119,15 +120,16 @@ export class RedisProfileStore implements ProfileStore {
   /** Max keys per MGET — bounds peak memory when rehydrating many profiles. */
   private static readonly BATCH = 200;
 
-  private constructor(client: any) {
+  private constructor(client: any, private authority: RedisAuthorityLease) {
     this.client = client;
   }
 
   /** Borrow the process-wide shared client (connects on first use). */
-  static async create(): Promise<RedisProfileStore> {
+  static async create(authority: RedisAuthorityLease): Promise<RedisProfileStore> {
+    authority.assertOwned();
     const client = await getRedis();
     logger.info('[PROFILE_STORE] Using Redis profile store (uno:profile:*).');
-    return new RedisProfileStore(client);
+    return new RedisProfileStore(client, authority);
   }
 
   private key(id: string): string {
@@ -135,6 +137,7 @@ export class RedisProfileStore implements ProfileStore {
   }
 
   async loadAll(): Promise<Profile[]> {
+    this.authority.assertOwned();
     const ids: string[] = await this.client.smembers(this.indexKey);
     if (!ids.length) return [];
 
@@ -160,23 +163,20 @@ export class RedisProfileStore implements ProfileStore {
     }
 
     if (dangling.length) {
-      await this.client.srem(this.indexKey, ...dangling).catch(() => {});
+      await this.authority.pruneIndex(this.client, this.indexKey, dangling);
       logger.debug(`[PROFILE_STORE] Pruned ${dangling.length} dangling profile index entr(ies).`);
     }
 
+    this.authority.assertOwned();
     return profiles;
   }
 
   async save(profile: Profile): Promise<void> {
-    await this.client
-      .multi()
-      .set(this.key(profile.id), JSON.stringify(profile))
-      .sadd(this.indexKey, profile.id)
-      .exec();
+    await this.authority.saveIndexedSnapshot(this.client, this.key(profile.id), this.indexKey, profile.id, JSON.stringify(profile));
   }
 
   async remove(id: string): Promise<void> {
-    await this.client.multi().del(this.key(id)).srem(this.indexKey, id).exec();
+    await this.authority.removeIndexedSnapshot(this.client, this.key(id), this.indexKey, id);
   }
 
   // No close(): the shared client is owned and closed by config/redis.ts.
@@ -191,11 +191,15 @@ export class RedisProfileStore implements ProfileStore {
  *
  * Same failure policy as the room store: in production, STORE=redis that cannot
  * reach Redis THROWS (losing every profile + lifetime stat on restart is not an
- * acceptable silent degradation). In development it falls back to memory.
+ * acceptable silent degradation). A configured Redis authority never falls
+ * back silently; use STORE=memory when Redis is intentionally unavailable.
  */
-export async function createProfileStore(): Promise<ProfileStore> {
+export async function createProfileStore(authority?: RedisAuthorityLease): Promise<ProfileStore> {
   const kind = (process.env.STORE || 'file').toLowerCase();
   const isProd = process.env.NODE_ENV === 'production';
+  if (kind === 'redis' && isRedisConfigured() && !authority) {
+    throw new Error('Redis profile store requires the active authority lease');
+  }
 
   try {
     if (kind === 'memory') {
@@ -206,13 +210,14 @@ export async function createProfileStore(): Promise<ProfileStore> {
       if (!isRedisConfigured()) {
         throw new Error('STORE=redis requires REDIS_URL to be set');
       }
-      return await RedisProfileStore.create();
+      return await RedisProfileStore.create(authority!);
     }
     // Default: file. PROFILE_DIR is the sibling of the rooms' DATA_DIR.
     const dir = process.env.PROFILE_DIR || path.join(process.cwd(), '.data', 'profiles');
     logger.info(`[PROFILE_STORE] Using file store at ${dir}`);
     return new FileProfileStore(dir);
   } catch (err: any) {
+    if (authority) throw err;
     if (kind === 'redis' && isProd) {
       throw new Error(`Failed to initialize the Redis profile store: ${err?.message}`);
     }
