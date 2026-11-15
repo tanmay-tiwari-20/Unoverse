@@ -65,6 +65,7 @@ interface GameState {
   // null in that case). Carries the private reconnect secret like player does.
   spectator: Spectator | null;
   error: string | null;
+  roomUnavailable: boolean;
   connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error';
   cameraMode: 'seated' | 'orbit';
   
@@ -131,6 +132,7 @@ interface GameState {
   setPlayer: (player: Player | null) => void;
   setSpectator: (spectator: Spectator | null) => void;
   setError: (error: string | null) => void;
+  setRoomUnavailable: (unavailable: boolean) => void;
   setConnectionStatus: (status: 'disconnected' | 'connecting' | 'connected' | 'error') => void;
   setCameraMode: (mode: 'seated' | 'orbit') => void;
   
@@ -232,6 +234,7 @@ export const useGameStore = create<GameState>((set) => ({
   player: null,
   spectator: null,
   error: null,
+  roomUnavailable: false,
   connectionStatus: 'disconnected',
   cameraMode: 'seated',
   
@@ -316,6 +319,7 @@ export const useGameStore = create<GameState>((set) => ({
   setPlayer: (player) => set({ player }),
   setSpectator: (spectator) => set({ spectator }),
   setError: (error) => set({ error }),
+  setRoomUnavailable: (roomUnavailable) => set({ roomUnavailable }),
   setConnectionStatus: (status) => set({ connectionStatus: status }),
   setCameraMode: (cameraMode) => set({ cameraMode }),
   
@@ -428,6 +432,7 @@ export const useGameStore = create<GameState>((set) => ({
     player: null,
     spectator: null,
     error: null,
+    roomUnavailable: false,
     cameraMode: 'seated',
     playerCards: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
     discardPile: [],

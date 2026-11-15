@@ -52,6 +52,9 @@ export interface UnoGameState {
   // or pass. drawnCardId holds the id of that just-drawn, still-playable card while
   // the engine waits for that decision; null whenever no decision is pending.
   drawnCardId: string | null;
+  // Advances for every new turn, including Skip/Reverse turns for the same
+  // player. Optional only for persisted games created before this counter.
+  turnNumber?: number;
   turnDeadline?: number | null; // epoch ms when the current turn auto-resolves (null = no timer)
   lastAction?: {
     type: 'play' | 'draw' | 'pass' | 'jump_in' | 'swap' | 'rotate' | 'challenge';

@@ -8,7 +8,8 @@ export function createGameSnapshot(room: Room, recipientId: string | null) {
 
   const recipient = room.players.find((player) => player.id === recipientId);
   const activePlayer = room.players.find((player) => player.id === game.currentPlayerId);
-  const winner = room.players.find((player) => player.id === game.winnerId);
+  const winner = room.players.find((player) => player.id === game.winnerId)
+    ?? room.roundParticipants?.find((player) => player.id === game.winnerId);
   const hand = recipient ? game.hands[recipient.id] || [] : [];
 
   return {

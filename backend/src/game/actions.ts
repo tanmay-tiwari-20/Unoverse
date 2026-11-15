@@ -148,6 +148,7 @@ const advanceTurn = (
   }
 
   state.currentPlayerId = nextId;
+  state.turnNumber = (state.turnNumber ?? 0) + 1;
 };
 
 /** The player seated immediately after `playerId` in the current direction (with cards). */
@@ -291,6 +292,7 @@ export const startGameState = (players: Player[], rules?: HouseRules): UnoGameSt
     wildFourWasBluff: null,
     challengeableById: null,
     drawnCardId: null,
+    turnNumber: 0,
     startedAt: Date.now(),
     roundStats: {},
   };

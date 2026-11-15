@@ -83,7 +83,7 @@ async function twoPlayerRoom() {
   await rulesUpdated;
   const started = nextEvent(host, 'game-updated');
   host.emit('start-game', {});
-  return { host, peer, initial: await started };
+  return { host, peer, roomCode: room.code, initial: await started };
 }
 
 async function joinSavedSeat(code: string, seat: 1 | 2) {
@@ -163,6 +163,23 @@ beforeAll(async () => {
     const room: Room = { code, hostId: 'p1', players, game, houseRules: game.rules, status: 'playing' };
     await fs.writeFile(path.join(roomDir, `${code}.json`), JSON.stringify(room));
   }
+  for (const [code, value] of [['TIM001', 'skip'], ['TIM002', 'reverse']] as const) {
+    const players = players2();
+    const game = makeState({
+      hands: { p1: [card('red', value), card('blue', '8')], p2: [card('green', '2')] },
+      rules: { mustSayUno: false, turnTimer: true, turnTimerSeconds: 45 },
+    });
+    const room: Room = { code, hostId: 'p1', players, game, houseRules: game.rules, status: 'playing' };
+    await fs.writeFile(path.join(roomDir, `${code}.json`), JSON.stringify(room));
+  }
+  {
+    const game = makeState({
+      hands: { p1: [card('blue', '8')], p2: [card('green', '2')] },
+      deck: [card('red', '2')], rules: { mustSayUno: false, turnTimer: false },
+    });
+    const room: Room = { code: 'DRW001', hostId: 'p1', players: players2(), game, houseRules: game.rules, status: 'playing' };
+    await fs.writeFile(path.join(roomDir, `${room.code}.json`), JSON.stringify(room));
+  }
   const port = await new Promise<number>((resolve, reject) => {
     const probe = createServer();
     probe.once('error', reject);
@@ -219,6 +236,28 @@ afterAll(cleanupFixture, 10_000);
 
 describe('HTTP and Socket.IO boundaries', () => {
   // Restored seats have a 60-second reconnect deadline; exercise them first.
+  it.each([['TIM001', 'skip'], ['TIM002', 'reverse']] as const)('renews the deadline after %s %s and preserves it through resync', async (code, value) => {
+    const host = await joinSavedSeat(code, 1);
+    await joinSavedSeat(code, 2);
+    const previousDeadline = host.snapshot.turnDeadline;
+    expect(previousDeadline).toBeGreaterThan(Date.now());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const playedAt = Date.now();
+    const updated = nextEvent(host.socket, 'game-updated', (snapshot) => snapshot.lastAction?.card?.value === value);
+    host.socket.emit('play-card', { cardId: host.snapshot.hand.find((card: { value: string }) => card.value === value).id });
+    const extraTurn = await updated;
+    expect(extraTurn.currentPlayerId).toBe(host.socket.id);
+    expect(extraTurn.turnDeadline).toBeGreaterThan(previousDeadline);
+    expect(extraTurn.turnDeadline).toBeGreaterThanOrEqual(playedAt + 45_000);
+
+    const rebroadcast = nextEvent(host.socket, 'game-updated');
+    host.socket.emit('call-uno');
+    expect((await rebroadcast).turnDeadline).toBe(extraTurn.turnDeadline);
+    host.socket.disconnect();
+    const rejoined = await joinSavedSeat(code, 1);
+    expect(rejoined.snapshot.turnDeadline).toBe(extraTurn.turnDeadline);
+  });
+
   it('keeps late UNO open after an invalid request and accepts the real call before the next play', async () => {
     const { host, peer, peerHand } = await lateUnoRoom('UNO001');
     const invalid = nextEvent(peer, 'error');
@@ -477,12 +516,32 @@ describe('HTTP and Socket.IO boundaries', () => {
     expect(Object.keys(snapshot.handCounts)).toHaveLength(2);
   });
 
+  it('predicts and assigns a spectator slot for a new arrival during an active round', async () => {
+    const { host, roomCode } = await twoPlayerRoom();
+    const response = await fetch(`${baseUrl}/api/rooms/join`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: roomCode, name: 'Late arrival' }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ isSpectator: true, waitingForNextRound: true, isFull: false });
+    const visitor = await connect();
+    const lobby = nextEvent(host, 'lobby-updated');
+    const joined = nextEvent(visitor, 'joined-successfully');
+    const snapshot = nextEvent(visitor, 'game-updated');
+    visitor.emit('join-room', { code: roomCode, name: 'Late arrival' });
+    expect(await joined).toMatchObject({ isSpectator: true, player: null });
+    expect((await lobby).players).toHaveLength(2);
+    expect(await snapshot).toMatchObject({ ownSeat: null, hand: [] });
+  });
+
   it('does not broadcast a pending draw identity to the other player', async () => {
-    const { host, peer, initial } = await twoPlayerRoom();
-    const owner = initial.currentPlayerId === host.id ? host : peer;
-    const opponent = owner === host ? peer : host;
-    const ownerUpdate = nextEvent(owner, 'game-updated');
-    const opponentUpdate = nextEvent(opponent, 'game-updated');
+    // A fixed draw avoids randomly opening on +2, where drawing pays a penalty
+    // and intentionally cannot create the play-or-pass decision tested here.
+    const { socket: owner } = await joinSavedSeat('DRW001', 1);
+    const { socket: opponent } = await joinSavedSeat('DRW001', 2);
+    const isDraw = (snapshot: any) => snapshot.lastAction?.type === 'draw' && snapshot.lastAction.playerId === owner.id;
+    const ownerUpdate = nextEvent(owner, 'game-updated', isDraw);
+    const opponentUpdate = nextEvent(opponent, 'game-updated', isDraw);
     owner.emit('draw-card');
     const [ownView, otherView] = await Promise.all([ownerUpdate, opponentUpdate]);
     expect(ownView.drawnCardId).not.toBeNull();

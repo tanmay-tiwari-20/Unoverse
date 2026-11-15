@@ -58,6 +58,44 @@ export const PlayerHandHUD: React.FC = () => {
     if (scrollable && selectedCardId) revealCard(cardRefs.current.get(selectedCardId));
   }, [scrollable, selectedCardId, cardCount, width, revealCard]);
 
+  const handVisible = !!room && !!player &&
+    ['playing', 'awaiting_color_selection'].includes(room.status) && gameStatus !== 'ended';
+  useEffect(() => {
+    const strip = scrollRef.current;
+    if (!scrollable || !handVisible || !strip) return;
+    let start: { x: number; y: number; atStart: boolean; atEnd: boolean } | null = null;
+    const onStart = (event: TouchEvent) => {
+      const touch = event.touches.length === 1 ? event.touches[0] : null;
+      start = touch ? {
+        x: touch.clientX, y: touch.clientY,
+        atStart: strip.scrollLeft <= 1,
+        atEnd: strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1,
+      } : null;
+    };
+    const onMove = (event: TouchEvent) => {
+      if (!start || event.touches.length !== 1) return;
+      const dx = event.touches[0].clientX - start.x;
+      const dy = event.touches[0].clientY - start.y;
+      // Native history swipes can ignore CSS overscroll containment. Only stop
+      // outward gestures at an exhausted edge; inward browsing remains native.
+      if (Math.abs(dx) > Math.abs(dy) && ((start.atStart && dx > 0) || (start.atEnd && dx < 0))) {
+        if (event.cancelable) event.preventDefault();
+        gesture.current.cancel();
+      }
+    };
+    const onEnd = () => { start = null; };
+    strip.addEventListener('touchstart', onStart, { passive: true });
+    strip.addEventListener('touchmove', onMove, { passive: false });
+    strip.addEventListener('touchend', onEnd);
+    strip.addEventListener('touchcancel', onEnd);
+    return () => {
+      strip.removeEventListener('touchstart', onStart);
+      strip.removeEventListener('touchmove', onMove);
+      strip.removeEventListener('touchend', onEnd);
+      strip.removeEventListener('touchcancel', onEnd);
+    };
+  }, [scrollable, handVisible]);
+
   // Hide hand when game is not active or has ended
   if (!room || !player || !['playing', 'awaiting_color_selection'].includes(room.status)) {
     return null;

@@ -13,6 +13,7 @@ import { attachSocialListeners, sayHello } from '../lib/social/socialClient';
 import { BACKEND_URL } from '../lib/config';
 import { getPlatform } from '../lib/platform';
 import { roomMembershipLifecycle } from '../lib/roomMembership';
+import type { Room } from '../types/game';
 
 // --- Persistent profile identity -------------------------------------------
 // The durable player identity (profileId + private secret) lives in
@@ -98,6 +99,7 @@ let listenersAttached = false;
 // Leaving invalidates in-flight room replies as well as queued joins. Otherwise
 // an acknowledgement received after browser Back could restore a ghost seat.
 let acceptsRoomUpdates = false;
+let requestedRoomCode: string | null = null;
 
 // --- Deferred join (race-condition guard) ------------------------------------
 // When `joinRoom` is called before the socket has completed its connection
@@ -117,6 +119,26 @@ const clearPendingJoin = () => {
   sharedSocket?.off('connect', pendingJoin.handler);
   pendingJoin = null;
 };
+
+// A new round can promote a waiting spectator without another join request.
+// Public rosters omit secrets, so retain the local credential across promotion.
+function syncRoomMembership(room: Room) {
+  const state = useGameStore.getState();
+  const identity = state.player ?? state.spectator;
+  const socketId = state.socket?.id ?? identity?.id;
+  const player = room.players.find((member) => member.id === socketId);
+  const spectator = room.spectators?.find((member) => member.id === socketId);
+  if (player) {
+    state.setPlayer({ ...player, secret: identity?.secret || loadSecret(room.code, player.name) });
+    state.setSpectator(null);
+    state.setIsSpectator(false);
+  } else if (spectator) {
+    state.setPlayer(null);
+    state.setSpectator({ ...spectator, secret: identity?.secret || loadSecret(room.code, spectator.name) });
+    state.setIsSpectator(true);
+  }
+  state.setRoom(room);
+}
 
 function setupSocketListeners(socketInstance: Socket) {
   if (listenersAttached) return;
@@ -176,7 +198,7 @@ function setupSocketListeners(socketInstance: Socket) {
   socketInstance.on('connect', () => {
     logger.debug('SOCKET_CONNECTED', socketInstance.id);
     useGameStore.getState().setConnectionStatus('connected');
-    useGameStore.getState().setError(null);
+    if (!useGameStore.getState().roomUnavailable) useGameStore.getState().setError(null);
 
     // Re-bind the social identity on every connect AND reconnect, so presence and
     // the friend graph are correct again after a drop without the player acting.
@@ -184,7 +206,7 @@ function setupSocketListeners(socketInstance: Socket) {
 
     const state = useGameStore.getState();
     const identity = state.player ?? state.spectator;
-    if (state.room && identity) {
+    if (acceptsRoomUpdates && state.room && identity) {
       useGameStore.getState().addToast('Reconnected to game server! Resyncing...', 'info');
       const secret = identity.secret || loadSecret(state.room.code, identity.name);
       socketInstance.emit('join-room', { code: state.room.code, name: identity.name, secret, ...profileCreds() });
@@ -196,7 +218,9 @@ function setupSocketListeners(socketInstance: Socket) {
     useGameStore.getState().setConnectionStatus('error');
 
     const state = useGameStore.getState();
-    if (state.room) {
+    if (state.roomUnavailable) {
+      // An absent room cannot recover through a transport retry.
+    } else if (state.room) {
       useGameStore.getState().addToast('Connection lost. Reconnecting...', 'error');
     } else {
       useGameStore.getState().setError('Unable to connect to game server. Please ensure the backend is running.');
@@ -211,6 +235,8 @@ function setupSocketListeners(socketInstance: Socket) {
 
   socketInstance.on('joined-successfully', ({ room, player, isSpectator, spectator }) => {
     if (!acceptsRoomUpdates) return;
+    if (requestedRoomCode && room?.code !== requestedRoomCode) return;
+    requestedRoomCode = room?.code ?? null;
     logger.debug('[Socket] Joined room successfully:', room?.code, player, 'isSpectator:', isSpectator);
     if (room && player?.secret) {
       saveSecret(room.code, player.name, player.secret);
@@ -222,11 +248,14 @@ function setupSocketListeners(socketInstance: Socket) {
     useGameStore.getState().setPlayer(player);
     useGameStore.getState().setSpectator(isSpectator ? (spectator ?? null) : null);
     useGameStore.getState().setIsSpectator(!!isSpectator);
+    useGameStore.getState().setRoomUnavailable(false);
     useGameStore.getState().setError(null);
     useGameStore.getState().setIsProcessing(false);
     useGameStore.getState().addToast(
       isSpectator
-        ? 'All player slots are filled — you joined as a spectator.'
+        ? spectator?.waitingForNextRound
+          ? 'Round in progress — you are spectating until the next round.'
+          : 'All player slots are filled — you joined as a spectator.'
         : `Joined as ${player?.name}`,
       'success'
     );
@@ -234,8 +263,9 @@ function setupSocketListeners(socketInstance: Socket) {
 
   socketInstance.on('lobby-updated', (updatedRoom) => {
     if (!acceptsRoomUpdates) return;
+    if (requestedRoomCode && updatedRoom?.code !== requestedRoomCode) return;
     logger.debug('[Socket] Lobby updated:', updatedRoom);
-    useGameStore.getState().setRoom(updatedRoom);
+    syncRoomMembership(updatedRoom);
     if (updatedRoom?.houseRules) useGameStore.getState().setHouseRules(updatedRoom.houseRules);
     useGameStore.getState().setIsProcessing(false);
   });
@@ -257,6 +287,8 @@ function setupSocketListeners(socketInstance: Socket) {
 
   socketInstance.on('game-started', (room) => {
     if (!acceptsRoomUpdates) return;
+    if (requestedRoomCode && room?.code !== requestedRoomCode) return;
+    syncRoomMembership(room);
     logger.debug('[Socket] Game started:', room.code);
     soundManager.play('shuffle');
     useGameStore.getState().addToast('Game has started! Good luck!', 'success');
@@ -271,6 +303,7 @@ function setupSocketListeners(socketInstance: Socket) {
   });
 
   socketInstance.on('game-ended', ({ winnerName }) => {
+    if (!acceptsRoomUpdates) return;
     logger.debug('[Socket] Game ended. Winner:', winnerName);
     soundManager.play('victory');
     useGameStore.getState().setIsProcessing(false);
@@ -300,6 +333,7 @@ function setupSocketListeners(socketInstance: Socket) {
   });
 
   socketInstance.on('game-stopped', ({ room }) => {
+    if (!acceptsRoomUpdates) return;
     logger.debug('[Socket] Game stopped — not enough players. Resetting to lobby.');
     useGameStore.getState().clearAllCards();
     if (room) {
@@ -309,10 +343,21 @@ function setupSocketListeners(socketInstance: Socket) {
     useGameStore.getState().setIsProcessing(false);
   });
 
-  socketInstance.on('error', (err: { message: string }) => {
+  socketInstance.on('error', (err: { message: string; code?: string; roomCode?: string }) => {
     logger.error('[Socket] Error from server:', err.message);
     const state = useGameStore.getState();
-    if (state.room) {
+    const roomMissing = err.code === 'ROOM_NOT_FOUND' || err.message === 'Room not found' || err.message === 'This room no longer exists';
+    if (roomMissing) {
+      if (!acceptsRoomUpdates || (err.roomCode && requestedRoomCode && err.roomCode !== requestedRoomCode)) return;
+      acceptsRoomUpdates = false;
+      clearPendingJoin();
+      roomMembershipLifecycle.reset();
+      state.reset();
+      state.setRoomUnavailable(true);
+      state.setError('This room no longer exists. It may have expired or closed.');
+    } else if (state.roomUnavailable) {
+      return;
+    } else if (state.room) {
       useGameStore.getState().addToast(err.message, 'error');
     } else {
       useGameStore.getState().setError(err.message);
@@ -405,6 +450,9 @@ export const useSocket = () => {
 
   const createRoom = (name: string) => {
     acceptsRoomUpdates = true;
+    requestedRoomCode = null;
+    useGameStore.getState().setRoomUnavailable(false);
+    useGameStore.getState().setError(null);
     clearPendingJoin();
     const currentSocket = useGameStore.getState().socket || getOrCreateSocket();
     currentSocket.emit('create-room', { name, ...profileCreds() });
@@ -416,6 +464,9 @@ export const useSocket = () => {
 
     const normCode = code.trim().toUpperCase();
     const normName = name.trim();
+    requestedRoomCode = normCode;
+    useGameStore.getState().setRoomUnavailable(false);
+    useGameStore.getState().setError(null);
 
     // De-duplication check: if we are already in this room as this player or spectator, ignore duplicate join
     const state = useGameStore.getState();
@@ -459,16 +510,11 @@ export const useSocket = () => {
   const leaveRoom = () => {
     roomMembershipLifecycle.reset();
     acceptsRoomUpdates = false;
+    requestedRoomCode = null;
     clearPendingJoin();
     const currentSocket = useGameStore.getState().socket;
     currentSocket?.emit('leave-room');
-    const state = useGameStore.getState();
-    state.setRoom(null);
-    state.setPlayer(null);
-    state.setSpectator(null);
-    state.setIsSpectator(false);
-    state.setError(null);
-    state.clearAllCards();
+    useGameStore.getState().reset();
   };
 
   const startGame = (options?: { fillWithBots?: boolean }) => {

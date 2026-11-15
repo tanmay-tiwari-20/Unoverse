@@ -899,6 +899,69 @@ export class RoomManager {
     return {};
   }
 
+  /** Shared by the HTTP preview and the authoritative socket join. */
+  public getJoinDisposition(room: Room, secret?: string, profileId?: string): JoinDisposition {
+    const returning = this.findReturningMember(room, secret, profileId);
+    if (returning.player) return { isSpectator: false, reconnecting: true, waitingForNextRound: false };
+    if (returning.spectator) {
+      if (returning.spectator.waitingForNextRound && this.humanPlayers(room).length === 0
+        && (!room.game || room.game.status === 'ended') && !this.getCapacityInfo(room).isFull) {
+        return { isSpectator: false, reconnecting: true, waitingForNextRound: false };
+      }
+      return { isSpectator: true, reconnecting: true, waitingForNextRound: !!returning.spectator.waitingForNextRound };
+    }
+    const waitingForNextRound = !!room.game && room.game.status !== 'ended';
+    const botSeatAvailable = room.status === 'lobby' && room.players.some((p) => p.isBot);
+    return {
+      isSpectator: waitingForNextRound || (this.getCapacityInfo(room).isFull && !botSeatAvailable),
+      reconnecting: false,
+      waitingForNextRound,
+    };
+  }
+
+  /** Retain round identities even after their live seats and hands are removed. */
+  private ensureRoundParticipants(room: Room): RoundParticipant[] {
+    const participants = room.roundParticipants ??= [];
+    if (!room.game) return participants;
+    for (const player of room.players) {
+      if (!Object.prototype.hasOwnProperty.call(room.game.hands, player.id)) continue;
+      const existing = participants.find((p) => p.uid === player.uid);
+      if (existing) {
+        if (!existing.departed) Object.assign(existing, this.roundParticipant(player));
+      } else {
+        participants.push(this.roundParticipant(player));
+      }
+    }
+    return participants;
+  }
+
+  private roundParticipant(player: Player): RoundParticipant {
+    const { id, uid, name, profileId, isBot } = player;
+    return { id, uid, name, profileId, isBot };
+  }
+
+  /** Give arrivals a real hand only when a new round is dealt. */
+  private seatWaitingSpectators(room: Room): void {
+    const { maxPlayers } = this.getCapacityInfo(room);
+    for (const spectator of [...(room.spectators ?? [])]) {
+      if (!spectator.waitingForNextRound || spectator.disconnectedAt !== undefined) continue;
+      if (room.players.length >= maxPlayers) break;
+      const occupiedSeats = new Set(room.players.map((p) => p.seatNumber));
+      let seatNumber = 1;
+      while (occupiedSeats.has(seatNumber)) seatNumber++;
+      const profile = spectator.profileId ? profileManager.getProfile(spectator.profileId) : undefined;
+      const player: Player = {
+        id: spectator.id, uid: spectator.uid, name: spectator.name, secret: spectator.secret,
+        seatNumber, isHost: !room.players.some((p) => p.isHost),
+        ...(spectator.profileId ? { profileId: spectator.profileId, tag: profile?.tag, avatar: profile?.avatarUrl, outfit: profile?.outfit } : {}),
+      };
+      room.players.push(player);
+      if (player.isHost) room.hostId = player.id;
+      room.spectators = room.spectators!.filter((s) => s.uid !== spectator.uid);
+    }
+    room.players.sort((a, b) => a.seatNumber - b.seatNumber);
+  }
+
   // Join an existing room via Socket connection
   public joinRoom(
     code: string,
@@ -936,6 +999,7 @@ export class RoomManager {
     const existingPlayer = returning.player;
 
     if (existingPlayer) {
+      if (room.game) this.ensureRoundParticipants(room);
       // Cancel this seat's disconnect timer — they made it back in time.
       if (this.cancelDisconnectTimer(upperCode, existingPlayer.uid)) {
         logger.debug(`[GRACE_PERIOD_CANCEL] Reconnection detected. Cancelled disconnect grace period for ${displayName} in Room ${upperCode}`);
@@ -1038,6 +1102,8 @@ export class RoomManager {
         }
       }
 
+      const participant = room.roundParticipants?.find((p) => p.uid === existingPlayer.uid && !p.departed);
+      if (participant) Object.assign(participant, this.roundParticipant(existingPlayer));
       logger.debug(`[PLAYER_RECONNECTED] Rebound seat ${existingPlayer.uid} ("${displayName}") from socket ${oldSocketId} to ${playerSocketId}`);
       logger.debug(`[PLAYER_ASSIGNED_SEAT] Name: ${displayName} (Reconnected), Socket: ${playerSocketId}, Room: ${room.code}, Seat: ${existingPlayer.seatNumber}`);
       logger.debug(`[ROOM_JOIN] Player: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
@@ -1054,22 +1120,33 @@ export class RoomManager {
       delete existingSpectator.disconnectedAt;
       existingSpectator.name = displayName;
       if (profile) existingSpectator.profileId = profile.profileId;
+      // If the hosts left during this spectator's disconnect grace period,
+      // restore a usable lobby instead of stranding them without a host.
+      if (this.humanPlayers(room).length === 0 && (!room.game || room.game.status === 'ended')) {
+        this.seatWaitingSpectators(room);
+        const promoted = room.players.find((p) => p.uid === existingSpectator.uid);
+        if (promoted) {
+          this.markDirty(room.code);
+          return { room, player: promoted, isSpectator: false };
+        }
+      }
       logger.debug(`[SPECTATOR_RECONNECTED] Rebound spectator slot ${existingSpectator.uid} ("${displayName}") from socket ${oldSocketId} to ${playerSocketId}`);
       logger.debug(`[ROOM_JOIN] Spectator: ${displayName}, Socket: ${playerSocketId}, Room: ${room.code}`);
       this.markDirty(room.code);
       return { room, player: null, isSpectator: true, spectator: existingSpectator };
     }
 
-    // Spectator Check: overflow past the active-player capacity joins as a spectator.
+    // New arrivals wait for a deal; only returning players can reclaim a live hand.
     // This gate is authoritative: because Node runs handlers on a single thread, two
     // sockets can never pass this check "simultaneously" — the array push below is
     // committed before the next join is processed, so capacity can't be exceeded.
-    let shouldSpectate = this.getCapacityInfo(room).isFull;
+    const disposition = this.getJoinDisposition(room, secret, profile?.profileId);
+    let shouldSpectate = disposition.isSpectator;
 
     // Bot displacement: while the game hasn't started, a full table that still
     // contains bots always makes room for a real player — one bot leaves and the
     // human takes its seat. The configured player limit is never exceeded.
-    if (shouldSpectate && room.status === 'lobby') {
+    if (this.getCapacityInfo(room).isFull && room.status === 'lobby') {
       const botIndex = room.players.findIndex((p) => p.isBot);
       if (botIndex !== -1) {
         const [displaced] = room.players.splice(botIndex, 1);
@@ -1081,7 +1158,9 @@ export class RoomManager {
     if (shouldSpectate) {
       // Spectator mode can be disabled via house rules — reject instead of seating.
       if (room.houseRules && room.houseRules.spectatorMode === false) {
-        throw new Error('This table is full and spectating is disabled.');
+        throw new Error(disposition.waitingForNextRound
+          ? 'A round is in progress and spectating is disabled. Join after this round.'
+          : 'This table is full and spectating is disabled.');
       }
       if (!room.spectators) {
         room.spectators = [];
@@ -1100,6 +1179,7 @@ export class RoomManager {
           uid: randomUUID(),
           name: displayName,
           secret: randomUUID(),
+          waitingForNextRound: disposition.waitingForNextRound,
           ...(profile ? { profileId: profile.profileId } : {}),
         };
         room.spectators.push(spectator);
@@ -1166,8 +1246,25 @@ export class RoomManager {
       const playerIndex = room.players.findIndex((p) => p.id === playerSocketId);
 
       if (playerIndex !== -1) {
+        const participant = room.game
+          ? this.ensureRoundParticipants(room).find((p) => p.uid === room.players[playerIndex].uid)
+          : undefined;
+        if (participant && room.game && !participant.departed) {
+          participant.departed = {
+            handPoints: handPoints(room.game.hands[playerSocketId] ?? []),
+            stats: { ...(room.game.roundStats?.[playerSocketId] ?? emptyRoundDelta()) },
+          };
+        }
         const [leftPlayer] = room.players.splice(playerIndex, 1);
         let gameStopped = false;
+
+        // A departure can complete a round that already has a winner. Bank it
+        // before bot cleanup or an undersized table can discard the live game.
+        if (room.game?.winnerId && shouldEndRound(room.game, room.players)) {
+          room.game.status = 'ended';
+          room.game.turnDeadline = null;
+          this.finalizeRound(code);
+        }
 
         // Cancel any active disconnect grace period timer for safety
         this.cancelDisconnectTimer(code, leftPlayer.uid);
@@ -1188,32 +1285,34 @@ export class RoomManager {
           room.players = [];
           if (room.game) {
             room.game = undefined;
+            room.roundParticipants = undefined;
             room.status = 'lobby';
             gameStopped = true;
           }
         }
 
         // Clean up game state if a game is active
-        if (room.game && room.players.length >= 2) {
+        if (room.game && (room.players.length >= 2 || room.game.status === 'ended')) {
           // Enough players remain — keep the game going.
           const game = room.game;
 
           // Remove the player's hand
           delete game.hands[playerSocketId];
           delete game.unoCalled[playerSocketId];
+          if (game.roundStats) delete game.roundStats[playerSocketId];
 
           // If the leaving player owed the table a wild-color choice, that
           // choice can never arrive — return the game to normal play (the turn
           // handoff below decides who acts next).
           if (game.colorChooserId === playerSocketId) {
             game.colorChooserId = null;
-            game.status = 'playing';
+            if (game.status !== 'ended') game.status = 'playing';
           }
 
           // Same for a pending Seven-O swap-target choice.
           if (game.swapChooserId === playerSocketId) {
             game.swapChooserId = null;
-            game.status = 'playing';
+            if (game.status !== 'ended') game.status = 'playing';
           }
 
           // A Wild Draw Four played by the leaver can no longer be challenged —
@@ -1230,7 +1329,7 @@ export class RoomManager {
           // and following the current play direction (so an active Reverse is
           // honored), skipping seats that no longer hold cards. Never assigned
           // by array position.
-          if (game.currentPlayerId === playerSocketId) {
+          if (game.currentPlayerId === playerSocketId && game.status !== 'ended') {
             // The leaver's private draw-then-play decision leaves with them.
             game.drawnCardId = null;
             const nextId = getNextActivePlayerId(game, room.players, leftPlayer.seatNumber);
@@ -1241,6 +1340,7 @@ export class RoomManager {
                 game.challengeableById = nextId;
               }
               game.currentPlayerId = nextId;
+              game.turnNumber = (game.turnNumber ?? 0) + 1;
               const next = room.players.find((p) => p.id === nextId);
               logger.debug(`[TURN_ADVANCED_ON_LEAVE] Next Player: ${next?.name} (${nextId})`);
             }
@@ -1253,9 +1353,14 @@ export class RoomManager {
           // the lobby. A fresh game must be started from scratch once enough
           // players have re-joined.
           room.game = undefined;
+          room.roundParticipants = undefined;
           room.status = 'lobby';
           gameStopped = true;
           logger.debug(`[GAME_STOPPED] Room ${code} dropped below 2 players. Game reset to lobby.`);
+        }
+
+        if (this.humanPlayers(room).length === 0 && (!room.game || room.game.status === 'ended')) {
+          this.seatWaitingSpectators(room);
         }
 
         // If the player was the host and there are other players, elect a new
@@ -1375,6 +1480,8 @@ export class RoomManager {
       throw new Error('A round is already in progress');
     }
 
+    this.seatWaitingSpectators(room);
+
     if (fillWithBots && room.status === 'lobby') {
       const { maxPlayers } = this.getCapacityInfo(room);
       if (room.players.length < maxPlayers) {
@@ -1422,6 +1529,7 @@ export class RoomManager {
 
     room.status = 'playing';
     room.game = startGameState(room.players, rules);
+    room.roundParticipants = room.players.map((p) => this.roundParticipant(p));
     this.markDirty(code);
     return room;
   }
@@ -1441,15 +1549,17 @@ export class RoomManager {
       return { result: room.match.lastRound, matchWon: !!room.match.matchWinnerName };
     }
 
-    const winner = room.players.find((p) => p.id === game.winnerId);
+    const participants = this.ensureRoundParticipants(room);
+    const winner = participants.find((p) => p.id === game.winnerId);
     const winnerName = winner ? winner.name : 'Unknown';
     // Points are banked onto the WINNING SEAT, never onto a name — with duplicate
     // names allowed, crediting "tanmay" could otherwise pay the wrong player.
-    // A winner who somehow has no seat (left mid-finalization) gets a throwaway
-    // key so the round still balances instead of writing to `undefined`.
+    // Legacy snapshots without a participant record still get a fallback key.
     const key = winner ? winner.uid : `absent:${game.winnerId}`;
 
-    const points = calculateRoundPoints(game.hands, game.winnerId);
+    const points = calculateRoundPoints(game.hands, game.winnerId)
+      + participants.reduce((sum, p) => sum + (p.id !== game.winnerId && p.departed && !game.hands[p.id]
+        ? p.departed.handPoints : 0), 0);
     const entry = room.match.scores[key] ?? {
       name: winnerName,
       points: 0,
@@ -1514,7 +1624,8 @@ export class RoomManager {
     if (!match) return;
 
     // Significance gate: solo-vs-bots practice (fewer than N humans) never counts.
-    const humans = room.players.filter((p) => !p.isBot);
+    const participants = this.ensureRoundParticipants(room);
+    const humans = participants.filter((p) => !p.isBot);
     if (humans.length < PROFILE_CONFIG.minHumansForStats) return;
 
     // Only humans carrying a persistent profile are tracked.
@@ -1525,13 +1636,13 @@ export class RoomManager {
     // Winner (empty hand) is forced to 1st; everyone else ranks by ascending
     // remaining points (fewer left = better finish). This single ordering serves
     // both the round commit and the round-as-match history record.
-    const ranked = room.players
-      .filter((p) => game.hands[p.id])
+    const ranked = participants
+      .filter((p) => p.departed || game.hands[p.id])
       .map((p) => ({
         id: p.id,
         name: p.name,
         playerId: p.profileId ?? null,
-        pts: p.id === game.winnerId ? -1 : handPoints(game.hands[p.id]),
+        pts: p.id === game.winnerId ? -1 : p.departed?.handPoints ?? handPoints(game.hands[p.id]),
       }))
       .sort((a, b) => a.pts - b.pts);
     const roundPlacement = new Map<string, number>();
@@ -1540,7 +1651,7 @@ export class RoomManager {
     for (const p of tracked) {
       const won = p.id === game.winnerId;
       profileManager.applyRoundResult(p.profileId!, {
-        delta: (game.roundStats && game.roundStats[p.id]) || emptyRoundDelta(),
+        delta: p.departed?.stats ?? game.roundStats?.[p.id] ?? emptyRoundDelta(),
         won,
         placement: roundPlacement.get(p.id) ?? 0,
         // Only the round winner banks points in UNO scoring.
@@ -1552,7 +1663,7 @@ export class RoomManager {
     // Everything below describes THIS round: its winner, its standings, its
     // wall-clock length. `rounds: 1` because one record covers exactly one round.
     const winnerName = result.winnerName;
-    const winnerId = room.players.find((p) => p.id === game.winnerId)?.profileId ?? null;
+    const winnerId = participants.find((p) => p.id === game.winnerId)?.profileId ?? null;
     const durationMs = game.startedAt ? Math.max(0, Date.now() - game.startedAt) : 0;
     const players: MatchPlayerRecord[] = ranked.map((r) => ({
       name: r.name,

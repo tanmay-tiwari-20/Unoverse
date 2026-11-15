@@ -40,6 +40,7 @@ import { autoResolveTimedOutTurn } from './game/autoPlay';
 import { createGameSnapshot } from './game/clientSnapshot';
 import { UnoPenaltyNotifier } from './game/unoNotifications';
 import { recoverActivePlayerId } from './game/turnManager';
+import { turnSignatureOf } from './game/turnTimer';
 import { BotRunner } from './bots/botRunner';
 import { logger } from './utils/logger';
 import { socketRateLimiter } from './utils/rateLimiter';
@@ -99,19 +100,9 @@ import {
 const TURN_DURATION_MS = Number(process.env.TURN_TIMEOUT_MS) || 45000;
 const turnTimers = new Map<string, NodeJS.Timeout>();
 let shuttingDown = false;
-// Tracks which turn (status + active socket id) the current timer belongs to, so
+// Tracks which turn/decision the current timer belongs to, so
 // idempotent re-broadcasts (e.g. a reconnect) don't restart the clock.
 const turnSignatures = new Map<string, string>();
-
-function turnSignatureOf(game: { status: string; currentPlayerId: string; colorChooserId: string | null; swapChooserId?: string | null; drawnCardId?: string | null }): string {
-  let activeId = game.currentPlayerId;
-  if (game.status === 'awaiting_color_selection') activeId = game.colorChooserId ?? game.currentPlayerId;
-  else if (game.status === 'awaiting_swap_target') activeId = game.swapChooserId ?? game.currentPlayerId;
-  // Opening a draw-then-play decision window keeps the same player & status but is
-  // a distinct timed phase, so fold it into the signature to (re)arm a fresh clock.
-  const decision = game.drawnCardId ? ':decision' : '';
-  return `${game.status}:${activeId}${decision}`;
-}
 
 function clearTurnTimer(code: string) {
   const existing = turnTimers.get(code);
@@ -141,7 +132,7 @@ function armTurnTimer(code: string) {
 
   const durationMs = (game.rules?.turnTimerSeconds ? game.rules.turnTimerSeconds * 1000 : TURN_DURATION_MS);
 
-  const signature = turnSignatureOf(game);
+  const signature = turnSignatureOf(game, room.players);
   if (turnSignatures.get(code) === signature && turnTimers.has(code)) {
     return; // Same turn already being timed — don't reset the clock.
   }
@@ -163,7 +154,7 @@ function handleTurnTimeout(code: string, signature: string) {
   const game = room.game;
 
   // The turn moved on between scheduling and firing — ignore this stale timeout.
-  if (turnSignatureOf(game) !== signature) return;
+  if (turnSignatureOf(game, room.players) !== signature) return;
 
   try {
     logger.info(`[TURN_TIMEOUT] Auto-resolving '${game.status}' for room ${code}`);
@@ -207,7 +198,7 @@ function rearmTurnTimerAfterFailure(code: string) {
     setTimeout(() => {
       const r = roomManager.getRoom(code);
       if (!r || !r.game) { clearTurnTimer(code); return; }
-      const sig = turnSignatureOf(r.game);
+      const sig = turnSignatureOf(r.game, r.players);
       handleTurnTimeout(code, sig);
     }, TURN_TIMER_RETRY_MS)
   );
@@ -337,12 +328,13 @@ function handlePossibleGameEnd(code: string): boolean {
   const winner = room.players.find((p) => p.id === room.game!.winnerId);
   io.to(code).emit('game-ended', {
     winnerId: room.game.winnerId,
-    winnerName: winner ? winner.name : null,
+    winnerName: finalized?.result.winnerName ?? winner?.name ?? null,
+    winnerUid: finalized?.result.winnerUid ?? winner?.uid ?? null,
     roundResult: finalized?.result ?? null,
     matchWon: finalized?.matchWon ?? false,
     match: room.match ?? null,
   });
-  logger.debug(`[Socket] Round in room ${code} ended. Winner: ${winner?.name ?? 'Unknown'}`);
+  logger.debug(`[Socket] Round in room ${code} ended. Winner: ${finalized?.result.winnerName ?? winner?.name ?? 'Unknown'}`);
   // Everyone here stops being "playing" — refresh their friends' cards.
   socialRefreshRoom(code);
   return true;
@@ -603,37 +595,26 @@ app.post('/api/rooms/join', publicReadLimiter, validateHttpBody(httpJoinRoomSche
       ? resolveProfileIdentity(profileId, profileSecret)
       : undefined;
   const seatSecret = typeof secret === 'string' ? secret : undefined;
-  const heldBy = <T extends { secret: string; profileId?: string }>(m: T): boolean =>
-    (!!identity && m.profileId === identity.profileId) || (!!seatSecret && m.secret === seatSecret);
-
-  const reconnectingAsPlayer = room.players.some((p) => !p.isBot && heldBy(p));
-  const reconnectingAsSpectator = room.spectators?.some(heldBy) ?? false;
+  const { isSpectator, reconnecting, waitingForNextRound } =
+    roomManager.getJoinDisposition(room, seatSecret, identity?.profileId);
 
   // Capacity numbers come from the SAME roomManager helper the join gate uses,
   // so this pre-check can never drift from the authoritative decision.
   const { maxPlayers, playerCount, spectatorCount, maxSpectators, isFull, spectatorsFull } =
     roomManager.getCapacityInfo(room);
 
-  let isSpectator = false;
-  if (reconnectingAsSpectator && !reconnectingAsPlayer) {
-    isSpectator = true;
-  } else if (!reconnectingAsPlayer) {
-    // A full lobby that still contains bots will hand a bot's seat to this
-    // human on join (see joinRoom), so don't predict spectator in that case.
-    const botSeatAvailable = room.status === 'lobby' && room.players.some((p) => p.isBot);
-    isSpectator = isFull && !botSeatAvailable;
-  }
-
   // If the table is full and spectating is disabled, this join would be rejected
   // by the socket layer — surface that to the client now with a clear message.
-  if (isSpectator && !reconnectingAsSpectator && room.houseRules?.spectatorMode === false) {
-    res.status(403).json({ error: 'This table is full and spectating is disabled.' });
+  if (isSpectator && !reconnecting && room.houseRules?.spectatorMode === false) {
+    res.status(403).json({ error: waitingForNextRound
+      ? 'A round is in progress and spectating is disabled. Join after this round.'
+      : 'This table is full and spectating is disabled.' });
     return;
   }
 
   // Both player seats AND spectator slots are taken — the room is completely
   // full. Mirror the socket-layer rejection so the user is told before entering.
-  if (isSpectator && !reconnectingAsSpectator && spectatorsFull) {
+  if (isSpectator && !reconnecting && spectatorsFull) {
     res.status(403).json({ error: 'This room is completely full — all player seats and spectator slots are taken.' });
     return;
   }
@@ -642,6 +623,7 @@ app.post('/api/rooms/join', publicReadLimiter, validateHttpBody(httpJoinRoomSche
   res.status(200).json({
     success: true,
     isSpectator,
+    waitingForNextRound,
     isFull,
     playerCount,
     maxPlayers,
@@ -1053,7 +1035,10 @@ io.on('connection', (socket) => {
       }
     } catch (error: any) {
       logger.error(`[Socket] Join error for client ${socket.id}:`, error.message);
-      socket.emit('error', { message: error.message || 'Failed to join room' });
+      socket.emit('error', {
+        message: error.message || 'Failed to join room',
+        ...(!roomManager.getRoom(code.toUpperCase()) ? { code: 'ROOM_NOT_FOUND', roomCode: code.toUpperCase() } : {}),
+      });
     }
   }));
 
@@ -1263,26 +1248,9 @@ io.on('connection', (socket) => {
         logger.debug(`[TURN_ADVANCED] Next Player: ${nextPlayerName}`);
       }
 
+      // The first finisher wins even if somebody else plays the round's last card.
+      if (handlePossibleGameEnd(currentRoomCode)) return;
       broadcastGameState(currentRoomCode);
-
-      if (updatedGame.status === 'ended') {
-        clearTurnTimer(currentRoomCode);
-        // Bank the round's points onto the match scoreboard before announcing.
-        const finalized = roomManager.finalizeRound(currentRoomCode);
-        // Re-broadcast so clients receive the updated match scores with the ended state.
-        broadcastGameState(currentRoomCode);
-        logger.debug(`[Socket] Round in room ${currentRoomCode} ended. Winner: ${player?.name ?? 'Unknown'}`);
-        io.to(currentRoomCode).emit('game-ended', {
-          winnerId: socket.id,
-          // Display name read from the SEAT, not from what this client told us its
-          // name was at join time — the seat is the server's own record.
-          winnerName: player?.name ?? null,
-          winnerUid: player?.uid ?? null,
-          roundResult: finalized?.result ?? null,
-          matchWon: finalized?.matchWon ?? false,
-          match: room.match ?? null,
-        });
-      }
     } catch (error: any) {
       logger.error(`[Socket] Play card error:`, error.message);
       socket.emit('error', { message: error.message || 'Failed to play card' });
@@ -1511,7 +1479,7 @@ io.on('connection', (socket) => {
           io.to(tempRoomCode).emit('game-stopped', { room: roomManager.publicRoom(updatedRoom) });
         }
         io.to(tempRoomCode).emit('lobby-updated', roomManager.publicRoom(updatedRoom));
-        if (updatedRoom.status === 'playing') {
+        if (updatedRoom.status === 'playing' && !handlePossibleGameEnd(tempRoomCode)) {
           broadcastGameState(tempRoomCode);
         }
       } else {
@@ -1559,7 +1527,7 @@ io.on('connection', (socket) => {
         }
         // Broadcast the updated lobby to remaining players
         io.to(currentRoomCode).emit('lobby-updated', roomManager.publicRoom(updatedRoom));
-        if (updatedRoom.status === 'playing') {
+        if (updatedRoom.status === 'playing' && !handlePossibleGameEnd(currentRoomCode)) {
           broadcastGameState(currentRoomCode);
         }
       } else {
@@ -1596,7 +1564,7 @@ function restoredMemberExpired(code: string, result: import('./rooms/roomManager
   if (room) {
     if (gameStopped) io.to(code).emit('game-stopped', { room: roomManager.publicRoom(room) });
     io.to(code).emit('lobby-updated', roomManager.publicRoom(room));
-    if (room.status === 'playing') broadcastGameState(code);
+    if (room.status === 'playing' && !handlePossibleGameEnd(code)) broadcastGameState(code);
     socialRefreshRoom(code);
   }
 }

@@ -109,20 +109,27 @@ beforeEach(async (context) => {
   const roomDirectory = path.join(dataDirectory, 'rooms');
   await fs.mkdir(roomDirectory);
   const first = context.name.includes('Wild') ? card('wild', 'wild') : card('red', '7');
+  const aliceHand = context.name.includes('large phone hand')
+    ? [first, ...Array.from({ length: 38 }, () => card('blue', '8')), card('red', '9')]
+    : [first, card('blue', '8')];
   const game = makeState({
-    hands: { p1: [first, card('blue', '8')], p2: [card('red', '9'), card('yellow', '2')] },
+    hands: { p1: aliceHand, p2: [card('red', '9'), card('yellow', '2')] },
     rules: { allowLateUno: true, unoPenaltyCards: 2, turnTimer: false, stackDrawTwoOnWildFour: true },
   });
   await fs.writeFile(path.join(roomDirectory, 'E2E001.json'), JSON.stringify({
     code: 'E2E001', hostId: 'p1', players: players2(), game, houseRules: game.rules, status: 'playing', arena: 'classic',
   }));
+  await startBackend(context.signal);
+}, { timeout: 30_000 });
+
+async function startBackend(signal) {
   backendProcess = startProcess(['-r', backendRequire.resolve('ts-node/register/transpile-only'), path.join(backend, 'src/index.ts')], dataDirectory, {
-    HOST: '127.0.0.1', PORT: new URL(backendUrl).port, NODE_ENV: 'development', STORE: 'file', DATA_DIR: roomDirectory,
+    HOST: '127.0.0.1', PORT: new URL(backendUrl).port, NODE_ENV: 'development', STORE: 'file', DATA_DIR: path.join(dataDirectory, 'rooms'),
     PROFILE_DIR: path.join(dataDirectory, 'profiles'), REPORT_DIR: path.join(dataDirectory, 'reports'),
     REDIS_URL: '', CORS_ORIGIN: '*', TRUST_PROXY_HOPS: '0', LOG_LEVEL: 'silent', CRAZYGAMES_AUTH_ENABLED: 'false',
   });
-  await waitForServer(`${backendUrl}/health`, backendProcess, { timeoutMs: 20_000, signal: context.signal });
-}, { timeout: 30_000 });
+  await waitForServer(`${backendUrl}/health`, backendProcess, { timeoutMs: 20_000, signal });
+}
 
 afterEach(async (context) => {
   try {
@@ -150,7 +157,12 @@ async function player(name, options = {}) {
   });
   assert.equal(profileResponse.status, 201);
   const { profile, secret } = await profileResponse.json();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
+  const context = await browser.newContext({
+    viewport: options.viewport ?? { width: 1280, height: 800 },
+    hasTouch: options.hasTouch ?? false,
+    isMobile: options.hasTouch ?? false,
+    reducedMotion: 'reduce',
+  });
   contexts.push(context);
   await context.addInitScript(({ name, id, secret }) => {
     localStorage.setItem('unoverse:profile', JSON.stringify({ state: { profileId: id, profileSecret: secret, displayName: name }, version: 0 }));
@@ -217,6 +229,86 @@ test('gameplay controls work when WebGL is unavailable', { timeout: 90_000 }, as
   assert.equal(await alice.page.getByRole('button', { name: 'Draw Card', exact: true }).isVisible(), true);
 });
 
+test('a large phone hand scrolls to both edge cards without playing during a swipe', { timeout: 90_000 }, async () => {
+  const alice = await player('Alice', { viewport: { width: 360, height: 780 }, hasTouch: true, noWebGL: true });
+  const bob = await player('Bob', { noWebGL: true });
+  await joinFromHome(alice.page);
+  await joinFromHome(bob.page);
+  await alice.page.getByRole('button', { name: 'Play in Portrait', exact: true }).click();
+  const hand = alice.page.getByRole('region', { name: 'Your hand', exact: true });
+  const strip = hand.locator('[data-hand-scroll="true"]');
+  await strip.waitFor();
+  assert.equal(await hand.locator('[data-card-id]').count(), 40);
+  const initial = await strip.evaluate((element) => ({
+    left: element.getBoundingClientRect().left,
+    right: element.getBoundingClientRect().right,
+    width: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    scrollLeft: element.scrollLeft,
+  }));
+  assert.ok(initial.left >= 0 && initial.right <= 360, 'the scroll viewport fits on the phone');
+  assert.ok(initial.scrollWidth > initial.width, 'large hands have a scrollable range');
+  assert.equal(initial.scrollLeft, 0, 'the first card starts within reach');
+
+  const touch = await alice.context.newCDPSession(alice.page);
+  const settleHand = () => strip.evaluate((element) => new Promise((resolve) => {
+    let previous = element.scrollLeft;
+    let stableFrames = 0;
+    const frame = () => {
+      const current = element.scrollLeft;
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 3) resolve();
+      else requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }));
+  const swipe = async (direction) => {
+    await settleHand();
+    const bounds = await strip.boundingBox();
+    const from = direction === 'left' ? bounds.x + bounds.width - 35 : bounds.x + 35;
+    const to = direction === 'left' ? bounds.x + 35 : bounds.x + bounds.width - 35;
+    const y = bounds.y + bounds.height / 2;
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from, y }] });
+    for (let step = 1; step <= 8; step++) {
+      await new Promise((resolve) => setTimeout(resolve, 16));
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from + (to - from) * step / 8, y }] });
+    }
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await settleHand();
+  };
+  // Native touch input must move the strip; setting scrollLeft here would hide
+  // pointer-event or touch-action regressions in the actual hand component.
+  for (let swipeCount = 0; swipeCount < 24; swipeCount++) {
+    if (await strip.evaluate((element) => element.scrollLeft + element.clientWidth >= element.scrollWidth - 1)) break;
+    await swipe('left');
+  }
+  await alice.page.waitForFunction(() => {
+    const element = document.querySelector('[data-hand-scroll="true"]');
+    return element && element.scrollLeft + element.clientWidth >= element.scrollWidth - 1;
+  });
+  await swipe('left');
+  assert.equal(await hand.locator('[data-card-id]').count(), 40, 'swipes must not play any card');
+  const last = hand.getByRole('button', { name: 'Play Red 9', exact: true });
+  const lastBounds = await last.boundingBox();
+  assert.ok(lastBounds.x >= initial.left && lastBounds.x + lastBounds.width <= initial.right, 'the final card is fully visible');
+  await last.tap();
+  await bob.page.getByRole('button', { name: 'Play Red 9', exact: true }).waitFor();
+  await alice.page.waitForFunction(() => document.querySelectorAll('[aria-label="Your hand"] [data-card-id]').length === 39);
+  assert.equal(await hand.locator('[data-card-id]').count(), 39, 'the edge card can be played by touch');
+
+  for (let swipeCount = 0; swipeCount < 24; swipeCount++) {
+    if (await strip.evaluate((element) => element.scrollLeft <= 1)) break;
+    await swipe('right');
+  }
+  await alice.page.waitForFunction(() => document.querySelector('[data-hand-scroll="true"]')?.scrollLeft <= 1);
+  await swipe('right');
+  assert.match(alice.page.url(), /\/lobby\/E2E001/, 'swiping past a hand edge must not navigate browser history');
+  const firstBounds = await hand.getByRole('button', { name: 'Red 7', exact: true }).boundingBox();
+  assert.ok(firstBounds.x >= initial.left && firstBounds.x + firstBounds.width <= initial.right, 'the first card remains reachable after scrolling back');
+  await touch.detach();
+});
+
 test('blocked browser storage still permits creating a guest profile', { timeout: 90_000 }, async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   contexts.push(context);
@@ -243,6 +335,22 @@ test('browser Back releases the room seat instead of retaining ghost membership'
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).playerCount, 1);
+});
+
+test('reconnecting after a room expires replaces the old table with Return Home', { timeout: 90_000 }, async (context) => {
+  const alice = await player('Alice', { noWebGL: true });
+  const bob = await player('Bob', { noWebGL: true });
+  await joinFromHome(alice.page);
+  await joinFromHome(bob.page);
+  await stopProcess(backendProcess);
+  await fs.unlink(path.join(dataDirectory, 'rooms', 'E2E001.json'));
+  await startBackend(context.signal);
+  await alice.page.getByRole('heading', { name: 'Room Unavailable', exact: true }).waitFor();
+  assert.equal(await alice.page.getByRole('region', { name: 'Your hand', exact: true }).count(), 0);
+  assert.equal(await alice.page.getByRole('button', { name: 'Draw Card', exact: true }).count(), 0);
+  await alice.page.getByRole('button', { name: 'Return Home', exact: true }).click();
+  await alice.page.waitForURL(`${frontendUrl}/`);
+  await alice.page.getByRole('textbox', { name: 'Room code to join' }).waitFor();
 });
 
 test('bug reporting retains failed submissions and acknowledges a real saved report', { timeout: 90_000 }, async () => {

@@ -93,8 +93,6 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
 
   const room = useGameStore((state) => state.room);
   const player = useGameStore((state) => state.player);
-  const error = useGameStore((state) => state.error);
-  const setError = useGameStore((state) => state.setError);
   const isSpectator = useGameStore((state) => state.isSpectator);
   const gameStatus = useGameStore((state) => state.gameStatus);
   const isChatOpen = useGameStore((state) => state.isChatOpen);
@@ -115,17 +113,6 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
   useEffect(() => {
     if (!chatEnabled && isChatOpen) setChatOpen(false);
   }, [chatEnabled, isChatOpen, setChatOpen]);
-
-  // Auto-redirect if room no longer exists
-  useEffect(() => {
-    if (error === "Room not found" || error === "This room no longer exists") {
-      const timer = setTimeout(() => {
-        setError(null);
-        router.push(HOME_HREF);
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [error, router, setError]);
 
   // Connect socket and join room seating list
   useEffect(() => {
@@ -183,7 +170,7 @@ export default function LobbyRoom({ roomId, name }: LobbyRoomProps) {
 
   // Render connection/error loading states
   if (!room || (!player && !isSpectator)) {
-    return <JoinStatusScreen />;
+    return <JoinStatusScreen onReturnHome={leaveRoom} />;
   }
 
   return (

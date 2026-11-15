@@ -28,6 +28,7 @@ export interface Spectator {
   name: string;
   secret?: string; // Private per-session token — only present on your own spectator object.
   profileId?: string; // permanent Player ID, when the spectator has a profile
+  waitingForNextRound?: boolean;
 }
 
 export interface Room {
